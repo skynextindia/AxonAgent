@@ -1,0 +1,589 @@
+"""Pure Python event detection engine.
+
+Watches the live state for structural market events and emits
+MarketEvent objects. Zero LLM tokens consumed.
+"""
+
+from __future__ import annotations
+
+import logging
+import queue
+from datetime import datetime, timedelta
+from typing import Optional, Set
+
+import numpy as np
+
+from axonai.realtime.event_types import (
+    EventPriority, EventType, LiveCandle, MarketEvent
+)
+from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
+
+logger = logging.getLogger(__name__)
+
+
+class EventDetector:
+    """Detects structural market events from live state.
+
+    Detection rules (all pure math, zero LLM cost):
+
+    1. LEVEL_BREACH: Price crosses a key level confirmed by M5 close
+    2. STRUCTURE_BREAK: M15 close breaks most recent swing high/low
+    3. SWEEP_DETECTED: Price pierces swing level then reverses
+    4. VOLATILITY_SPIKE: M5 range > 2x rolling average
+    5. CANDLE_PATTERN: Pin bar or engulfing at a key level
+    6. REGIME_SHIFT: Dominant regime changes
+    7. SESSION_TRANSITION: Session boundary crossed
+    8. SPREAD_CHANGE: Spread narrows to safe or widens to danger
+    9. MOMENTUM_DIVERGENCE: Price vs RSI divergence
+    """
+
+    def __init__(
+        self,
+        live_state: LiveWorldState,
+        live_evidence: LiveMarketEvidence,
+        event_queue: queue.Queue,
+        config: dict,
+    ):
+        self.live_state = live_state
+        self.live_evidence = live_evidence
+        self.event_queue = event_queue
+        self.config = config
+
+        # State tracking
+        self._consumed_levels: Set[float] = set()
+        self._previous_regime: str = ""
+        self._previous_session: str = ""
+        self._previous_spread_safe: Optional[bool] = None
+        self._cooldown_until: datetime = datetime.min
+
+        # Rolling M5 ranges for volatility spike detection
+        self._m5_ranges: list = []
+        self._m5_range_window: int = 20
+
+        # RSI history for divergence detection
+        self._rsi_history: list = []  # [(price, rsi)] tuples
+        self._rsi_max_history: int = 10
+
+        # Config
+        self._suppress_asian = config.get("realtime_suppress_asian", True)
+        self._level_reset_atr_mult = config.get("realtime_level_reset_atr_multiple", 2.0)
+        self._log_events = config.get("realtime_log_events", True)
+        self._pip_mult = 0.0001  # Updated on init
+
+    def set_pip_multiplier(self, is_jpy: bool):
+        """Set pip multiplier based on pair type."""
+        self._pip_mult = 0.01 if is_jpy else 0.0001
+
+    def on_tick(self, bid: float, ask: float, timestamp: datetime):
+        """Lightweight per-tick checks."""
+        if not self.live_state.is_initialized:
+            return
+
+        mid = (bid + ask) / 2.0
+        state = self.live_state._state
+        if state is None:
+            return
+
+        # 1. Session transition
+        session_changed = self.live_state.on_tick(bid, ask, timestamp)
+        if session_changed is True and state.session != self._previous_session:
+            if self._previous_session:  # Skip first tick
+                self._emit(MarketEvent(
+                    event_type=EventType.SESSION_TRANSITION,
+                    priority=EventPriority.LOW,
+                    timestamp=timestamp,
+                    symbol=self.live_state.symbol,
+                    price=mid,
+                    details={
+                        "from": self._previous_session,
+                        "to": state.session,
+                        "penalty": state.session_penalty,
+                    }
+                ))
+            self._previous_session = state.session
+
+        # 2. Spread change
+        if self._previous_spread_safe is not None:
+            if state.spread_safe != self._previous_spread_safe:
+                self._emit(MarketEvent(
+                    event_type=EventType.SPREAD_CHANGE,
+                    priority=EventPriority.LOW,
+                    timestamp=timestamp,
+                    symbol=self.live_state.symbol,
+                    price=mid,
+                    details={
+                        "spread_pips": state.spread_pips,
+                        "safe": state.spread_safe,
+                        "atr_h1": state.atr_14_h1,
+                    }
+                ))
+        self._previous_spread_safe = state.spread_safe
+
+        # 3. Level breach check (tick-level, confirmed on candle close)
+        self._check_level_proximity(mid, timestamp)
+
+    def on_candle_close(self, candle: LiveCandle):
+        """Structural checks on candle close."""
+        if not self.live_state.is_initialized:
+            return
+
+        state = self.live_state._state
+        if state is None:
+            return
+
+        # Update live state and evidence
+        self.live_state.on_candle_close(candle)
+        self.live_evidence.on_candle_close(candle)
+
+        if candle.timeframe == "M5":
+            self._check_volatility_spike(candle)
+            self._check_level_breach_confirmed(candle)
+
+        if candle.timeframe == "M15":
+            self._check_structure_break(candle)
+            self._check_sweep(candle)
+            self._check_candle_pattern_at_level(candle)
+
+        if candle.timeframe in ("M15", "H1"):
+            self._check_regime_shift()
+            self._check_momentum_divergence(candle)
+
+        # Reset consumed levels if price has moved far enough
+        self._try_reset_consumed_levels(candle.close)
+
+    def _check_level_proximity(self, price: float, timestamp: datetime):
+        """Flag potential level breaches at tick level (for logging only)."""
+        key_levels = self.live_evidence.key_levels
+        for level in key_levels:
+            rounded = round(level, 5)
+            if rounded in self._consumed_levels:
+                continue
+            distance_pips = abs(price - level) / self._pip_mult
+            # Just proximity logging, actual breach confirmed on M5 close
+            if distance_pips < 2.0 and self._log_events:
+                logger.debug("Price %.5f within 2 pips of key level %.5f", price, level)
+
+    def _check_level_breach_confirmed(self, candle: LiveCandle):
+        """Confirm level breach on M5 candle close."""
+        key_levels = self.live_evidence.key_levels
+        swing_highs = [sh["price"] for sh in self.live_evidence.swing_highs]
+        swing_lows = [sl["price"] for sl in self.live_evidence.swing_lows]
+        all_levels = set(key_levels + swing_highs + swing_lows)
+
+        for level in all_levels:
+            rounded = round(level, 5)
+            if rounded in self._consumed_levels:
+                continue
+
+            # Bullish breach: close above level and open was below
+            if candle.close > level and candle.open <= level:
+                self._consumed_levels.add(rounded)
+                self._emit(MarketEvent(
+                    event_type=EventType.LEVEL_BREACH,
+                    priority=EventPriority.HIGH,
+                    timestamp=candle.open_time,
+                    symbol=self.live_state.symbol,
+                    price=candle.close,
+                    details={
+                        "level": level,
+                        "direction": "bullish",
+                        "timeframe": candle.timeframe,
+                    }
+                ))
+            # Bearish breach: close below level and open was above
+            elif candle.close < level and candle.open >= level:
+                self._consumed_levels.add(rounded)
+                self._emit(MarketEvent(
+                    event_type=EventType.LEVEL_BREACH,
+                    priority=EventPriority.HIGH,
+                    timestamp=candle.open_time,
+                    symbol=self.live_state.symbol,
+                    price=candle.close,
+                    details={
+                        "level": level,
+                        "direction": "bearish",
+                        "timeframe": candle.timeframe,
+                    }
+                ))
+
+    def _check_structure_break(self, candle: LiveCandle):
+        """Detect Break of Structure (BOS) on M15."""
+        swing_highs = self.live_evidence.swing_highs
+        swing_lows = self.live_evidence.swing_lows
+
+        if swing_highs:
+            latest_sh = swing_highs[0]["price"]
+            if candle.close > latest_sh and candle.open <= latest_sh:
+                self._emit(MarketEvent(
+                    event_type=EventType.STRUCTURE_BREAK,
+                    priority=EventPriority.HIGH,
+                    timestamp=candle.open_time,
+                    symbol=self.live_state.symbol,
+                    price=candle.close,
+                    details={
+                        "broken_level": latest_sh,
+                        "direction": "bullish_bos",
+                        "timeframe": "M15",
+                    }
+                ))
+
+        if swing_lows:
+            latest_sl = swing_lows[0]["price"]
+            if candle.close < latest_sl and candle.open >= latest_sl:
+                self._emit(MarketEvent(
+                    event_type=EventType.STRUCTURE_BREAK,
+                    priority=EventPriority.HIGH,
+                    timestamp=candle.open_time,
+                    symbol=self.live_state.symbol,
+                    price=candle.close,
+                    details={
+                        "broken_level": latest_sl,
+                        "direction": "bearish_bos",
+                        "timeframe": "M15",
+                    }
+                ))
+
+    def _check_sweep(self, candle: LiveCandle):
+        """Detect liquidity sweeps: price pierces swing level then closes back inside."""
+        swing_highs = self.live_evidence.swing_highs
+        swing_lows = self.live_evidence.swing_lows
+        state = self.live_state._state
+        atr = state.atr_14_h1 if state else 0.001
+
+        for sh in swing_highs:
+            level = sh["price"]
+            # Wick above level but close below it
+            if candle.high > level and candle.close < level:
+                pierce_distance = candle.high - level
+                if pierce_distance < atr:  # Sweep, not breakout
+                    self._emit(MarketEvent(
+                        event_type=EventType.SWEEP_DETECTED,
+                        priority=EventPriority.HIGH,
+                        timestamp=candle.open_time,
+                        symbol=self.live_state.symbol,
+                        price=candle.close,
+                        details={
+                            "swept_level": level,
+                            "direction": "bearish_sweep",
+                            "pierce_pips": pierce_distance / self._pip_mult,
+                            "timeframe": "M15",
+                        }
+                    ))
+                    break
+
+        for sl in swing_lows:
+            level = sl["price"]
+            # Wick below level but close above it
+            if candle.low < level and candle.close > level:
+                pierce_distance = level - candle.low
+                if pierce_distance < atr:
+                    self._emit(MarketEvent(
+                        event_type=EventType.SWEEP_DETECTED,
+                        priority=EventPriority.HIGH,
+                        timestamp=candle.open_time,
+                        symbol=self.live_state.symbol,
+                        price=candle.close,
+                        details={
+                            "swept_level": level,
+                            "direction": "bullish_sweep",
+                            "pierce_pips": pierce_distance / self._pip_mult,
+                            "timeframe": "M15",
+                        }
+                    ))
+                    break
+
+    def _check_volatility_spike(self, candle: LiveCandle):
+        """Detect volatility spikes on M5."""
+        self._m5_ranges.append(candle.range)
+        if len(self._m5_ranges) > self._m5_range_window:
+            self._m5_ranges = self._m5_ranges[-self._m5_range_window:]
+
+        if len(self._m5_ranges) < 10:
+            return
+
+        avg_range = np.mean(self._m5_ranges[:-1])
+        if candle.range > 2.0 * avg_range and avg_range > 0:
+            self._emit(MarketEvent(
+                event_type=EventType.VOLATILITY_SPIKE,
+                priority=EventPriority.HIGH,
+                timestamp=candle.open_time,
+                symbol=self.live_state.symbol,
+                price=candle.close,
+                details={
+                    "range_pips": candle.range / self._pip_mult,
+                    "avg_range_pips": avg_range / self._pip_mult,
+                    "ratio": candle.range / (avg_range + 1e-8),
+                    "timeframe": "M5",
+                }
+            ))
+
+    def _check_candle_pattern_at_level(self, candle: LiveCandle):
+        """Detect candle patterns (Pin Bars & Engulfing) only when at a key level (confluence filter)."""
+        key_levels = self.live_evidence.key_levels
+        if not key_levels:
+            return
+
+        # Check if candle close is within 5 pips of any key level
+        pip_5 = 5 * self._pip_mult
+        at_level = False
+        nearest_level = 0.0
+        for level in key_levels:
+            if abs(candle.close - level) <= pip_5:
+                at_level = True
+                nearest_level = level
+                break
+
+        if not at_level:
+            return
+
+        c_range = candle.range + 1e-8
+        pattern = None
+
+        # 1. Pin Bar check
+        if candle.body / c_range < 0.30:
+            if candle.upper_shadow / c_range > 0.60 and candle.close <= candle.open:
+                pattern = "pin_bar_bearish"
+            elif candle.lower_shadow / c_range > 0.60 and candle.close >= candle.open:
+                pattern = "pin_bar_bullish"
+
+        # 2. Engulfing check (requires previous candle)
+        m15_history = list(self.live_evidence._m15_candles)
+        if not pattern and len(m15_history) >= 2:
+            prev = m15_history[-2]
+            is_curr_bullish = candle.close > candle.open
+            is_prev_bullish = prev.close > prev.open
+            
+            curr_body = abs(candle.close - candle.open)
+            prev_body = abs(prev.close - prev.open)
+
+            if is_curr_bullish and not is_prev_bullish:
+                if candle.open <= prev.close and candle.close >= prev.open and curr_body > prev_body:
+                    pattern = "engulfing_bullish"
+            elif not is_curr_bullish and is_prev_bullish:
+                if candle.open >= prev.close and candle.close <= prev.open and curr_body > prev_body:
+                    pattern = "engulfing_bearish"
+
+        if pattern:
+            # Calculate dynamic level interaction count from history
+            interactions = 0
+            for hist_c in m15_history:
+                if hist_c.low <= nearest_level <= hist_c.high:
+                    interactions += 1
+
+            # Calculate relative candle momentum (current body size relative to last 10 average)
+            avg_body = 0.001
+            m15_bodies = [abs(c.close - c.open) for c in m15_history[-11:-1]] # exclude current
+            if m15_bodies:
+                avg_body = float(np.mean(m15_bodies)) + 1e-8
+            
+            curr_body = abs(candle.close - candle.open)
+            momentum_ratio = curr_body / avg_body
+
+            # Determine intensity grade
+            if interactions >= 5 or momentum_ratio >= 1.8:
+                intensity_grade = "HIGH"
+            elif interactions >= 3 or momentum_ratio >= 1.2:
+                intensity_grade = "MEDIUM"
+            else:
+                intensity_grade = "LOW"
+
+            self._emit(MarketEvent(
+                event_type=EventType.CANDLE_PATTERN,
+                priority=EventPriority.HIGH if intensity_grade == "HIGH" else EventPriority.MEDIUM,
+                timestamp=candle.open_time,
+                symbol=self.live_state.symbol,
+                price=candle.close,
+                details={
+                    "pattern": pattern,
+                    "at_level": nearest_level,
+                    "timeframe": "M15",
+                    "level_interactions": interactions,
+                    "momentum_intensity": round(momentum_ratio, 2),
+                    "intensity_grade": intensity_grade,
+                }
+            ))
+
+    def _check_regime_shift(self):
+        """Detect when the dominant regime changes."""
+        state = self.live_state._state
+        if state is None:
+            return
+
+        current_regime = state.dominant_regime
+        if self._previous_regime and current_regime != self._previous_regime:
+            self._emit(MarketEvent(
+                event_type=EventType.REGIME_SHIFT,
+                priority=EventPriority.MEDIUM,
+                timestamp=datetime.now(),
+                symbol=self.live_state.symbol,
+                price=0.0,  # Not price-specific
+                details={
+                    "from": self._previous_regime,
+                    "to": current_regime,
+                    "confidence": state.regime_confidence,
+                    "scores": dict(state.regime_scores),
+                }
+            ))
+        self._previous_regime = current_regime
+
+    def _check_momentum_divergence(self, candle: LiveCandle):
+        """Detect price vs RSI divergence."""
+        rsi = self.live_state.current_rsi
+        self._rsi_history.append((candle.close, rsi))
+        if len(self._rsi_history) > self._rsi_max_history:
+            self._rsi_history = self._rsi_history[-self._rsi_max_history:]
+
+        if len(self._rsi_history) < 4:
+            return
+
+        prices = [p for p, _ in self._rsi_history]
+        rsis = [r for _, r in self._rsi_history]
+
+        # Bearish divergence: price higher high, RSI lower high
+        if prices[-1] > max(prices[-4:-1]) and rsis[-1] < max(rsis[-4:-1]):
+            self._emit(MarketEvent(
+                event_type=EventType.MOMENTUM_DIVERGENCE,
+                priority=EventPriority.MEDIUM,
+                timestamp=candle.open_time,
+                symbol=self.live_state.symbol,
+                price=candle.close,
+                details={
+                    "type": "bearish_divergence",
+                    "price": candle.close,
+                    "rsi": rsi,
+                }
+            ))
+
+        # Bullish divergence: price lower low, RSI higher low
+        if prices[-1] < min(prices[-4:-1]) and rsis[-1] > min(rsis[-4:-1]):
+            self._emit(MarketEvent(
+                event_type=EventType.MOMENTUM_DIVERGENCE,
+                priority=EventPriority.MEDIUM,
+                timestamp=candle.open_time,
+                symbol=self.live_state.symbol,
+                price=candle.close,
+                details={
+                    "type": "bullish_divergence",
+                    "price": candle.close,
+                    "rsi": rsi,
+                }
+            ))
+
+    def _try_reset_consumed_levels(self, current_price: float):
+        """Reset consumed levels when price pulls back significantly."""
+        state = self.live_state._state
+        if state is None:
+            return
+
+        atr = state.atr_14_h1
+        reset_dist = atr * self._level_reset_atr_mult
+
+        to_remove = set()
+        for level in self._consumed_levels:
+            if abs(current_price - level) > reset_dist:
+                to_remove.add(level)
+
+        self._consumed_levels -= to_remove
+        if to_remove and self._log_events:
+            logger.debug("Reset %d consumed levels (price moved away)", len(to_remove))
+
+    def _emit(self, event: MarketEvent):
+        """Push event into queue with filtering."""
+        # Cooldown check
+        if datetime.now() < self._cooldown_until:
+            if self._log_events:
+                logger.debug("Event suppressed (cooldown): %s", event)
+            return
+
+        # Asian session filter
+        if self._suppress_asian:
+            state = self.live_state._state
+            if state and state.session == "asian" and event.priority.value < EventPriority.HIGH.value:
+                if self._log_events:
+                    logger.debug("Event suppressed (asian session): %s", event)
+                return
+
+        # Spread gate: suppress all events when spread is dangerously wide
+        state = self.live_state._state
+        if state and not state.spread_safe and event.priority.value < EventPriority.CRITICAL.value:
+            if self._log_events:
+                logger.debug("Event suppressed (wide spread): %s", event)
+            return
+
+        if self._log_events:
+            logger.info("EVENT DETECTED: %s", event)
+
+        try:
+            self.event_queue.put_nowait(event)
+        except queue.Full:
+            logger.warning("Event queue full, dropping: %s", event)
+
+    def set_cooldown(self, seconds: float):
+        """Set cooldown period after graph execution."""
+        self._cooldown_until = datetime.now() + timedelta(seconds=seconds)
+
+    def reset_consumed_level(self, level: float):
+        """Manually reset a specific consumed level."""
+        self._consumed_levels.discard(round(level, 5))
+
+    def backfill_historical_events(self):
+        """Run pattern and structural checks on historical candles.
+        Populates dashboard history without queuing for execution.
+        """
+        logger.info("EventDetector: backfilling historical events from seeded candle history...")
+        m15_candles = list(self.live_evidence._m15_candles)
+        if not m15_candles:
+            logger.info("EventDetector: no historical M15 candles found to backfill.")
+            return
+
+        from axonai.realtime.api_server import get_dashboard
+        dashboard = get_dashboard()
+
+        # Detour the normal _emit to collect historical events instead of placing them in the live queue
+        historical_events = []
+        original_emit = self._emit
+
+        def mock_emit(event: MarketEvent):
+            historical_events.append(event)
+
+        self._emit = mock_emit
+
+        try:
+            # We clear self.live_evidence._m15_candles temporarily so that progressive checks
+            # (like engulfing requiring the previous candle) see historical progression!
+            self.live_evidence._m15_candles.clear()
+            for candle in m15_candles:
+                self.live_evidence._m15_candles.append(candle)
+                self._check_candle_pattern_at_level(candle)
+                self._check_structure_break(candle)
+                self._check_sweep(candle)
+        except Exception as e:
+            logger.error("EventDetector: error during historical backfill: %s", e, exc_info=True)
+        finally:
+            # Always restore the original emit method
+            self._emit = original_emit
+            # Restore the full seeded candle list back in self.live_evidence
+            self.live_evidence._m15_candles.clear()
+            self.live_evidence._m15_candles.extend(m15_candles)
+
+        # Broadcast historical events to the dashboard cache to hydrate the UI immediately
+        if dashboard and historical_events:
+            # Sort events by timestamp so they appear in correct chronological order
+            historical_events.sort(key=lambda x: x.timestamp)
+            logger.info("EventDetector: broadcasting %d historical events to dashboard cache", len(historical_events))
+            
+            # Keep only the last 30 events to match the standard cache size
+            for idx, event in enumerate(historical_events[-30:]):
+                dashboard.broadcast({
+                    "type": "event",
+                    "id": f"h-{idx}",
+                    "event_type": event.event_type.value,
+                    "priority": event.priority.name,
+                    "price": event.price,
+                    "details": event.details,
+                    "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    "status": "skipped",
+                    "reason": "historical data",
+                    "historical": True
+                })
+

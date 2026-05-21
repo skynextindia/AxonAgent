@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AXON.AI // Cognitive Intelligence System</title>
+    <!-- Google Fonts: JetBrains Mono for full terminal cockpit style -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&display=swap" rel="stylesheet">
+    <!-- Tailwind CSS (CDN) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        mono: ['"JetBrains Mono"', 'monospace'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        /* Cyberpunk Ultramodern Stark High-Contrast Dark Mode */
+        body {
+            background-color: #000000;
+            background-image: radial-gradient(circle at 50% 50%, #060608 0%, #000000 100%);
+            color: #ffffff;
+            font-family: 'JetBrains Mono', monospace;
+            overflow: hidden;
+            height: 100vh;
+            max-height: 100vh;
+        }
+
+        /* Razor Sharp Zero-Curve Panels */
+        .cyber-panel {
+            background: #040406;
+            border: 1px solid #1f1f2e;
+            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.95);
+            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .cyber-panel:hover {
+            border-color: #38384f;
+            background-color: #06060a;
+        }
+
+        /* Animated High Contrast Neon Outlines */
+        .accent-cyan { color: #00f0ff; text-shadow: 0 0 8px rgba(0, 240, 255, 0.4); }
+        .accent-rose { color: #ff0055; text-shadow: 0 0 8px rgba(255, 0, 85, 0.4); }
+        .accent-emerald { color: #00ff66; text-shadow: 0 0 8px rgba(0, 255, 102, 0.4); }
+        .accent-purple { color: #9d00ff; text-shadow: 0 0 8px rgba(157, 0, 255, 0.4); }
+        .accent-orange { color: #ffaa00; text-shadow: 0 0 8px rgba(255, 170, 0, 0.4); }
+
+        .border-glow-cyan {
+            border-color: rgba(0, 240, 255, 0.5) !important;
+            box-shadow: 0 0 15px rgba(0, 240, 255, 0.08);
+        }
+        .border-glow-rose {
+            border-color: rgba(255, 0, 85, 0.6) !important;
+            box-shadow: 0 0 15px rgba(255, 0, 85, 0.1);
+        }
+        .border-glow-emerald {
+            border-color: rgba(0, 255, 102, 0.6) !important;
+            box-shadow: 0 0 15px rgba(0, 255, 102, 0.1);
+        }
+
+        /* Speed Heartbeat Pulse */
+        @keyframes pulse-cyan {
+            0%, 100% { background-color: #00f0ff; opacity: 1; transform: scale(1); box-shadow: 0 0 6px #00f0ff; }
+            50% { background-color: #9d00ff; opacity: 0.7; transform: scale(1.1); box-shadow: 0 0 2px #9d00ff; }
+        }
+        .tick-heartbeat {
+            animation: pulse-cyan 0.8s infinite;
+        }
+
+        /* Hazard stripe styling for extreme events */
+        .hazard-bg-buy {
+            background: repeating-linear-gradient(
+                -45deg,
+                rgba(0, 255, 102, 0.06),
+                rgba(0, 255, 102, 0.06) 10px,
+                transparent 10px,
+                transparent 20px
+            );
+        }
+        .hazard-bg-sell {
+            background: repeating-linear-gradient(
+                -45deg,
+                rgba(255, 0, 85, 0.06),
+                rgba(255, 0, 85, 0.06) 10px,
+                transparent 10px,
+                transparent 20px
+            );
+        }
+
+        /* Blinking cursor */
+        .cursor {
+            display: inline-block;
+            width: 5px;
+            height: 11px;
+            background-color: #00f0ff;
+            animation: blink 0.8s step-end infinite;
+            vertical-align: middle;
+        }
+        @keyframes blink {
+            from, to { opacity: 0 }
+            50% { opacity: 1 }
+        }
+
+        /* Monospace custom scrollbar styling */
+        ::-webkit-scrollbar {
+            width: 3px;
+            height: 3px;
+        }
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #252538;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #00f0ff;
+        }
+
+        /* Ultra thin scanlines */
+        .scanlines {
+            position: fixed;
+            top: 0; left: 0; width: 100%; height: 100%;
+            background: linear-gradient(
+                rgba(18, 16, 16, 0) 50%, 
+                rgba(0, 0, 0, 0.25) 50%
+            );
+            background-size: 100% 4px;
+            z-index: 9999;
+            pointer-events: none;
+            opacity: 0.15;
+        }
+    </style>
+</head>
+<body class="p-3 antialiased selection:bg-[#9d00ff]/30 selection:text-white flex flex-col h-screen max-h-screen">
+    
+    <!-- Thin retro-futuristic scanline layer -->
+    <div class="scanlines"></div>
+
+    <!-- HEADER PANEL -->
+    <header class="cyber-panel h-[56px] flex-shrink-0 px-4 flex items-center justify-between border-b border-[#1f1f2e] mb-3 relative overflow-hidden">
+        <!-- Top neon line indicator -->
+        <div class="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-[#9d00ff] via-[#00f0ff] to-[#00ff66]"></div>
+        
+        <div class="flex items-center gap-3">
+            <div class="h-6 w-6 bg-black border border-[#00f0ff] flex items-center justify-center relative">
+                <span class="absolute inset-0 bg-[#00f0ff]/10 animate-ping"></span>
+                <span class="text-xs text-[#00f0ff] font-extrabold">&Omega;</span>
+            </div>
+            <div>
+                <h1 class="text-xs font-black tracking-widest uppercase leading-none">AXON<span class="accent-cyan">.AI</span></h1>
+                <p class="text-[7.5px] text-zinc-500 uppercase tracking-widest font-bold mt-1.5 flex items-center gap-1.5 font-mono">
+                    <span class="w-1.5 h-1.5 bg-[#00ff66] animate-pulse shadow-sm shadow-[#00ff66]"></span>
+                    CORE_DAEMON_LIVE_v4.0
+                </p>
+            </div>
+        </div>
+        
+        <div class="flex items-center gap-6 text-[10px] font-mono">
+            <div class="flex flex-col items-end">
+                <span class="text-[7.5px] text-zinc-500 uppercase tracking-wider font-bold">INSTRUMENT</span>
+                <span id="header-ticker" class="text-white font-bold tracking-wide">EURUSD=X</span>
+            </div>
+            <div class="h-6 w-[1px] bg-zinc-800"></div>
+            <div class="flex flex-col items-end">
+                <span class="text-[7.5px] text-zinc-500 uppercase tracking-wider font-bold">UPTIME</span>
+                <span id="header-uptime" class="text-zinc-200 font-medium">00:00:00</span>
+            </div>
+            <div class="h-6 w-[1px] bg-zinc-800"></div>
+            <div class="flex flex-col items-end">
+                <span class="text-[7.5px] text-zinc-500 uppercase tracking-wider font-bold">RTT_LATENCY</span>
+                <span id="header-latency" class="text-[#00f0ff] font-bold">--ms</span>
+            </div>
+            <div class="h-6 w-[1px] bg-zinc-800"></div>
+            <div class="flex items-center gap-2">
+                <div class="flex items-center gap-2 bg-black border border-[#252538] px-2.5 py-1">
+                    <span id="socket-light" class="w-1.5 h-1.5 bg-rose-600 shadow-sm shadow-rose-600"></span>
+                    <span id="socket-status" class="text-rose-500 font-extrabold text-[8px] uppercase tracking-widest">OFFLINE</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- MAIN GRID CONTAINER (Strictly height-constrained, zero scroll) -->
+    <main class="flex-grow grid grid-cols-4 gap-3 min-h-0 overflow-hidden">
+        
+        <!-- SIDEBAR (Left - 25% Width) -->
+        <div class="col-span-1 flex flex-col gap-3 min-h-0 h-full overflow-hidden">
+            
+            <!-- LIVE PRICE STREAM & TICK HEARTBEAT -->
+            <div class="cyber-panel p-3.5 flex flex-col justify-between h-[110px] flex-shrink-0 border-l-[3px] border-l-[#00f0ff]">
+                <div class="flex justify-between items-center">
+                    <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold flex items-center gap-1.5">
+                        <span class="w-1.5 h-1.5 tick-heartbeat"></span> REALTIME_FEED
+                    </span>
+                    <!-- Tick Rate Activity blocks -->
+                    <div id="tick-activity-strip" class="flex gap-[1px] items-center">
+                        <span class="w-1.5 h-2.5 bg-zinc-950 border border-zinc-900"></span>
+                        <span class="w-1.5 h-2.5 bg-zinc-950 border border-zinc-900"></span>
+                        <span class="w-1.5 h-2.5 bg-zinc-950 border border-zinc-900"></span>
+                        <span class="w-1.5 h-2.5 bg-zinc-950 border border-zinc-900"></span>
+                        <span class="w-1.5 h-2.5 bg-zinc-950 border border-zinc-900"></span>
+                        <span class="w-1.5 h-2.5 bg-zinc-950 border border-zinc-900"></span>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-2 gap-2 mt-1.5">
+                    <div class="bg-black border border-[#1f1f2e] p-2 text-center">
+                        <span class="text-[7px] text-zinc-500 uppercase block font-extrabold tracking-widest mb-0.5">BID</span>
+                        <span id="price-bid" class="text-sm font-black tracking-tight text-white">0.00000</span>
+                    </div>
+                    <div class="bg-black border border-[#1f1f2e] p-2 text-center">
+                        <span class="text-[7px] text-zinc-500 uppercase block font-extrabold tracking-widest mb-0.5">ASK</span>
+                        <span id="price-ask" class="text-sm font-black tracking-tight text-white">0.00000</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MT5 BROKER ACCOUNT DETAILS -->
+            <div class="cyber-panel p-3.5 flex flex-col justify-between flex-grow min-h-0 overflow-hidden">
+                <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold mb-2 block">BROKER_MT5_ACCOUNT</span>
+                <div class="flex flex-col gap-2.5 text-[9.5px] flex-grow justify-center">
+                    <div class="flex justify-between items-center border-b border-[#1f1f2e] pb-1.5">
+                        <span class="text-zinc-500">BALANCE</span>
+                        <span id="acc-balance" class="text-white font-bold">$0.00</span>
+                    </div>
+                    <div class="flex justify-between items-center border-b border-[#1f1f2e] pb-1.5">
+                        <span class="text-zinc-500">EQUITY</span>
+                        <span id="acc-equity" class="text-zinc-200 font-bold">$0.00</span>
+                    </div>
+                    <div class="flex justify-between items-center border-b border-[#1f1f2e] pb-1.5">
+                        <span class="text-zinc-500">MARGIN</span>
+                        <span id="acc-margin" class="text-zinc-300 font-bold">$0.00</span>
+                    </div>
+                    <div class="flex justify-between items-center border-b border-[#1f1f2e] pb-1.5">
+                        <span class="text-zinc-500">FREE_MARGIN</span>
+                        <span id="acc-freemargin" class="text-zinc-300 font-bold">$0.00</span>
+                    </div>
+                    <div class="flex justify-between items-center border-b border-[#1f1f2e] pb-1.5">
+                        <span class="text-zinc-500">MARGIN_LEVEL</span>
+                        <span id="acc-marginlevel" class="text-zinc-300 font-bold">0.00%</span>
+                    </div>
+                    <div class="flex justify-between items-center pt-1.5">
+                        <span class="text-zinc-400 font-extrabold">FLOATING_PNL</span>
+                        <span id="acc-profit" class="font-extrabold text-[#00ff66]">$0.00</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ENGINE DIAGNOSTICS & CONTROL -->
+            <div class="cyber-panel p-3.5 flex flex-col justify-between h-[125px] flex-shrink-0">
+                <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold block">ENGINE_DIAGNOSTICS</span>
+                <div class="flex flex-col gap-1.5 text-[8.5px] mt-1.5">
+                    <div class="flex justify-between items-center">
+                        <span class="text-zinc-500 font-bold">REACTIVE_COOLDOWN</span>
+                        <span id="ctrl-cooldown" class="text-[#00ff66] font-bold">READY</span>
+                    </div>
+                    <div class="w-full bg-[#0d0d0f] border border-[#1f1f2e] h-1 overflow-hidden">
+                        <div id="cooldown-bar" class="h-full bg-amber-500 transition-all duration-1000" style="width: 0%"></div>
+                    </div>
+                    <div class="grid grid-cols-3 gap-1.5 mt-1 text-center text-[8px] font-mono">
+                        <div class="bg-black border border-[#1f1f2e] py-1">
+                            <span class="text-[6px] text-zinc-500 block font-bold">DETECTED</span>
+                            <span id="stats-detected" class="text-white font-bold">0</span>
+                        </div>
+                        <div class="bg-black border border-[#1f1f2e] py-1">
+                            <span class="text-[6px] text-zinc-500 block font-bold">FIRED</span>
+                            <span id="stats-fired" class="text-[#00ff66] font-bold">0</span>
+                        </div>
+                        <div class="bg-black border border-[#1f1f2e] py-1">
+                            <span class="text-[6px] text-zinc-500 block font-bold">GATED</span>
+                            <span id="stats-skipped" class="text-amber-500 font-bold">0</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- RIGHT VIEWPORT (75% Width - Height Constrained) -->
+        <div class="col-span-3 flex flex-col gap-3 min-h-0 h-full overflow-hidden">
+            
+            <!-- TOP STATS ROW -->
+            <div class="grid grid-cols-4 gap-3 h-[75px] flex-shrink-0">
+                
+                <!-- BELIEF/CONVICTION -->
+                <div class="cyber-panel p-3 flex flex-col justify-between border-t border-t-[#9d00ff]">
+                    <div class="flex justify-between items-center">
+                        <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold">CONVICTION_BELIEF</span>
+                        <span id="belief-abort-flag" class="hidden text-[6px] bg-rose-950/30 border border-[#ff0055]/30 text-[#ff0055] px-1 py-0.2 font-bold animate-pulse">GATED_STATE</span>
+                    </div>
+                    <div class="flex items-end gap-3 mt-1">
+                        <span id="belief-val" class="text-lg font-black text-white leading-none">0.00</span>
+                        <div class="flex-1 h-1 bg-[#0d0d0f] border border-zinc-900 overflow-hidden relative mb-0.5">
+                            <div id="belief-bar" class="h-full bg-gradient-to-r from-[#9d00ff] via-[#00f0ff] to-[#00ff66]" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DOMINANT REGIME -->
+                <div class="cyber-panel p-3 flex flex-col justify-between border-t border-t-[#00f0ff]">
+                    <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold">MARKET_REGIME</span>
+                    <div class="flex justify-between items-end mt-1">
+                        <div class="flex flex-col">
+                            <span id="regime-type" class="text-sm font-black text-[#00f0ff] uppercase tracking-wider leading-none">UNKNOWN</span>
+                            <span id="regime-vol" class="text-[6.5px] text-zinc-500 mt-1 uppercase font-bold">VOL: MEDIUM | ATR: 0.0</span>
+                        </div>
+                        <div class="flex flex-col items-end">
+                            <span id="regime-conf" class="text-xs font-bold text-white">--%</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ACTIVE TRADING SESSION -->
+                <div class="cyber-panel p-3 flex flex-col justify-between">
+                    <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold">ACTIVE_SESSION</span>
+                    <div class="grid grid-cols-4 gap-1 text-center text-[8px] font-bold mt-1">
+                        <div id="sess-london" class="border border-zinc-900 bg-black py-0.5 text-zinc-700">LDN</div>
+                        <div id="sess-newyork" class="border border-zinc-900 bg-black py-0.5 text-zinc-700">NYC</div>
+                        <div id="sess-asian" class="border border-zinc-900 bg-black py-0.5 text-zinc-700">ASN</div>
+                        <div id="sess-rollover" class="border border-zinc-900 bg-black py-0.5 text-zinc-700">OVR</div>
+                    </div>
+                </div>
+
+                <!-- LIVE SPREAD TELEMETRY -->
+                <div class="cyber-panel p-3 flex flex-col justify-between border-t border-t-[#00ff66]">
+                    <div class="flex justify-between items-center">
+                        <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold">SPREAD_MONITOR</span>
+                        <!-- Core spread-label resolved for dynamic JS rendering! -->
+                        <span id="spread-label" class="text-[6px] text-zinc-500 uppercase font-bold tracking-widest">TELEMETRY_SAFE</span>
+                    </div>
+                    <div class="flex justify-between items-center mt-1">
+                        <div class="flex items-baseline gap-0.5">
+                            <span id="spread-val" class="text-lg font-black text-[#00ff66] leading-none">0.0</span>
+                            <span class="text-[6.5px] text-zinc-500 font-bold uppercase">Pips</span>
+                        </div>
+                        <div id="spread-box" class="px-2 py-0.5 border border-zinc-900 bg-black flex items-center justify-center">
+                            <span id="spread-status-text" class="text-[#00ff66] font-bold text-[7px] tracking-wider uppercase">SAFE</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- MIDDLE ROW (Swing Channels & Decision HUD - Optimal Spacing Layout) -->
+            <div class="grid grid-cols-12 gap-3 h-[160px] flex-shrink-0">
+                
+                <!-- SWING LEVELS PROXIMITY CHANNELS (Col span 5) -->
+                <div class="col-span-5 cyber-panel p-3.5 flex flex-col justify-between overflow-hidden">
+                    <div class="flex justify-between items-center mb-1">
+                        <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold">SWING_CHANNELS</span>
+                        <span class="text-[6.5px] bg-[#00f0ff]/10 text-[#00f0ff] border border-[#00f0ff]/20 px-1.5 py-0.5 font-bold">H1_TIME</span>
+                    </div>
+                    
+                    <div class="flex-grow flex flex-col gap-2 mt-1 text-[8.5px]">
+                        <div class="flex flex-col bg-black border border-[#1f1f2e] p-2 relative overflow-hidden">
+                            <div class="flex justify-between font-bold text-[#ff0055] mb-0.5">
+                                <span class="text-zinc-500 font-extrabold tracking-wider">RESISTANCE (SH)</span>
+                                <span id="level-res-val" class="font-extrabold">--.-----</span>
+                            </div>
+                            <div class="flex justify-between items-center text-[6.5px] text-zinc-500">
+                                <span id="level-res-time" class="truncate max-w-[140px] uppercase">NO_SH_BAR_DETECTED</span>
+                                <span id="level-res-dist" class="bg-rose-950/20 border border-[#ff0055]/30 px-1.5 py-0.2 text-[#ff0055] font-bold">-- Pips</span>
+                            </div>
+                            <div class="w-full bg-[#0d0d0f] border border-zinc-900 h-1 mt-1.5 relative">
+                                <div id="level-res-bar" class="h-full bg-gradient-to-r from-[#9d00ff] to-[#ff0055]" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="flex flex-col bg-black border border-[#1f1f2e] p-2 relative overflow-hidden">
+                            <div class="flex justify-between font-bold text-[#00ff66] mb-0.5">
+                                <span class="text-zinc-500 font-extrabold tracking-wider">SUPPORT (SL)</span>
+                                <span id="level-sup-val" class="font-extrabold">--.-----</span>
+                            </div>
+                            <div class="flex justify-between items-center text-[6.5px] text-zinc-500">
+                                <span id="level-sup-time" class="truncate max-w-[140px] uppercase">NO_SL_BAR_DETECTED</span>
+                                <span id="level-sup-dist" class="bg-emerald-950/20 border border-[#00ff66]/30 px-1.5 py-0.2 text-[#00ff66] font-bold">-- Pips</span>
+                            </div>
+                            <div class="w-full bg-[#0d0d0f] border border-zinc-900 h-1 mt-1.5 relative">
+                                <div id="level-sup-bar" class="h-full bg-gradient-to-r from-[#9d00ff] to-[#00ff66]" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- COGNITIVE COCKPIT DECISION CENTER (Col span 7) -->
+                <div class="col-span-7 cyber-panel p-3.5 flex flex-col justify-between border-l-[3px] border-l-[#9d00ff] relative overflow-hidden" id="decision-panel">
+                    
+                    <div class="flex justify-between items-center z-10">
+                        <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold">DECISION_HUD</span>
+                        <span class="text-[7px] text-zinc-500 uppercase tracking-wider font-mono">DAEMON: ACTIVE</span>
+                    </div>
+                    
+                    <div class="flex-grow flex flex-col justify-center items-center py-1 z-10">
+                        <span id="decision-status" class="text-[#9d00ff] text-[8.5px] font-bold uppercase tracking-widest block mb-1 animate-pulse">Awaiting Event Trigger...</span>
+                        <div class="text-2xl font-black tracking-[0.2em] text-[#00f0ff] uppercase py-1 border-y border-[#1f1f2e] px-8 w-full text-center" id="decision-action">
+                            MONITOR
+                        </div>
+                        <span id="decision-time" class="text-[6.5px] text-zinc-500 uppercase tracking-wider mt-1.5">SYS_HELM: HEADLESS_REACTIVE_LOOP</span>
+                    </div>
+                    
+                    <div class="border-t border-[#1f1f2e] pt-1.5 flex justify-between items-center text-[8.5px] z-10">
+                        <div class="flex items-center gap-2">
+                            <span class="text-zinc-500 font-bold uppercase">PREV_DECISION</span>
+                            <span id="prev-decision-lbl" class="text-[#9d00ff] font-extrabold">HOLD</span>
+                        </div>
+                        <!-- Radar display placement -->
+                        <div id="sweep-radar" class="bg-black border border-zinc-800 px-2 py-0.5 flex items-center gap-1.5">
+                            <span id="sweep-icon" class="w-1.5 h-1.5 bg-zinc-700 flex-shrink-0 animate-pulse"></span>
+                            <span id="sweep-msg" class="text-[6.5px] text-zinc-500 font-bold uppercase">LIQ_MONITOR</span>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- BOTTOM ROW (Mind Console & Events log - Split View) -->
+            <div class="flex-grow grid grid-cols-12 gap-3 min-h-0 overflow-hidden">
+                
+                <!-- MIND STREAMING ENGINE (Col span 8) -->
+                <div class="col-span-8 cyber-panel flex flex-col min-h-0 overflow-hidden">
+                    <!-- Console Header -->
+                    <div class="bg-black border-b border-[#1f1f2e] px-3.5 py-2.5 flex justify-between items-center text-[8.5px] flex-shrink-0">
+                        <div class="flex items-center gap-2">
+                            <span class="w-1.5 h-1.5 bg-[#00f0ff] tick-heartbeat"></span>
+                            <span class="font-extrabold uppercase tracking-widest text-white">COGNITIVE_REASON_STREAM</span>
+                        </div>
+                        <div class="flex items-center gap-3 text-zinc-500 font-semibold font-mono">
+                            <span>MODE: ACTIVE_LOGGER</span>
+                            <button id="clear-console-btn" class="hover:text-[#00f0ff] hover:border-[#00f0ff]/50 transition-all uppercase border border-zinc-800 px-2 py-0.5 bg-black font-mono">CLEAR</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Console Body -->
+                    <div class="flex-grow overflow-y-auto p-4 font-mono text-[8.5px] flex flex-col gap-2.5 bg-black/40 text-zinc-300 leading-normal" id="console-body">
+                        <div class="text-[#00f0ff]/60 border-b border-[#1a1a24] pb-1.5 uppercase font-bold flex items-center gap-1.5">
+                            <span>[SYSTEM_INITIALIZED] Connected to Core. Active visual telemetry logs stream starting...</span>
+                            <span class="cursor"></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- REAL-TIME EVENTS LOG (Col span 4) -->
+                <div class="col-span-4 cyber-panel flex flex-col min-h-0 overflow-hidden">
+                    <div class="bg-black border-b border-[#1f1f2e] px-3.5 py-2.5 flex items-center justify-between text-[8.5px] flex-shrink-0">
+                        <span class="uppercase font-extrabold text-zinc-400">EVENT_SETUP_FEED</span>
+                        <span class="text-[6.5px] text-zinc-500 font-bold">CAP_20_LIFO</span>
+                    </div>
+                    
+                    <div class="flex-grow overflow-y-auto p-3 flex flex-col gap-1.5 text-[8.5px] bg-[#020203]" id="events-log-container">
+                        <div class="text-zinc-600 text-center py-8 italic">Awaiting telemetry spikes...</div>
+                    </div>
+                </div>
+
+            </div>
+
+        </div>
+
+    </main>
+
+    <script>
+        // High-contrast realtime WebSocket UI controller
+        class DashboardController {
+            constructor() {
+                this.ws = null;
+                this.reconnectInterval = 2000;
+                this.startTime = Date.now();
+                
+                // Track Bid/Ask prices for live level pip-distance calculations
+                this.currentBid = 0.0;
+                this.currentAsk = 0.0;
+                this.currentRes = 0.0;
+                this.currentSup = 0.0;
+                this.pipMult = 0.0001; // default EURUSD
+
+                this.tickHistory = [];
+                this.initializeUI();
+                this.connect();
+                this.startClock();
+            }
+
+            initializeUI() {
+                // DOM bindings
+                this.ticker = document.getElementById("header-ticker");
+                this.uptime = document.getElementById("header-uptime");
+                this.latency = document.getElementById("header-latency");
+                
+                this.socketLight = document.getElementById("socket-light");
+                this.socketStatus = document.getElementById("socket-status");
+
+                this.priceBid = document.getElementById("price-bid");
+                this.priceAsk = document.getElementById("price-ask");
+                
+                this.beliefVal = document.getElementById("belief-val");
+                this.beliefBar = document.getElementById("belief-bar");
+                this.beliefAbortFlag = document.getElementById("belief-abort-flag");
+                
+                this.regimeType = document.getElementById("regime-type");
+                this.regimeVol = document.getElementById("regime-vol");
+                this.regimeConf = document.getElementById("regime-conf");
+
+                this.spreadVal = document.getElementById("spread-val");
+                this.spreadBox = document.getElementById("spread-box");
+                this.spreadLabel = document.getElementById("spread-label");
+                this.spreadStatusText = document.getElementById("spread-status-text");
+
+                this.accBalance = document.getElementById("acc-balance");
+                this.accEquity = document.getElementById("acc-equity");
+                this.accMargin = document.getElementById("acc-margin");
+                this.accFreeMargin = document.getElementById("acc-freemargin");
+                this.accMarginLevel = document.getElementById("acc-marginlevel");
+                this.accProfit = document.getElementById("acc-profit");
+
+                this.statsDetected = document.getElementById("stats-detected");
+                this.statsFired = document.getElementById("stats-fired");
+                this.statsSkipped = document.getElementById("stats-skipped");
+                this.cooldownVal = document.getElementById("ctrl-cooldown");
+                this.cooldownBar = document.getElementById("cooldown-bar");
+
+                this.levelResVal = document.getElementById("level-res-val");
+                this.levelResTime = document.getElementById("level-res-time");
+                this.levelResDist = document.getElementById("level-res-dist");
+                this.levelResBar = document.getElementById("level-res-bar");
+                
+                this.levelSupVal = document.getElementById("level-sup-val");
+                this.levelSupTime = document.getElementById("level-sup-time");
+                this.levelSupDist = document.getElementById("level-sup-dist");
+                this.levelSupBar = document.getElementById("level-sup-bar");
+
+                this.sweepRadar = document.getElementById("sweep-radar");
+                this.sweepIcon = document.getElementById("sweep-icon");
+                this.sweepMsg = document.getElementById("sweep-msg");
+
+                this.decisionPanel = document.getElementById("decision-panel");
+                this.decisionStatus = document.getElementById("decision-status");
+                this.decisionAction = document.getElementById("decision-action");
+                this.decisionTime = document.getElementById("decision-time");
+                this.prevDecision = document.getElementById("prev-decision-lbl");
+
+                this.consoleBody = document.getElementById("console-body");
+                this.eventsLog = document.getElementById("events-log-container");
+                this.tickActivityStrip = document.getElementById("tick-activity-strip");
+
+                // Clear console button
+                document.getElementById("clear-console-btn").onclick = () => {
+                    this.consoleBody.innerHTML = '<div class="text-[#00f0ff]/60 border-b border-[#1a1a24] pb-1.5 uppercase font-bold flex items-center gap-2"><span>[STREAM_CLEARED] System dynamic logs stream active.</span><span class="cursor"></span></div>';
+                    this.triggerBeep(800, 0.05);
+                };
+            }
+
+            connect() {
+                const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+                const wsUri = `${protocol}//${window.location.host}/ws`;
+                
+                this.socketLight.className = "w-1.5 h-1.5 bg-amber-500 animate-pulse shadow-sm shadow-amber-500";
+                this.socketStatus.innerText = "CONNECTING";
+                this.socketStatus.className = "text-amber-500 font-extrabold text-[8px] uppercase tracking-widest";
+
+                logger("Dashboard WS: connecting to " + wsUri);
+                this.ws = new WebSocket(wsUri);
+
+                this.ws.onopen = () => {
+                    this.socketLight.className = "w-1.5 h-1.5 bg-[#00ff66] shadow-sm shadow-[#00ff66]";
+                    this.socketStatus.innerText = "ONLINE";
+                    this.socketStatus.className = "text-[#00ff66] font-extrabold text-[8px] uppercase tracking-widest";
+                    logger("Dashboard WS: connected.");
+                    this.triggerBeep(1100, 0.08); // high frequency startup chirp
+                    
+                    // Periodic active connection heartbeats
+                    if (this.pingInterval) clearInterval(this.pingInterval);
+                    this.pingInterval = setInterval(() => {
+                        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                            this.ws.send(JSON.stringify({
+                                type: "ping",
+                                timestamp: Date.now()
+                            }));
+                        }
+                    }, 2000);
+                };
+
+                this.ws.onclose = () => {
+                    this.socketLight.className = "w-1.5 h-1.5 bg-rose-600 shadow-sm shadow-rose-600";
+                    this.socketStatus.innerText = "OFFLINE";
+                    this.socketStatus.className = "text-[#ff0055] font-extrabold text-[8px] uppercase tracking-widest";
+                    this.latency.innerText = "--ms";
+                    
+                    if (this.pingInterval) {
+                        clearInterval(this.pingInterval);
+                        this.pingInterval = null;
+                    }
+                    
+                    logger("Dashboard WS: disconnected. Retrying in " + this.reconnectInterval + "ms");
+                    setTimeout(() => this.connect(), this.reconnectInterval);
+                };
+
+                this.ws.onerror = (err) => {
+                    logger("Dashboard WS: error: " + err);
+                };
+
+                this.ws.onmessage = (msg) => {
+                    try {
+                        const data = JSON.parse(msg.data);
+                        this.handleMessage(data);
+                    } catch (e) {
+                        logger("Dashboard WS: failed to parse packet: " + e);
+                    }
+                };
+            }
+
+            handleMessage(data) {
+                if (data.type === "pong") {
+                    const rtt = Date.now() - data.timestamp;
+                    this.latency.innerText = `${rtt}ms`;
+                    return;
+                }
+
+                switch (data.type) {
+                    case "tick":
+                        this.handleTick(data);
+                        break;
+                    case "regime":
+                        this.handleRegime(data);
+                        break;
+                    case "levels":
+                        this.handleLevels(data);
+                        break;
+                    case "account":
+                        this.handleAccount(data);
+                        break;
+                    case "candle":
+                        this.handleCandle(data);
+                        break;
+                    case "event":
+                        this.handleEvent(data);
+                        break;
+                    case "agent":
+                        this.handleAgent(data);
+                        break;
+                    case "decision":
+                        this.handleDecision(data);
+                        break;
+                }
+            }
+
+            handleTick(data) {
+                const prevBid = this.currentBid;
+                this.currentBid = data.bid;
+                this.currentAsk = data.ask;
+                
+                // Live prices
+                this.priceBid.innerText = data.bid.toFixed(5);
+                this.priceAsk.innerText = data.ask.toFixed(5);
+                
+                // Live spread
+                this.spreadVal.innerText = data.spread.toFixed(1);
+
+                // Re-calculate swing level pip distances on tick
+                this.updatePipDistances();
+
+                // Stream tick activity visually to strip
+                this.updateTickActivity(data.bid, prevBid);
+            }
+
+            updateTickActivity(newBid, prevBid) {
+                if (prevBid === 0.0) return;
+                
+                let colorClass = "bg-[#252538]";
+                if (newBid > prevBid) colorClass = "bg-[#00ff66] shadow-sm shadow-[#00ff66]";
+                if (newBid < prevBid) colorClass = "bg-[#ff0055] shadow-sm shadow-[#ff0055]";
+                
+                const block = document.createElement("span");
+                block.className = `w-1.5 h-3.5 flex-shrink-0 transition-all ${colorClass}`;
+                
+                this.tickActivityStrip.appendChild(block);
+                if (this.tickActivityStrip.children.length > 8) {
+                    this.tickActivityStrip.removeChild(this.tickActivityStrip.firstChild);
+                }
+                this.triggerBeep(1200, 0.005); // high density audio ticking tick
+            }
+
+            handleRegime(data) {
+                this.ticker.innerText = "EURUSD=X";
+
+                // Conviction Score
+                this.beliefVal.innerText = data.belief.toFixed(2);
+                this.beliefBar.style.width = `${Math.min(100, data.belief * 100)}%`;
+                
+                if (data.belief >= 0.60 && data.should_run_graph) {
+                    this.beliefVal.className = "text-lg font-black text-white leading-none";
+                    this.beliefAbortFlag.classList.add("hidden");
+                } else {
+                    this.beliefVal.className = "text-lg font-black text-[#ff0055] leading-none animate-pulse";
+                    if (data.abort_reason) {
+                        this.beliefAbortFlag.classList.remove("hidden");
+                        this.beliefAbortFlag.innerText = data.abort_reason.toUpperCase().replace('_', ' ');
+                    }
+                }
+
+                // Dominant Regime
+                this.regimeType.innerText = data.dominant;
+                this.regimeConf.innerText = `${(data.confidence * 100).toFixed(0)}%`;
+                this.regimeVol.innerText = `VOL: ${data.volatility.toUpperCase()} | ATR: ${data.atr.toFixed(5)}`;
+
+                if (data.dominant === "trending" || data.dominant === "breakout") {
+                    this.regimeType.className = "text-sm font-black text-[#00ff66] uppercase tracking-wider leading-none";
+                } else if (data.dominant === "ranging" || data.dominant === "compression") {
+                    this.regimeType.className = "text-sm font-black text-amber-500 uppercase tracking-wider leading-none";
+                } else {
+                    this.regimeType.className = "text-sm font-black text-[#ff0055] uppercase tracking-wider leading-none animate-pulse";
+                }
+
+                // Active Session Grid Highlighting
+                this.updateSessionGrid(data.session);
+
+                // Spread safety styling (using robust DOM guards)
+                if (this.spreadLabel) {
+                    if (data.spread_safe) {
+                        this.spreadBox.className = "px-2.5 py-0.5 border border-[#00ff66]/30 bg-[#00ff66]/5 flex items-center justify-center";
+                        this.spreadStatusText.innerText = "SAFE";
+                        this.spreadStatusText.className = "text-[#00ff66] font-bold text-[7px] tracking-wider uppercase";
+                        this.spreadLabel.innerText = "TELEMETRY_SAFE";
+                        this.spreadLabel.className = "text-[6px] text-zinc-500 uppercase font-bold tracking-widest";
+                    } else {
+                        this.spreadBox.className = "px-2.5 py-0.5 border border-[#ff0055]/30 bg-[#ff0055]/5 flex items-center justify-center animate-pulse";
+                        this.spreadStatusText.innerText = "WIDE";
+                        this.spreadStatusText.className = "text-[#ff0055] font-bold text-[7px] tracking-wider uppercase";
+                        this.spreadLabel.innerText = "WIDE_GATED";
+                        this.spreadLabel.className = "text-[6px] text-[#ff0055] uppercase font-bold tracking-widest";
+                    }
+                }
+
+                // Sync Python Core Daemon status, stats, and real uptime
+                if (data.events_detected !== undefined) {
+                    this.statsDetected.innerText = data.events_detected;
+                    this.statsFired.innerText = data.events_fired;
+                    this.statsSkipped.innerText = data.events_skipped;
+                }
+
+                if (data.daemon_start_time) {
+                    this.startTime = Number(data.daemon_start_time);
+                }
+
+                if (data.cooldown_remaining !== undefined && data.cooldown_remaining > 0) {
+                    this.cooldownVal.innerText = `${data.cooldown_remaining}s`;
+                    this.cooldownVal.className = "text-amber-500 font-bold";
+                    this.cooldownBar.style.width = `${(data.cooldown_remaining / 300 * 100).toFixed(0)}%`;
+                } else if (data.cooldown_remaining === 0) {
+                    this.cooldownVal.innerText = "READY";
+                    this.cooldownVal.className = "text-[#00ff66] font-bold";
+                    this.cooldownBar.style.width = "0%";
+                }
+            }
+
+            updateSessionGrid(session) {
+                const sessions = ["london", "newyork", "asian", "rollover"];
+                sessions.forEach(s => {
+                    const el = document.getElementById(`sess-${s}`);
+                    if (el) {
+                        el.className = "border border-zinc-900 bg-black py-0.5 text-zinc-700 text-[8px]";
+                    }
+                });
+
+                if (session === "overlap") {
+                    const ldn = document.getElementById("sess-london");
+                    const nyc = document.getElementById("sess-newyork");
+                    const cls = "border border-[#9d00ff] bg-[#9d00ff]/10 py-0.5 text-[#9d00ff] font-extrabold uppercase text-[8px]";
+                    if (ldn) ldn.className = cls;
+                    if (nyc) nyc.className = cls;
+                } else {
+                    const activeEl = document.getElementById(`sess-${session}`);
+                    if (activeEl) {
+                        if (session === "london" || session === "newyork") {
+                            activeEl.className = "border border-[#9d00ff] bg-[#9d00ff]/10 py-0.5 text-[#9d00ff] font-extrabold uppercase text-[8px]";
+                        } else {
+                            activeEl.className = "border border-amber-500 bg-amber-500/10 py-0.5 text-amber-500 font-extrabold uppercase text-[8px]";
+                        }
+                    }
+                }
+            }
+
+            handleLevels(data) {
+                const highs = data.swing_highs;
+                const lows = data.swing_lows;
+                
+                if (highs && highs.length > 0) {
+                    const priceSample = highs[0].price;
+                    this.pipMult = priceSample > 200 ? 0.01 : 0.0001; // Gold/JPY vs standard FX
+                }
+
+                if (highs && highs.length > 0) {
+                    const latestH = highs[0];
+                    this.currentRes = latestH.price;
+                    this.levelResVal.innerText = latestH.price.toFixed(5);
+                    this.levelResTime.innerText = `SH AT ${latestH.time.slice(-8)}`;
+                }
+
+                if (lows && lows.length > 0) {
+                    const latestL = lows[0];
+                    this.currentSup = latestL.price;
+                    this.levelSupVal.innerText = latestL.price.toFixed(5);
+                    this.levelSupTime.innerText = `SL AT ${latestL.time.slice(-8)}`;
+                }
+
+                this.updatePipDistances();
+            }
+
+            updatePipDistances() {
+                if (this.currentBid === 0.0) return;
+
+                // Resistance proximity
+                if (this.currentRes > 0.0) {
+                    const distPips = (this.currentRes - this.currentBid) / this.pipMult;
+                    this.levelResDist.innerText = `${distPips.toFixed(1)} Pips`;
+                    
+                    const proxPercent = Math.max(0, 100 - (distPips / 50 * 100));
+                    this.levelResBar.style.width = `${proxPercent}%`;
+
+                    if (distPips <= 2.5) {
+                        this.levelResDist.className = "bg-rose-950/20 border border-[#ff0055]/40 px-1.5 py-0.2 text-[#ff0055] font-extrabold animate-pulse";
+                    } else if (distPips <= 10.0) {
+                        this.levelResDist.className = "bg-rose-950/10 border border-[#ff0055]/20 px-1.5 py-0.2 text-[#ff0055] font-bold";
+                    } else {
+                        this.levelResDist.className = "bg-zinc-950 border border-zinc-900 px-1.5 py-0.2 text-zinc-500";
+                    }
+                }
+
+                // Support proximity
+                if (this.currentSup > 0.0) {
+                    const distPips = (this.currentBid - this.currentSup) / this.pipMult;
+                    this.levelSupDist.innerText = `${distPips.toFixed(1)} Pips`;
+                    
+                    const proxPercent = Math.max(0, 100 - (distPips / 50 * 100));
+                    this.levelSupBar.style.width = `${proxPercent}%`;
+
+                    if (distPips <= 2.5) {
+                        this.levelSupDist.className = "bg-emerald-950/20 border border-[#00ff66]/40 px-1.5 py-0.2 text-[#00ff66] font-extrabold animate-pulse";
+                    } else if (distPips <= 10.0) {
+                        this.levelSupDist.className = "bg-emerald-950/10 border border-[#00ff66]/20 px-1.5 py-0.2 text-[#00ff66] font-bold";
+                    } else {
+                        this.levelSupDist.className = "bg-zinc-950 border border-zinc-900 px-1.5 py-0.2 text-zinc-500";
+                    }
+                }
+            }
+
+            handleAccount(data) {
+                this.accBalance.innerText = `$${data.balance.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                this.accEquity.innerText = `$${data.equity.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                this.accMargin.innerText = `$${data.margin.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                this.accFreeMargin.innerText = `$${data.free_margin.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                if (this.accMarginLevel) {
+                    this.accMarginLevel.innerText = data.margin_level ? `${data.margin_level.toFixed(2)}%` : "0.00%";
+                }
+                
+                const pnl = data.profit;
+                this.accProfit.innerText = (pnl >= 0 ? "+" : "") + `$${pnl.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}`;
+                if (pnl > 0.0) {
+                    this.accProfit.className = "font-extrabold text-[#00ff66]";
+                } else if (pnl < 0.0) {
+                    this.accProfit.className = "font-extrabold text-[#ff0055]";
+                } else {
+                    this.accProfit.className = "font-extrabold text-white";
+                }
+            }
+
+            handleCandle(data) {
+                logger(`Candle closed: timeframe=${data.timeframe} | C=${data.close.toFixed(5)}`);
+            }
+
+            handleEvent(data) {
+                const isBackfill = data.historical === true || data.reason === "historical data" || (data.id && typeof data.id === 'string' && data.id.startsWith('h-'));
+
+                if (data.events_detected !== undefined) {
+                    this.statsDetected.innerText = data.events_detected;
+                } else if (data.id && !isBackfill) {
+                    this.statsDetected.innerText = data.id;
+                }
+                
+                const div = document.createElement("div");
+                div.className = `flex justify-between items-start bg-[#07070b] border border-zinc-900 px-2 py-1.5 text-[8.5px] font-mono leading-normal w-full gap-1.5 ${isBackfill ? 'opacity-60' : ''}`;
+                
+                let priorityColor = "text-zinc-600 font-mono";
+                if (!isBackfill) {
+                    if (data.priority === "HIGH") priorityColor = "text-amber-500 font-semibold";
+                    if (data.priority === "CRITICAL") priorityColor = "text-[#ff0055] font-bold animate-pulse";
+                }
+
+                let statusBadge = "";
+                if (isBackfill) {
+                    statusBadge = `<span class="text-zinc-500 bg-zinc-950 border border-zinc-800 px-1.5 py-0.5 text-[7.5px] font-bold">HISTORICAL</span>`;
+                } else if (data.status === "detected") {
+                    statusBadge = `<span class="text-[#00f0ff] bg-cyan-950/20 border border-[#00f0ff]/30 px-1.5 py-0.5 text-[7.5px] font-bold">DETECTED</span>`;
+                } else if (data.status === "skipped") {
+                    statusBadge = `<span class="text-amber-500 bg-amber-950/20 border border-amber-500/30 px-1.5 py-0.5 text-[7.5px] font-bold">GATED</span>`;
+                    if (data.events_skipped !== undefined) {
+                        this.statsSkipped.innerText = data.events_skipped;
+                    } else {
+                        const skippedCount = parseInt(this.statsSkipped.innerText) || 0;
+                        this.statsSkipped.innerText = skippedCount + 1;
+                    }
+                } else if (data.status === "firing") {
+                    statusBadge = `<span class="text-[#ff0055] bg-rose-950/30 border border-[#ff0055]/30 px-1.5 py-0.5 text-[7.5px] font-bold animate-pulse">GRAPH FIRE</span>`;
+                    if (data.events_fired !== undefined) {
+                        this.statsFired.innerText = data.events_fired;
+                    } else {
+                        const firedCount = parseInt(this.statsFired.innerText) || 0;
+                        this.statsFired.innerText = firedCount + 1;
+                    }
+                    
+                    // Activate live execution HUD classes (only for real-time live execution!)
+                    this.decisionPanel.className = "col-span-7 cyber-panel p-3.5 flex flex-col justify-between border-l-[3px] border-l-[#ff0055] relative overflow-hidden border-glow-rose";
+                    this.decisionStatus.innerText = "COGNITIVE GRAPH ENGINE RUNNING SCANS LIVE...";
+                    this.decisionStatus.className = "text-[#ff0055] font-bold text-[9px] tracking-widest block mb-1.5 animate-pulse";
+                }
+
+                let eventName = data.event_type.replace('_', ' ').toUpperCase();
+                if (data.event_type === "candle_pattern" && data.details && data.details.pattern) {
+                    const pat = data.details.pattern.replace('_', ' ').toUpperCase();
+                    const tf = data.details.timeframe || "M15";
+                    eventName = `${pat} (${tf})`;
+                } else if (data.details && data.details.timeframe) {
+                    eventName = `${eventName} (${data.details.timeframe})`;
+                }
+
+                let detailsStr = "";
+                if (data.details) {
+                    if (data.event_type === "candle_pattern" && data.details.pattern) {
+                        const lvl = data.details.at_level ? data.details.at_level.toFixed(data.details.at_level > 50 ? 2 : 5) : "";
+                        detailsStr = `
+                            <div class="text-[7.5px] text-zinc-500 mt-1 font-mono leading-normal flex flex-col gap-0.5">
+                                <span>└─ CONFIRMED AT: <span class="text-zinc-300 font-bold">${lvl}</span></span>
+                                <span class="pl-3">INTERACTIONS: <span class="${isBackfill ? 'text-zinc-500' : 'text-[#00f0ff]'}">${data.details.level_interactions}</span> | MOMENTUM: <span class="${isBackfill ? 'text-zinc-500' : 'text-[#00f0ff]'}">${data.details.momentum_intensity}x</span></span>
+                            </div>
+                        `;
+                    } else if (data.event_type === "level_breach" && data.details.level) {
+                        const dir = data.details.direction ? data.details.direction.replace('_', ' ').toUpperCase() : "";
+                        const lvl = data.details.level.toFixed(data.details.level > 50 ? 2 : 5);
+                        detailsStr = `<div class="text-[7.5px] text-zinc-500 mt-1 font-mono leading-normal">└─ ${dir} BREACH ON LEVEL ${lvl}</div>`;
+                    } else if (data.event_type === "sweep_detected" && data.details.swept_level) {
+                        const dir = data.details.direction ? data.details.direction.replace('_', ' ').toUpperCase() : "";
+                        const lvl = data.details.swept_level.toFixed(data.details.swept_level > 50 ? 2 : 5);
+                        detailsStr = `<div class="text-[7.5px] text-zinc-500 mt-1 font-mono leading-normal">└─ ${dir} SWEEP ON LEVEL ${lvl}</div>`;
+                    } else if (data.event_type === "volatility_spike" && data.details.range_pips) {
+                        detailsStr = `<div class="text-[7.5px] text-zinc-500 mt-1 font-mono leading-normal">└─ RANGE: ${data.details.range_pips.toFixed(1)} PIPS (AVG: ${data.details.avg_range_pips.toFixed(1)} | RATIO: ${data.details.ratio.toFixed(1)}x)</div>`;
+                    }
+                }
+
+                if (data.status === "skipped" && data.reason) {
+                    detailsStr += `<div class="text-[7.5px] ${isBackfill ? 'text-zinc-500' : 'text-amber-500 font-bold'} mt-1 font-mono leading-normal">└─ GATED REASON: ${data.reason.toUpperCase()}</div>`;
+                }
+
+                const displayTime = data.timestamp ? (data.timestamp.includes(" ") ? data.timestamp.split(" ")[1] : data.timestamp) : new Date().toLocaleTimeString();
+                div.innerHTML = `
+                    <div class="flex flex-col flex-grow text-left">
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <span class="text-zinc-600">${displayTime}</span>
+                            ${isBackfill ? '<span class="text-[7.5px] px-1 py-0.2 bg-zinc-950 text-zinc-500 border border-zinc-800 font-bold uppercase tracking-wider">[PRE-SESSION]</span>' : ''}
+                            <span class="${priorityColor}">[${data.priority}]</span>
+                            <span class="${isBackfill ? 'text-zinc-500 font-normal' : 'text-white font-medium'}">${eventName}</span>
+                        </div>
+                        ${detailsStr}
+                    </div>
+                    <div class="flex items-center gap-1.5 flex-shrink-0">
+                        ${statusBadge}
+                    </div>
+                `;
+
+                if (this.eventsLog.children.length === 1 && this.eventsLog.firstElementChild && this.eventsLog.firstElementChild.classList.contains("italic")) {
+                    this.eventsLog.innerHTML = "";
+                }
+
+                this.eventsLog.insertBefore(div, this.eventsLog.firstChild);
+                if (this.eventsLog.children.length > 20) {
+                    this.eventsLog.removeChild(this.eventsLog.lastChild);
+                }
+
+                if (!isBackfill && data.event_type === "sweep_detected" && data.status === "detected") {
+                    this.triggerSweepAlarm(data.details.level_price || data.price);
+                }
+            }
+
+            triggerSweepAlarm(price) {
+                this.sweepRadar.className = "bg-rose-950/20 border border-[#ff0055]/40 px-2 py-0.5 flex items-center gap-1.5 animate-pulse";
+                this.sweepIcon.className = "w-1.5 h-1.5 bg-[#ff0055] flex-shrink-0 animate-ping";
+                this.sweepMsg.innerText = `SWEEP @ ${price.toFixed(5)}`;
+                this.sweepMsg.className = "text-[6.5px] text-[#ff0055] font-bold tracking-wider";
+
+                this.triggerBeep(1400, 0.15);
+                setTimeout(() => this.triggerBeep(980, 0.12), 120);
+
+                setTimeout(() => {
+                    this.sweepRadar.className = "bg-black border border-zinc-800 px-2 py-0.5 flex items-center gap-1.5";
+                    this.sweepIcon.className = "w-1.5 h-1.5 bg-zinc-700 flex-shrink-0 animate-pulse";
+                    this.sweepMsg.innerText = "LIQ MONITOR";
+                    this.sweepMsg.className = "text-[6.5px] text-zinc-500 font-bold uppercase";
+                }, 8000);
+            }
+
+            handleAgent(data) {
+                const isHistorical = data.historical === true;
+                const consoleDiv = document.createElement("div");
+                consoleDiv.className = `border-b border-zinc-900 pb-2.5 last:border-0 ${isHistorical ? 'opacity-50' : ''}`;
+
+                let agentColor = "text-cyan-400 bg-cyan-950/20 border border-cyan-800/30";
+                if (isHistorical) {
+                    agentColor = "text-zinc-500 bg-zinc-950 border border-zinc-900";
+                } else {
+                    if (data.agent_name.includes("Market")) agentColor = "text-emerald-400 bg-emerald-950/20 border border-emerald-800/30 font-bold";
+                    if (data.agent_name.includes("Sentiment") || data.agent_name.includes("Social")) agentColor = "text-blue-400 bg-blue-950/20 border border-blue-800/30";
+                    if (data.agent_name.includes("News") || data.agent_name.includes("Fundamental")) agentColor = "text-amber-500 bg-amber-950/20 border border-amber-800/30";
+                    if (data.agent_name.includes("Trader")) agentColor = "text-[#ff0055] bg-rose-950/20 border border-rose-800/30 font-bold";
+                    if (data.agent_name.includes("Portfolio")) agentColor = "text-[#9d00ff] bg-purple-950/20 border border-purple-800/30 font-bold";
+                }
+
+                let toolContent = "";
+                if (data.tool_calls && data.tool_calls.length > 0) {
+                    toolContent = data.tool_calls.map(tc => `
+                        <div class="bg-black border border-zinc-900 px-2 py-0.5 text-[8px] text-zinc-500 font-mono mt-1.5 w-fit flex items-center gap-1.5">
+                            <span class="w-1 h-1 bg-[#00f0ff] animate-ping"></span>
+                            <span>[USE_TOOL]</span> <span class="text-[#00f0ff] font-mono">${tc}</span>
+                        </div>
+                    `).join("");
+                }
+
+                consoleDiv.innerHTML = `
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-[8px] text-zinc-500 font-semibold">${data.timestamp}</span>
+                        <span class="text-[7.5px] uppercase tracking-wider px-1.5 py-0.2 font-bold ${agentColor}">${data.agent_name.toUpperCase()}</span>
+                    </div>
+                    <p class="text-zinc-300 font-mono pl-2 text-[9px] leading-relaxed">${data.message || ""}</p>
+                    ${toolContent}
+                `;
+
+                this.consoleBody.appendChild(consoleDiv);
+                this.consoleBody.scrollTop = this.consoleBody.scrollHeight;
+                if (!isHistorical) {
+                    this.triggerBeep(1000, 0.01);
+                }
+            }
+
+            handleDecision(data) {
+                const action = data.signal.toUpperCase();
+                const isHistorical = data.historical === true;
+                
+                this.decisionAction.innerText = action;
+                this.decisionTime.innerText = isHistorical ? `RESTORED PRIOR DECISION AT ${data.timestamp}` : `DECISION STAGED AT ${data.timestamp}`;
+                
+                if (action.includes("BUY")) {
+                    this.decisionPanel.className = `col-span-7 cyber-panel p-3.5 flex flex-col justify-between border-l-[3px] border-l-[#00ff66] bg-[#00ff66]/5 relative overflow-hidden border-glow-emerald hazard-bg-buy ${isHistorical ? 'opacity-70' : ''}`;
+                    this.decisionStatus.innerText = isHistorical ? "RESTORED PREVIOUS COGNITIVE GRAPH DECISION" : "COGNITIVE ARCHITECTURE GRAPH DECISION FINALIZED";
+                    this.decisionStatus.className = `text-[#00ff66] font-extrabold text-[9px] tracking-widest block mb-1.5 ${isHistorical ? '' : 'animate-pulse'}`;
+                    this.decisionAction.className = "text-3xl font-extrabold tracking-[0.2em] text-[#00ff66] uppercase py-2 border-y border-[#00ff66]/20 px-12 w-full text-center";
+                    if (!isHistorical) {
+                        this.triggerBeep(650, 0.12);
+                        setTimeout(() => this.triggerBeep(850, 0.1), 100);
+                    }
+                } else if (action.includes("SELL")) {
+                    this.decisionPanel.className = `col-span-7 cyber-panel p-3.5 flex flex-col justify-between border-l-[3px] border-l-[#ff0055] bg-[#ff0055]/5 relative overflow-hidden border-glow-rose hazard-bg-sell ${isHistorical ? 'opacity-70' : ''}`;
+                    this.decisionStatus.innerText = isHistorical ? "RESTORED PREVIOUS COGNITIVE GRAPH DECISION" : "COGNITIVE ARCHITECTURE GRAPH DECISION FINALIZED";
+                    this.decisionStatus.className = `text-[#ff0055] font-extrabold text-[9px] tracking-widest block mb-1.5 ${isHistorical ? '' : 'animate-pulse'}`;
+                    this.decisionAction.className = "text-3xl font-extrabold tracking-[0.2em] text-[#ff0055] uppercase py-2 border-y border-[#ff0055]/20 px-12 w-full text-center";
+                    if (!isHistorical) {
+                        this.triggerBeep(450, 0.12);
+                        setTimeout(() => this.triggerBeep(350, 0.1), 100);
+                    }
+                } else {
+                    this.decisionPanel.className = "col-span-7 cyber-panel p-3.5 flex flex-col justify-between border-l-[3px] border-l-[#9d00ff] bg-black/40 relative overflow-hidden";
+                    this.decisionStatus.innerText = "COGNITIVE ENGINE ACTIVE MONITORING";
+                    this.decisionStatus.className = "text-[#9d00ff] text-[9px] font-bold uppercase tracking-widest block mb-1.5";
+                    this.decisionAction.className = "text-3xl font-black tracking-[0.2em] text-[#00f0ff] uppercase py-1 border-y border-zinc-900 px-12 w-full text-center";
+                    if (!isHistorical) {
+                        this.triggerBeep(1000, 0.02);
+                    }
+                }
+
+                this.prevDecision.innerText = action;
+                this.prevDecision.className = action.includes("BUY") ? "text-[#00ff66] font-bold" : (action.includes("SELL") ? "text-[#ff0055] font-bold" : "text-[#9d00ff] font-bold");
+            }
+
+            startClock() {
+                setInterval(() => {
+                    const elapsed = Math.floor((Date.now() - this.startTime) / 1000);
+                    const hours = String(Math.floor(elapsed / 3600)).padStart(2, '0');
+                    const minutes = String(Math.floor((elapsed % 3600) / 60)).padStart(2, '0');
+                    const seconds = String(elapsed % 60).padStart(2, '0');
+                    this.uptime.innerText = `${hours}:${minutes}:${seconds}`;
+
+                    this.updateCooldownCountdown();
+                }, 1000);
+            }
+
+            updateCooldownCountdown() {
+                const val = this.cooldownVal.innerText;
+                if (val !== "READY" && !isNaN(parseInt(val))) {
+                    let rem = parseInt(val) - 1;
+                    if (rem <= 0) {
+                        this.cooldownVal.innerText = "READY";
+                        this.cooldownVal.className = "text-[#00ff66] font-bold";
+                        this.cooldownBar.style.width = "0%";
+                    } else {
+                        this.cooldownVal.innerText = `${rem}s`;
+                        this.cooldownVal.className = "text-amber-500 font-bold";
+                        this.cooldownBar.style.width = `${(rem / 300 * 100).toFixed(0)}%`;
+                    }
+                }
+            }
+
+            triggerBeep(frequency, duration) {
+                try {
+                    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                    const osc = audioCtx.createOscillator();
+                    const gain = audioCtx.createGain();
+
+                    osc.type = "sine";
+                    osc.frequency.setValueAtTime(frequency, audioCtx.currentTime);
+                    
+                    gain.gain.setValueAtTime(0.003, audioCtx.currentTime);
+                    gain.gain.exponentialRampToValueAtTime(0.00001, audioCtx.currentTime + duration);
+
+                    osc.connect(gain);
+                    gain.connect(audioCtx.destination);
+
+                    osc.start();
+                    osc.stop(audioCtx.currentTime + duration);
+                } catch(e) {}
+            }
+        }
+
+        function logger(msg) {
+            console.log(msg);
+        }
+
+        window.onload = () => {
+            new DashboardController();
+        };
+    </script>
+</body>
+</html>
