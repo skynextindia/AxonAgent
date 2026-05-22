@@ -15,12 +15,18 @@ import time
 from datetime import datetime, timedelta
 from typing import Optional
 
+try:
+    import MetaTrader5 as mt5
+except ImportError:
+    mt5 = None
+
 from axonai.dataflows.mt5_data import mt5_initialize, mt5_shutdown, _to_mt5_symbol
 from axonai.realtime.event_types import EventPriority, LiveCandle, MarketEvent
 from axonai.realtime.tick_engine import TickEngine
 from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
 from axonai.realtime.event_detector import EventDetector
 from axonai.realtime.graph_executor import GraphExecutor
+from axonai.realtime.trade_executor import MT5TradeExecutor
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +63,9 @@ class AxonDaemon:
 
         # Layer 3: Graph Executor
         self.graph_executor = GraphExecutor(symbol, config)
+
+        # Layer 4: Trade Executor
+        self.trade_executor = MT5TradeExecutor(config)
 
         # Stats
         self._events_detected: int = 0
@@ -152,21 +161,21 @@ class AxonDaemon:
             })
             
             # 3. Account Details
-            import MetaTrader5 as mt5
-            acc = mt5.account_info()
-            if acc:
-                dashboard.broadcast({
-                    "type": "account",
-                    "balance": acc.balance,
-                    "equity": acc.equity,
-                    "profit": acc.profit,
-                    "margin": acc.margin,
-                    "free_margin": acc.margin_free,
-                    "margin_level": acc.margin_level if hasattr(acc, "margin_level") else 0.0
-                })
+            if mt5:
+                acc = mt5.account_info()
+                if acc:
+                    dashboard.broadcast({
+                        "type": "account",
+                        "balance": acc.balance,
+                        "equity": acc.equity,
+                        "profit": acc.profit,
+                        "margin": acc.margin,
+                        "free_margin": acc.margin_free,
+                        "margin_level": acc.margin_level if hasattr(acc, "margin_level") else 0.0
+                    })
             
             # 4. Latest Tick
-            tick = mt5.symbol_info_tick(self.mt5_symbol)
+            tick = mt5.symbol_info_tick(self.mt5_symbol) if mt5 else None
             if tick:
                 bid = tick.bid
                 ask = tick.ask
@@ -232,18 +241,18 @@ class AxonDaemon:
                 })
                 
                 # Fetch and broadcast MetaTrader 5 account info
-                import MetaTrader5 as mt5
-                acc = mt5.account_info()
-                if acc:
-                    dashboard.broadcast({
-                        "type": "account",
-                        "balance": acc.balance,
-                        "equity": acc.equity,
-                        "profit": acc.profit,
-                        "margin": acc.margin,
-                        "free_margin": acc.margin_free,
-                        "margin_level": acc.margin_level if hasattr(acc, "margin_level") else 0.0
-                    })
+                if mt5:
+                    acc = mt5.account_info()
+                    if acc:
+                        dashboard.broadcast({
+                            "type": "account",
+                            "balance": acc.balance,
+                            "equity": acc.equity,
+                            "profit": acc.profit,
+                            "margin": acc.margin,
+                            "free_margin": acc.margin_free,
+                            "margin_level": acc.margin_level if hasattr(acc, "margin_level") else 0.0
+                        })
 
     def _on_candle_close(self, candle: LiveCandle):
         """Called by TickEngine when any timeframe candle closes."""
@@ -434,6 +443,14 @@ class AxonDaemon:
                         "signal": signal,
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     })
+
+                # Execute order on MT5 terminal
+                try:
+                    trade_result = self.trade_executor.execute_signal(self.mt5_symbol, signal)
+                    if trade_result:
+                        logger.info("AxonDaemon: Order execution complete: %s", trade_result)
+                except Exception as ex_err:
+                    logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
 
                 # Set cooldown on event detector
                 cooldown = self.config.get("realtime_cooldown_seconds", 300)

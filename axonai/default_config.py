@@ -20,6 +20,9 @@ _ENV_OVERRIDES = {
     "AXONAI_INTRADAY_INTERVAL":    "intraday_interval",
     "AXONAI_MT5_TERMINAL_PATH":    "mt5_terminal_path",
     "AXONAI_MT5_SYMBOL_SUFFIX":    "mt5_symbol_suffix",
+    "AXONAI_REALTIME_MAGIC_NUMBER": "realtime_magic_number",
+    "AXONAI_REALTIME_DEFAULT_LOT_SIZE": "realtime_default_lot_size",
+    "AXONAI_REALTIME_DEVIATION": "realtime_deviation",
 }
 
 
@@ -141,4 +144,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_suppress_asian": True,
     "realtime_level_reset_atr_multiple": 2.0,
     "realtime_log_events": True,
+    "realtime_magic_number": 123456,
+    "realtime_default_lot_size": 0.01,
+    "realtime_deviation": 20,
 })
