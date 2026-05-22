@@ -10,7 +10,6 @@ decision-making agents share the same shape.
 from unittest.mock import MagicMock
 
 import pytest
-
 from axonai.agents.managers.research_manager import create_research_manager
 from axonai.agents.schemas import (
     PortfolioRating,
@@ -20,7 +19,7 @@ from axonai.agents.schemas import (
     render_research_plan,
     render_trader_proposal,
 )
-from axonai.agents.trader.trader import create_trader
+from axonai.agents.trader.trader import create_trader, TraderHypothesisModel
 
 
 # ---------------------------------------------------------------------------
@@ -85,10 +84,14 @@ class TestRenderResearchPlan:
             recommendation=PortfolioRating.OVERWEIGHT,
             rationale="Bull case carried; tailwinds intact.",
             strategic_actions="Build position over two weeks; cap at 5%.",
+            supporting_arguments="* Strong margins\n* Solid growth",
+            opposing_arguments="* Weak demand\n* High competition",
+            missing_assumptions="None identified.",
+            overall_confidence=0.8,
         )
         md = render_research_plan(p)
         assert "**Recommendation**: Overweight" in md
-        assert "**Rationale**: Bull case carried" in md
+        assert "**Rationale**: Bull case" in md
         assert "**Strategic Actions**: Build position" in md
 
     def test_all_5_tier_ratings_render(self):
@@ -97,6 +100,10 @@ class TestRenderResearchPlan:
                 recommendation=rating,
                 rationale="r",
                 strategic_actions="s",
+                supporting_arguments="* A\n* B",
+                opposing_arguments="* C\n* D",
+                missing_assumptions="None",
+                overall_confidence=0.5,
             )
             md = render_research_plan(p)
             assert f"**Recommendation**: {rating.value}" in md
@@ -114,21 +121,21 @@ def _make_trader_state():
     }
 
 
-def _structured_trader_llm(captured: dict, proposal: TraderProposal | None = None):
+def _structured_trader_llm(captured: dict, hypothesis: TraderHypothesisModel | None = None):
     """Build a MagicMock LLM whose with_structured_output binding captures the
-    prompt and returns a real TraderProposal so render_trader_proposal works.
+    prompt and returns a real TraderHypothesisModel.
     """
-    if proposal is None:
-        proposal = TraderProposal(
-            action=TraderAction.BUY,
-            reasoning="Strong setup.",
-            entry_price=100.0,
-            stop_loss=90.0,
-            take_profit=120.0,
+    if hypothesis is None:
+        hypothesis = TraderHypothesisModel(
+            direction="BUY",
+            entry=100.0,
+            sl=90.0,
+            tp=120.0,
+            hypothesis="Strong setup.",
         )
     structured = MagicMock()
     structured.invoke.side_effect = lambda prompt: (
-        captured.__setitem__("prompt", prompt) or proposal
+        captured.__setitem__("prompt", prompt) or hypothesis
     )
     llm = MagicMock()
     llm.with_structured_output.return_value = structured
@@ -139,19 +146,18 @@ def _structured_trader_llm(captured: dict, proposal: TraderProposal | None = Non
 class TestTraderAgent:
     def test_structured_path_produces_rendered_markdown(self):
         captured = {}
-        proposal = TraderProposal(
-            action=TraderAction.BUY,
-            reasoning="AI capex cycle intact; institutional flows constructive.",
-            entry_price=189.5,
-            stop_loss=178.0,
-            take_profit=212.5,
-            position_sizing="6% of portfolio",
+        hypothesis = TraderHypothesisModel(
+            direction="BUY",
+            entry=189.5,
+            sl=178.0,
+            tp=212.5,
+            hypothesis="AI capex cycle intact; institutional flows constructive.",
         )
-        llm = _structured_trader_llm(captured, proposal)
+        llm = _structured_trader_llm(captured, hypothesis)
         trader = create_trader(llm)
         result = trader(_make_trader_state())
         plan = result["trader_investment_plan"]
-        assert "**Action**: Buy" in plan
+        assert "**Action**: BUY" in plan
         assert "**Entry Price**: 189.5" in plan
         assert "FINAL TRANSACTION PROPOSAL: **BUY**" in plan
         # The same rendered markdown is also added to messages for downstream agents.
@@ -162,21 +168,24 @@ class TestTraderAgent:
         llm = _structured_trader_llm(captured)
         trader = create_trader(llm)
         trader(_make_trader_state())
-        # The investment plan is in the user message of the captured prompt.
+        # The real-time context is in the user message of the captured prompt.
         prompt = captured["prompt"]
-        assert any("Proposed Investment Plan" in m["content"] for m in prompt)
+        assert any("REAL-TIME MARKET PRICING CONTEXT" in m["content"] for m in prompt)
 
     def test_falls_back_to_freetext_when_structured_unavailable(self):
         plain_response = (
-            "**Action**: Sell\n\nGuidance cut hits margins.\n\n"
-            "FINAL TRANSACTION PROPOSAL: **SELL**"
+            '{"direction": "SELL", "entry": 150.0, "sl": 152.0, "tp": 146.0, '
+            '"hypothesis": "Guidance cut hits margins."}'
         )
         llm = MagicMock()
         llm.with_structured_output.side_effect = NotImplementedError("provider unsupported")
         llm.invoke.return_value = MagicMock(content=plain_response)
         trader = create_trader(llm)
         result = trader(_make_trader_state())
-        assert result["trader_investment_plan"] == plain_response
+        plan = result["trader_investment_plan"]
+        assert "**Action**: SELL" in plan
+        assert "**Hypothesis**: Guidance cut hits margins." in plan
+        assert "**Entry Price**: 150.00000" in plan
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +213,10 @@ def _structured_rm_llm(captured: dict, plan: ResearchPlan | None = None):
             recommendation=PortfolioRating.HOLD,
             rationale="Balanced view across both sides.",
             strategic_actions="Hold current position; reassess after earnings.",
+            supporting_arguments="* Support A\n* Support B",
+            opposing_arguments="* Oppose A\n* Oppose B",
+            missing_assumptions="None",
+            overall_confidence=0.7,
         )
     structured = MagicMock()
     structured.invoke.side_effect = lambda prompt: (
@@ -222,6 +235,10 @@ class TestResearchManagerAgent:
             recommendation=PortfolioRating.OVERWEIGHT,
             rationale="Bull case is stronger; AI tailwind intact.",
             strategic_actions="Build position gradually over two weeks.",
+            supporting_arguments="* Strong margins\n* Solid growth",
+            opposing_arguments="* Weak demand\n* High competition",
+            missing_assumptions="None",
+            overall_confidence=0.85,
         )
         llm = _structured_rm_llm(captured, plan)
         rm = create_research_manager(llm)

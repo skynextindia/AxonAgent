@@ -90,11 +90,12 @@ def create_trader(llm):
             },
         ]
 
+        import json
         hypothesis_res = invoke_structured_or_freetext(
             structured_llm,
             llm,
             messages,
-            lambda x: str(x),
+            lambda x: x.model_dump_json() if hasattr(x, "model_dump_json") else (json.dumps(x) if isinstance(x, dict) else str(x)),
             "Trader",
             schema=TraderHypothesisModel,
         )
@@ -107,7 +108,20 @@ def create_trader(llm):
         tp = current_price + 4.0 * atr_value
         hypothesis_str = "No specific hypothesis generated."
 
-        if isinstance(hypothesis_res, TraderHypothesisModel):
+        parsed_data = None
+        if isinstance(hypothesis_res, str):
+            try:
+                parsed_data = json.loads(hypothesis_res)
+            except Exception:
+                pass
+
+        if isinstance(parsed_data, dict):
+            direction = str(parsed_data.get("direction", "HOLD")).upper()
+            entry = float(parsed_data.get("entry", current_price))
+            sl = float(parsed_data.get("sl", current_price - 2.0 * atr_value))
+            tp = float(parsed_data.get("tp", current_price + 4.0 * atr_value))
+            hypothesis_str = str(parsed_data.get("hypothesis", ""))
+        elif isinstance(hypothesis_res, TraderHypothesisModel):
             direction = hypothesis_res.direction.upper()
             entry = float(hypothesis_res.entry)
             sl = float(hypothesis_res.sl)
@@ -122,21 +136,21 @@ def create_trader(llm):
         else:
             # Try basic parsing from string
             try:
-                dir_match = re.search(r"direction['\"]?:\s*['\"]?(\w+)", str(hypothesis_res), re.IGNORECASE)
+                dir_match = re.search(r"direction['\"]?\s*[:=]\s*['\"]?(\w+)", str(hypothesis_res), re.IGNORECASE)
                 if dir_match:
                     direction = dir_match.group(1).upper()
-                entry_match = re.search(r"entry['\"]?:\s*([\d.]+)", str(hypothesis_res))
+                entry_match = re.search(r"entry['\"]?\s*[:=]\s*([\d.]+)", str(hypothesis_res))
                 if entry_match:
                     entry = float(entry_match.group(1))
-                sl_match = re.search(r"sl['\"]?:\s*([\d.]+)", str(hypothesis_res))
+                sl_match = re.search(r"sl['\"]?\s*[:=]\s*([\d.]+)", str(hypothesis_res))
                 if sl_match:
                     sl = float(sl_match.group(1))
-                tp_match = re.search(r"tp['\"]?:\s*([\d.]+)", str(hypothesis_res))
+                tp_match = re.search(r"tp['\"]?\s*[:=]\s*([\d.]+)", str(hypothesis_res))
                 if tp_match:
                     tp = float(tp_match.group(1))
-                hyp_match = re.search(r"hypothesis['\"]?:\s*['\"]?([^'\"\n]+)", str(hypothesis_res))
+                hyp_match = re.search(r"hypothesis['\"]?\s*[:=]\s*['\"]?([^'\"\n]+)", str(hypothesis_res))
                 if hyp_match:
-                    hypothesis_str = hyp_match.group(1)
+                    hypothesis_str = hyp_match.group(1).strip().rstrip("'\"")
             except Exception as e:
                 logger.warning("Failed parsing raw text hypothesis: %s", e)
 
