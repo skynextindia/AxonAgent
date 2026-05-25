@@ -164,19 +164,19 @@ def build_world_state(symbol: str = "EURUSD=X") -> WorldState:
         utc_hour = now_utc.hour + now_utc.minute / 60.0
         
         # Session labels and penalty scoring
-        if 8.0 <= utc_hour < 13.0:
-            session = "london"
+        if 13.0 <= utc_hour < 16.0:
+            session = "overlap"
             session_penalty = 1.0
             hours_since_london_open = utc_hour - 8.0
-        elif 13.0 <= utc_hour < 16.0:
-            session = "overlap"
+        elif 8.0 <= utc_hour < 13.0:
+            session = "london"
             session_penalty = 1.0
             hours_since_london_open = utc_hour - 8.0
         elif 16.0 <= utc_hour < 21.0:
             session = "newyork"
             session_penalty = 1.0
             hours_since_london_open = utc_hour - 8.0
-        elif 21.0 <= utc_hour or utc_hour < 0.0: # Rollover period NY close
+        elif 21.0 <= utc_hour < 22.0:
             session = "rollover"
             session_penalty = 0.5
             hours_since_london_open = (utc_hour - 8.0) if utc_hour >= 8.0 else (utc_hour + 16.0)
@@ -246,23 +246,32 @@ def build_world_state(symbol: str = "EURUSD=X") -> WorldState:
         eurjpy_mom, eurjpy_vol = _get_pair_momentum_and_volume("EURJPY=X")
         eurgbp_mom, eurgbp_vol = _get_pair_momentum_and_volume("EURGBP=X")
         
-        eur_strength = float(np.mean([
-            eurusd_mom * eurusd_vol,
-            eurjpy_mom * eurjpy_vol,
-            eurgbp_mom * eurgbp_vol
-        ]))
-        eur_strength = float(np.clip(eur_strength * 100, -1.0, 1.0)) # scale to -1..+1
+        # If cross-pair data is unavailable (meaning EURJPY and EURGBP momentum are 0.0), compute simplified proxy:
+        if eurjpy_mom == 0.0 and eurgbp_mom == 0.0 and len(df_h1) >= 4:
+            closes = df_h1["Close"].values
+            r1 = (closes[-1] - closes[-2]) / (closes[-2] + 1e-8)
+            r2 = (closes[-2] - closes[-3]) / (closes[-3] + 1e-8)
+            r3 = (closes[-3] - closes[-4]) / (closes[-4] + 1e-8)
+            eur_strength = float(np.clip((r1 + r2 + r3) * 100, -1.0, 1.0))
+            usd_strength = -eur_strength
+        else:
+            eur_strength = float(np.mean([
+                eurusd_mom * eurusd_vol,
+                eurjpy_mom * eurjpy_vol,
+                eurgbp_mom * eurgbp_vol
+            ]))
+            eur_strength = float(np.clip(eur_strength * 100, -1.0, 1.0)) # scale to -1..+1
 
-        # USD: EURUSD (inverted), GBPUSD (inverted), USDJPY
-        gbpusd_mom, gbpusd_vol = _get_pair_momentum_and_volume("GBPUSD=X")
-        usdjpy_mom, usdjpy_vol = _get_pair_momentum_and_volume("USDJPY=X")
-        
-        usd_strength = float(np.mean([
-            -eurusd_mom * eurusd_vol,
-            -gbpusd_mom * gbpusd_vol,
-            usdjpy_mom * usdjpy_vol
-        ]))
-        usd_strength = float(np.clip(usd_strength * 100, -1.0, 1.0))
+            # USD: EURUSD (inverted), GBPUSD (inverted), USDJPY
+            gbpusd_mom, gbpusd_vol = _get_pair_momentum_and_volume("GBPUSD=X")
+            usdjpy_mom, usdjpy_vol = _get_pair_momentum_and_volume("USDJPY=X")
+            
+            usd_strength = float(np.mean([
+                -eurusd_mom * eurusd_vol,
+                -gbpusd_mom * gbpusd_vol,
+                usdjpy_mom * usdjpy_vol
+            ]))
+            usd_strength = float(np.clip(usd_strength * 100, -1.0, 1.0))
 
         # 6. Belief gating calculations
         trend_score = regime_scores["trending"]

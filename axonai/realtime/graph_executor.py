@@ -157,9 +157,9 @@ class GraphExecutor:
         """Convert MT5 symbol back to yfinance format.
         EURUSDm -> EURUSD=X
         """
+        base = mt5_symbol.replace("=X", "").replace("=x", "").strip()
         suffix = self.config.get("mt5_symbol_suffix", "m")
-        base = mt5_symbol
-        if base.endswith(suffix):
+        if suffix and base.endswith(suffix):
             base = base[:-len(suffix)]
         return base + "=X"
 

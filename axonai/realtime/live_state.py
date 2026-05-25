@@ -18,6 +18,7 @@ import numpy as np
 from axonai.world_state import WorldState, build_world_state
 from axonai.dataflows.evidence_extractor import MarketEvidence, extract_market_evidence
 from axonai.realtime.event_types import LiveCandle
+from axonai.dataflows.mt5_data import get_broker_tz_offset, _to_mt5_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +41,21 @@ class LiveWorldState:
         self._state: Optional[WorldState] = None
         self._initialized = False
 
-        # Pip multiplier
-        self._is_jpy = "JPY" in symbol.upper()
+        # Parse JPY and base/quote symbols dynamically
+        sym_clean = symbol.strip().upper().replace("/", "").replace("=X", "")
+        if len(sym_clean) >= 6:
+            self._base_currency = sym_clean[:3]
+            self._quote_currency = sym_clean[3:6]
+        else:
+            self._base_currency = "EUR"
+            self._quote_currency = "USD"
+        
+        self._is_jpy = self._quote_currency == "JPY"
         self._pip_mult = 0.01 if self._is_jpy else 0.0001
+
+        # Config-driven lengths with defaults
+        rsi_len = config.get("indicator_rsi_length", 14)
+        bb_len = config.get("indicator_bb_length", 20)
 
         # Rolling indicator windows (seeded from historical data)
         self._h1_closes: deque = deque(maxlen=100)
@@ -50,8 +63,8 @@ class LiveWorldState:
         self._h1_lows: deque = deque(maxlen=100)
         self._h1_volumes: deque = deque(maxlen=100)
         self._h4_closes: deque = deque(maxlen=60)
-        self._tr_window: deque = deque(maxlen=14)  # True Range for ATR
-        self._bb_closes: deque = deque(maxlen=20)   # For Bollinger Bands
+        self._tr_window: deque = deque(maxlen=rsi_len)  # True Range for ATR
+        self._bb_closes: deque = deque(maxlen=bb_len)   # For Bollinger Bands
 
         # EMA state (carry forward)
         self._ema20_h1: float = 0.0
@@ -132,6 +145,8 @@ class LiveWorldState:
                 self._ema20_h4 = float(ema_h4.iloc[-1])
                 self._prev_ema20_h4 = float(ema_h4.iloc[-2])
 
+            self._update_currency_strength()
+
         except Exception as e:
             logger.error("LiveWorldState seed error: %s", e, exc_info=True)
 
@@ -151,21 +166,28 @@ class LiveWorldState:
         else:
             self._state.spread_safe = False
 
-        # Update session (time-based)
-        utc_hour = timestamp.hour + timestamp.minute / 60.0 if timestamp.tzinfo else (
-            datetime.now(timezone.utc).hour + datetime.now(timezone.utc).minute / 60.0
-        )
+        # Update session (time-based) using true UTC time adjusted for broker DST/offset
+        broker_symbol = _to_mt5_symbol(self.symbol, self.config)
+        offset_hours = get_broker_tz_offset(broker_symbol)
+        
+        if timestamp.tzinfo:
+            utc_dt = timestamp.astimezone(timezone.utc)
+        else:
+            utc_dt = timestamp - timedelta(hours=offset_hours)
+            utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+        utc_hour = utc_dt.hour + utc_dt.minute / 60.0
+
         prev_session = self._state.session
-        if 8.0 <= utc_hour < 13.0:
-            self._state.session = "london"
-            self._state.session_penalty = 1.0
-        elif 13.0 <= utc_hour < 16.0:
+        if 13.0 <= utc_hour < 16.0:
             self._state.session = "overlap"
+            self._state.session_penalty = 1.0
+        elif 8.0 <= utc_hour < 13.0:
+            self._state.session = "london"
             self._state.session_penalty = 1.0
         elif 16.0 <= utc_hour < 21.0:
             self._state.session = "newyork"
             self._state.session_penalty = 1.0
-        elif 21.0 <= utc_hour or utc_hour < 0.0:
+        elif 21.0 <= utc_hour < 22.0:
             self._state.session = "rollover"
             self._state.session_penalty = 0.5
         else:
@@ -238,6 +260,7 @@ class LiveWorldState:
                 self._state.volatility_regime = "medium"
 
         self._prev_close_h1 = candle.close
+        self._update_currency_strength()
         self._recompute_belief()
 
     def _update_h4(self, candle: LiveCandle):
@@ -348,6 +371,22 @@ class LiveWorldState:
         else:
             self._state.abort_reason = ""
 
+    def _update_currency_strength(self):
+        """Update base and quote currency strength dynamically using a single-pair momentum proxy."""
+        if self._state is None:
+            return
+        if len(self._h1_closes) >= 4:
+            closes = list(self._h1_closes)
+            r1 = (closes[-1] - closes[-2]) / (closes[-2] + 1e-8)
+            r2 = (closes[-2] - closes[-3]) / (closes[-3] + 1e-8)
+            r3 = (closes[-3] - closes[-4]) / (closes[-4] + 1e-8)
+            base_strength = float(np.clip((r1 + r2 + r3) * 100, -1.0, 1.0))
+            quote_strength = -base_strength
+            
+            # Map dynamic strengths to correct state attributes for backward-compatibility
+            self._state.eur_strength = base_strength
+            self._state.usd_strength = quote_strength
+
     def snapshot(self) -> WorldState:
         """Return a frozen copy of the current state for graph invocation."""
         if self._state is None:
@@ -370,15 +409,22 @@ class LiveWorldState:
 class LiveMarketEvidence:
     """Incrementally maintained swing highs/lows, key levels, and patterns."""
 
-    def __init__(self, symbol: str):
+    def __init__(self, symbol: str, config: Optional[dict] = None):
         self.symbol = symbol
+        self.config = config or {}
         self._evidence: Optional[MarketEvidence] = None
         self._initialized = False
-        self._pip_mult = 0.01 if "JPY" in symbol.upper() else 0.0001
+        
+        # Parse quote dynamically for JPY pairs
+        sym_clean = symbol.strip().upper().replace("/", "").replace("=X", "")
+        is_jpy = sym_clean.endswith("JPY") or (len(sym_clean) >= 6 and sym_clean[3:6] == "JPY")
+        self._pip_mult = 0.01 if is_jpy else 0.0001
 
         # Rolling candle history for structural detection
         self._m15_candles: deque[LiveCandle] = deque(maxlen=100)
         self._h1_candles: deque[LiveCandle] = deque(maxlen=100)
+        self._h4_candles: deque[LiveCandle] = deque(maxlen=100)
+
 
     def initialize(self):
         """Cold start from historical bars via extract_market_evidence()."""
@@ -391,6 +437,7 @@ class LiveMarketEvidence:
         
         # Seed candle history to resolve cold-start lag and populate dashboard feed
         self._seed_candles_from_history()
+        self._update_indicators()
 
     def _seed_candles_from_history(self):
         """Populate _m15_candles and _h1_candles deques from recent MT5 bars."""
@@ -409,9 +456,12 @@ class LiveMarketEvidence:
             # Fetch last 3 days for M15 (~288 bars) and 10 days for H1 (~240 bars) to ensure we get 100 closed bars
             df_m15 = _fetch_bars(mt5_sym, "M15", end_dt - timedelta(days=3), end_dt)
             df_h1 = _fetch_bars(mt5_sym, "H1", end_dt - timedelta(days=10), end_dt)
+            df_h4 = _fetch_bars(mt5_sym, "H4", end_dt - timedelta(days=40), end_dt)
 
             if df_m15 is not None and not df_m15.empty:
-                for open_time, row in df_m15.tail(100).iterrows():
+                # Exclude the very last bar (which is the active/incomplete bar in MT5) to avoid duplicate candles
+                closed_df_m15 = df_m15.iloc[:-1] if len(df_m15) > 1 else df_m15
+                for open_time, row in closed_df_m15.tail(100).iterrows():
                     candle = LiveCandle(
                         timeframe="M15",
                         open_time=open_time.to_pydatetime(),
@@ -426,7 +476,9 @@ class LiveMarketEvidence:
                 logger.info("LiveMarketEvidence: seeded %d M15 historical candles", len(self._m15_candles))
 
             if df_h1 is not None and not df_h1.empty:
-                for open_time, row in df_h1.tail(100).iterrows():
+                # Exclude the very last bar (which is the active/incomplete bar in MT5) to avoid duplicate candles
+                closed_df_h1 = df_h1.iloc[:-1] if len(df_h1) > 1 else df_h1
+                for open_time, row in closed_df_h1.tail(100).iterrows():
                     candle = LiveCandle(
                         timeframe="H1",
                         open_time=open_time.to_pydatetime(),
@@ -439,6 +491,23 @@ class LiveMarketEvidence:
                     )
                     self._h1_candles.append(candle)
                 logger.info("LiveMarketEvidence: seeded %d H1 historical candles", len(self._h1_candles))
+
+            if df_h4 is not None and not df_h4.empty:
+                # Exclude the very last bar (which is the active/incomplete bar in MT5) to avoid duplicate candles
+                closed_df_h4 = df_h4.iloc[:-1] if len(df_h4) > 1 else df_h4
+                for open_time, row in closed_df_h4.tail(100).iterrows():
+                    candle = LiveCandle(
+                        timeframe="H4",
+                        open_time=open_time.to_pydatetime(),
+                        open=float(row["Open"]),
+                        high=float(row["High"]),
+                        low=float(row["Low"]),
+                        close=float(row["Close"]),
+                        volume=int(row["Volume"]),
+                        is_closed=True
+                    )
+                    self._h4_candles.append(candle)
+                logger.info("LiveMarketEvidence: seeded %d H4 historical candles", len(self._h4_candles))
         except Exception as e:
             logger.error("LiveMarketEvidence candle seed error: %s", e, exc_info=True)
 
@@ -451,10 +520,194 @@ class LiveMarketEvidence:
         if candle.timeframe == "M15":
             self._m15_candles.append(candle)
             self._detect_patterns(candle)
+            self._update_indicators()
         elif candle.timeframe == "H1":
             self._h1_candles.append(candle)
             self._update_swing_points()
             self._update_key_levels(candle.close)
+            self._detect_patterns(candle)
+            self._update_indicators()
+        elif candle.timeframe == "H4":
+            self._h4_candles.append(candle)
+            self._detect_patterns(candle)
+            self._update_indicators()
+
+    def _update_indicators(self):
+        """Update dynamic indicators (RSI, MACD, trends) from H1 history using config-driven parameters."""
+        if self._evidence is None:
+            return
+        candles = list(self._h1_candles)
+        if len(candles) < 26:
+            return
+
+        closes = [c.close for c in candles]
+        highs = [c.high for c in candles]
+        lows = [c.low for c in candles]
+
+        # Config parameters
+        rsi_len = self.config.get("indicator_rsi_length", 14)
+        ema_fast = self.config.get("indicator_ema_fast", 20)
+        ema_slow = self.config.get("indicator_ema_slow", 50)
+
+        # 1. H1 RSI
+        deltas = np.diff(closes)
+        gains = np.where(deltas > 0, deltas, 0.0)
+        losses = np.where(deltas < 0, -deltas, 0.0)
+        if len(gains) >= rsi_len:
+            avg_gain = float(np.mean(gains[:rsi_len]))
+            avg_loss = float(np.mean(losses[:rsi_len]))
+            for i in range(rsi_len, len(gains)):
+                avg_gain = (avg_gain * (rsi_len - 1) + gains[i]) / rsi_len
+                avg_loss = (avg_loss * (rsi_len - 1) + losses[i]) / rsi_len
+            rs = avg_gain / (avg_loss + 1e-8)
+            self._evidence.rsi_h1 = float(100.0 - (100.0 / (1.0 + rs)))
+        else:
+            self._evidence.rsi_h1 = 50.0
+
+        # 2. H1 MACD (12, 26, 9)
+        def calc_ema(values, period):
+            ema = [values[0]]
+            k = 2.0 / (period + 1)
+            for val in values[1:]:
+                ema.append(val * k + ema[-1] * (1 - k))
+            return ema
+
+        ema12 = calc_ema(closes, 12)
+        ema26 = calc_ema(closes, 26)
+        macd_line = [e12 - e26 for e12, e26 in zip(ema12, ema26)]
+        signal_line = calc_ema(macd_line, 9)
+        macd_diff = macd_line[-1] - signal_line[-1]
+
+        if macd_diff > 1e-6:
+            self._evidence.macd_signal_h1 = "bullish"
+        elif macd_diff < -1e-6:
+            self._evidence.macd_signal_h1 = "bearish"
+        else:
+            self._evidence.macd_signal_h1 = "neutral"
+
+        # 3. Trend Direction H1 (using config-driven fast/slow EMAs)
+        ema_f = calc_ema(closes, ema_fast)
+        ema_s = calc_ema(closes, ema_slow)
+        latest_close = closes[-1]
+        latest_ema_f = ema_f[-1]
+        latest_ema_s = ema_s[-1]
+
+        if latest_close > latest_ema_f and latest_ema_f > latest_ema_s:
+            self._evidence.trend_direction_h1 = "up"
+        elif latest_close < latest_ema_f and latest_ema_f < latest_ema_s:
+            self._evidence.trend_direction_h1 = "down"
+        else:
+            self._evidence.trend_direction_h1 = "sideways"
+
+        # 4. Trend Direction H4 (downsample to groups of 4 H1 bars)
+        h4_closes = []
+        for idx in range(0, len(closes), 4):
+            chunk = closes[idx:idx+4]
+            if chunk:
+                h4_closes.append(chunk[-1])
+
+        if len(h4_closes) >= 10:
+            ema_f_h4 = calc_ema(h4_closes, min(ema_fast, len(h4_closes)-1))
+            ema_s_h4 = calc_ema(h4_closes, min(ema_slow, len(h4_closes)-1))
+            l_close = h4_closes[-1]
+            l_ema_f = ema_f_h4[-1]
+            l_ema_s = ema_s_h4[-1]
+            if l_close > l_ema_f and l_ema_f > l_ema_s:
+                self._evidence.trend_direction_h4 = "up"
+            elif l_close < l_ema_f and l_ema_f < l_ema_s:
+                self._evidence.trend_direction_h4 = "down"
+            else:
+                self._evidence.trend_direction_h4 = "sideways"
+        else:
+            self._evidence.trend_direction_h4 = "sideways"
+
+        # 5. Asian range / London open bias
+        # Filter candles within last 24h belonging to Asian session hours (UTC 0-7)
+        now_utc = datetime.now(timezone.utc)
+        start_search = now_utc - timedelta(hours=24)
+        m15_candles = list(self._m15_candles)
+        
+        broker_symbol = _to_mt5_symbol(self.symbol)
+        offset_hours = get_broker_tz_offset(broker_symbol)
+        
+        asian_highs = []
+        asian_lows = []
+        for c in m15_candles:
+            if c.open_time.tzinfo is None:
+                c_time = c.open_time - timedelta(hours=offset_hours)
+                c_time = c_time.replace(tzinfo=timezone.utc)
+            else:
+                c_time = c.open_time.astimezone(timezone.utc)
+            if c_time >= start_search and 0 <= c_time.hour < 8:
+                asian_highs.append(c.high)
+                asian_lows.append(c.low)
+
+        if asian_highs and asian_lows:
+            self._evidence.asian_range_high = float(max(asian_highs))
+            self._evidence.asian_range_low = float(min(asian_lows))
+        else:
+            # Fallback to general range of candles -12 to -4
+            self._evidence.asian_range_high = float(max(highs[-12:-4])) if len(highs) >= 12 else float(max(highs))
+            self._evidence.asian_range_low = float(min(lows[-12:-4])) if len(lows) >= 12 else float(min(lows))
+
+        # London range calculation
+        london_highs = []
+        london_lows = []
+        for c in m15_candles:
+            if c.open_time.tzinfo is None:
+                c_time = c.open_time - timedelta(hours=offset_hours)
+                c_time = c_time.replace(tzinfo=timezone.utc)
+            else:
+                c_time = c.open_time.astimezone(timezone.utc)
+            if c_time >= start_search and 8 <= c_time.hour < 16:
+                london_highs.append(c.high)
+                london_lows.append(c.low)
+
+        if london_highs and london_lows:
+            self._evidence.london_range_high = float(max(london_highs))
+            self._evidence.london_range_low = float(min(london_lows))
+        else:
+            self._evidence.london_range_high = 0.0
+            self._evidence.london_range_low = 0.0
+
+        # London open bias
+        london_close = closes[-1]
+        for c in reversed(candles):
+            if c.open_time.tzinfo is None:
+                c_time = c.open_time - timedelta(hours=offset_hours)
+                c_time = c_time.replace(tzinfo=timezone.utc)
+            else:
+                c_time = c.open_time.astimezone(timezone.utc)
+            if c_time.hour == 8:
+                london_close = c.close
+                break
+
+        if london_close > self._evidence.asian_range_high:
+            self._evidence.london_open_bias = "bullish"
+        elif london_close < self._evidence.asian_range_low:
+            self._evidence.london_open_bias = "bearish"
+        else:
+            self._evidence.london_open_bias = "neutral"
+
+        # New York range calculation (UTC 13-20)
+        ny_highs = []
+        ny_lows = []
+        for c in m15_candles:
+            if c.open_time.tzinfo is None:
+                c_time = c.open_time - timedelta(hours=offset_hours)
+                c_time = c_time.replace(tzinfo=timezone.utc)
+            else:
+                c_time = c.open_time.astimezone(timezone.utc)
+            if c_time >= start_search and 13 <= c_time.hour < 21:
+                ny_highs.append(c.high)
+                ny_lows.append(c.low)
+
+        if ny_highs and ny_lows:
+            self._evidence.ny_range_high = float(max(ny_highs))
+            self._evidence.ny_range_low = float(min(ny_lows))
+        else:
+            self._evidence.ny_range_high = 0.0
+            self._evidence.ny_range_low = 0.0
 
     def _update_swing_points(self):
         """Detect new swing highs/lows from H1 candle history."""
@@ -497,7 +750,7 @@ class LiveMarketEvidence:
         )[:5]
 
     def _detect_patterns(self, candle: LiveCandle):
-        """Detect candle patterns on M15."""
+        """Detect candle patterns on active timeframe."""
         patterns = []
         c_range = candle.range + 1e-8
 
@@ -508,9 +761,18 @@ class LiveMarketEvidence:
             elif candle.lower_shadow / c_range > 0.60 and candle.close >= candle.open:
                 patterns.append("pin_bar_bullish")
 
+        # Determine history based on timeframe
+        history = []
+        if candle.timeframe == "M15":
+            history = list(self._m15_candles)
+        elif candle.timeframe == "H1":
+            history = list(self._h1_candles)
+        elif candle.timeframe == "H4":
+            history = list(self._h4_candles)
+
         # Engulfing (need previous candle)
-        if len(self._m15_candles) >= 2:
-            prev = self._m15_candles[-2]
+        if len(history) >= 2:
+            prev = history[-2]
             if candle.is_bullish and not prev.is_bullish:
                 if candle.open <= prev.close and candle.close >= prev.open and candle.body > prev.body:
                     patterns.append("engulfing_bullish")

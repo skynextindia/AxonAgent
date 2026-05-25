@@ -13,7 +13,8 @@ from axonai.dataflows.mt5_data import (
     _to_mt5_symbol,
     _ensure_symbol_visible,
     _fetch_bars,
-    get_mt5_live_price
+    get_mt5_live_price,
+    get_broker_tz_offset
 )
 
 logger = logging.getLogger(__name__)
@@ -38,6 +39,10 @@ class MarketEvidence:
     asian_range_high: float
     asian_range_low: float
     london_open_bias: str        # "bullish" / "bearish" / "neutral" based on open vs asian range
+    london_range_high: float = 0.0
+    london_range_low: float = 0.0
+    ny_range_high: float = 0.0
+    ny_range_low: float = 0.0
 
 
 def extract_market_evidence(symbol: str = "EURUSD=X") -> MarketEvidence:
@@ -54,8 +59,13 @@ def extract_market_evidence(symbol: str = "EURUSD=X") -> MarketEvidence:
         recent_patterns=[],
         asian_range_high=0.0,
         asian_range_low=0.0,
-        london_open_bias="neutral"
+        london_open_bias="neutral",
+        london_range_high=0.0,
+        london_range_low=0.0,
+        ny_range_high=0.0,
+        ny_range_low=0.0
     )
+
 
     if not mt5_initialize():
         logger.warning("MT5 unavailable, returning default MarketEvidence")
@@ -223,8 +233,12 @@ def extract_market_evidence(symbol: str = "EURUSD=X") -> MarketEvidence:
         now_utc = datetime.now(timezone.utc)
         start_search = now_utc - timedelta(hours=24)
         
+        offset_hours = get_broker_tz_offset(mt5_sym)
+        
         # Filter H1 index by UTC hours 0-7
         df_utc = df_h1.copy()
+        # Shift index to actual UTC by subtracting the broker timezone offset
+        df_utc.index = df_utc.index - pd.Timedelta(hours=offset_hours)
         df_utc.index = df_utc.index.tz_localize('UTC') if df_utc.index.tz is None else df_utc.index.tz_convert('UTC')
         asian_bars = df_utc[(df_utc.index >= start_search) & (df_utc.index.hour < 8)]
         
@@ -251,6 +265,24 @@ def extract_market_evidence(symbol: str = "EURUSD=X") -> MarketEvidence:
         else:
             london_open_bias = "neutral"
 
+        # Find London session bars of the last 24 hours (UTC 8-15)
+        london_bars = df_utc[(df_utc.index >= start_search) & (df_utc.index.hour >= 8) & (df_utc.index.hour < 16)]
+        if not london_bars.empty:
+            london_range_high = float(london_bars["High"].max())
+            london_range_low = float(london_bars["Low"].min())
+        else:
+            london_range_high = 0.0
+            london_range_low = 0.0
+
+        # Find New York session bars of the last 24 hours (UTC 13-20)
+        ny_bars = df_utc[(df_utc.index >= start_search) & (df_utc.index.hour >= 13) & (df_utc.index.hour < 21)]
+        if not ny_bars.empty:
+            ny_range_high = float(ny_bars["High"].max())
+            ny_range_low = float(ny_bars["Low"].min())
+        else:
+            ny_range_high = 0.0
+            ny_range_low = 0.0
+
         return MarketEvidence(
             swing_highs=swing_highs,
             swing_lows=swing_lows,
@@ -262,7 +294,11 @@ def extract_market_evidence(symbol: str = "EURUSD=X") -> MarketEvidence:
             recent_patterns=recent_patterns,
             asian_range_high=asian_range_high,
             asian_range_low=asian_range_low,
-            london_open_bias=london_open_bias
+            london_open_bias=london_open_bias,
+            london_range_high=london_range_high,
+            london_range_low=london_range_low,
+            ny_range_high=ny_range_high,
+            ny_range_low=ny_range_low
         )
 
     except Exception as e:

@@ -25,7 +25,9 @@ _TF_PERIODS = {
     "M5": 300,
     "M15": 900,
     "H1": 3600,
+    "H4": 14400,
 }
+
 
 
 class CandleBuilder:
@@ -39,10 +41,10 @@ class CandleBuilder:
 
     def _period_start(self, ts: datetime) -> datetime:
         """Compute the period start time for a given timestamp."""
-        epoch = ts.replace(tzinfo=None)
-        total_seconds = int(epoch.timestamp())
+        # Use timezone-aware UTC conversion to prevent OS local timezone or DST shifts!
+        total_seconds = int(ts.replace(tzinfo=timezone.utc).timestamp())
         period_start_sec = (total_seconds // self.period_seconds) * self.period_seconds
-        return datetime.fromtimestamp(period_start_sec)
+        return datetime.utcfromtimestamp(period_start_sec)
 
     def feed_tick(self, price: float, volume: int, timestamp: datetime) -> Optional[LiveCandle]:
         """Process a tick. Returns a closed candle if the period boundary was crossed."""
@@ -149,10 +151,62 @@ class TickEngine(threading.Thread):
             if not info.visible:
                 mt5.symbol_select(self.symbol, True)
             logger.info("TickEngine: MT5 connected, symbol %s ready", self.symbol)
+
+            # Pre-seed active candles from MT5
+            self._preseed_active_candles()
+
+            # Initialize last tick time to current tick
+            tick = mt5.symbol_info_tick(self.symbol)
+            if tick is not None:
+                self._last_tick_time = datetime.utcfromtimestamp(tick.time)
+                logger.info("TickEngine: Set last tick time to %s", self._last_tick_time)
+            else:
+                self._last_tick_time = datetime.utcnow()
+
             return True
         except ImportError:
             logger.error("TickEngine: MetaTrader5 package not installed")
             return False
+
+    def _preseed_active_candles(self) -> None:
+        """Pre-seed active incomplete candles from MT5."""
+        if self._mt5 is None:
+            return
+
+        logger.info("TickEngine: Pre-seeding active candles from MT5...")
+        for tf, builder in self.candle_builders.items():
+            try:
+                tf_constant = getattr(self._mt5, f"TIMEFRAME_{tf}", None)
+                if tf_constant is None:
+                    continue
+
+                # Fetch index 0 (active incomplete bar)
+                rates = self._mt5.copy_rates_from_pos(self.symbol, tf_constant, 0, 1)
+                if rates is not None and len(rates) > 0:
+                    rate = rates[0]
+                    open_time = datetime.utcfromtimestamp(rate['time'])
+                    open_val = float(rate['open'])
+                    high_val = float(rate['high'])
+                    low_val = float(rate['low'])
+                    close_val = float(rate['close'])
+                    volume_val = int(rate['tick_volume'])
+
+                    builder.current = LiveCandle(
+                        timeframe=tf,
+                        open_time=open_time,
+                        open=open_val,
+                        high=high_val,
+                        low=low_val,
+                        close=close_val,
+                        volume=volume_val,
+                        is_closed=False
+                    )
+                    logger.info(
+                        "TickEngine: Pre-seeded %s candle. Time: %s, OHLC: (%.5f, %.5f, %.5f, %.5f), Vol: %d",
+                        tf, open_time, open_val, high_val, low_val, close_val, volume_val
+                    )
+            except Exception as e:
+                logger.error("TickEngine: Failed to pre-seed active candle for %s: %s", tf, e)
 
     def _poll_ticks(self) -> list:
         """Fetch new ticks since last known tick time."""
@@ -161,7 +215,7 @@ class TickEngine(threading.Thread):
         try:
             if self._last_tick_time is None:
                 # First poll — get last 100 ticks
-                from_time = datetime.now() - timedelta(seconds=10)
+                from_time = datetime.utcnow() - timedelta(seconds=10)
                 ticks = self._mt5.copy_ticks_from(
                     self.symbol, from_time, 100, self._mt5.COPY_TICKS_ALL
                 )
@@ -176,13 +230,13 @@ class TickEngine(threading.Thread):
             # Filter out already-seen ticks
             new_ticks = []
             for t in ticks:
-                tick_time = datetime.fromtimestamp(t['time'])
+                tick_time = datetime.utcfromtimestamp(t['time'])
                 if self._last_tick_time is None or tick_time > self._last_tick_time:
                     new_ticks.append(t)
 
             if new_ticks:
                 last = new_ticks[-1]
-                self._last_tick_time = datetime.fromtimestamp(last['time'])
+                self._last_tick_time = datetime.utcfromtimestamp(last['time'])
 
             return new_ticks
         except Exception as e:
@@ -194,7 +248,7 @@ class TickEngine(threading.Thread):
         bid = float(tick['bid'])
         ask = float(tick['ask'])
         volume = int(tick['volume']) if 'volume' in tick.dtype.names else 1
-        timestamp = datetime.fromtimestamp(tick['time'])
+        timestamp = datetime.utcfromtimestamp(tick['time'])
         mid_price = (bid + ask) / 2.0
 
         self.latest_bid = bid
@@ -217,7 +271,7 @@ class TickEngine(threading.Thread):
 
         # Feed all candle builders
         for tf, builder in self.candle_builders.items():
-            closed = builder.feed_tick(mid_price, volume, timestamp)
+            closed = builder.feed_tick(bid, volume, timestamp)
             if closed is not None and self.on_candle_close_callback:
                 try:
                     self.on_candle_close_callback(closed)
@@ -234,7 +288,17 @@ class TickEngine(threading.Thread):
             self.running = False
             return
 
+        from axonai.dataflows.mt5_data import get_broker_tz_offset
+
         while self.running:
+            # Check if market is closed (weekend in broker local time)
+            offset_hours = get_broker_tz_offset(self.symbol)
+            broker_now = datetime.utcnow() + timedelta(hours=offset_hours)
+            if broker_now.weekday() in (5, 6):
+                # Saturday (5) or Sunday (6) in broker local time -> sleep 10s to save CPU/connection
+                time.sleep(10.0)
+                continue
+
             new_ticks = self._poll_ticks()
             for tick in new_ticks:
                 self._process_tick(tick)

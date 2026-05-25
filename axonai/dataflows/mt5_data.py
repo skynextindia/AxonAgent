@@ -94,19 +94,38 @@ def mt5_shutdown():
 def _to_mt5_symbol(yf_symbol: str, config: Optional[dict] = None) -> str:
     """Convert a yfinance-style symbol to MT5 broker symbol.
 
-    ``EURUSD=X`` → ``EURUSDm`` (default suffix from config).
+    ``EURUSD=X`` → ``EURUSDm`` (auto-detects broker suffix if connected).
     """
-    from axonai.dataflows.config import get_config
-    cfg = config or get_config()
-    suffix = cfg.get("mt5_symbol_suffix", "m")
-
-    # Strip yfinance forex suffix '=X'
-    base = yf_symbol.replace("=X", "").replace("=x", "")
-
-    # Strip crypto suffix '-USD' → keep base
+    # Clean the input yfinance symbol first
+    base = yf_symbol.replace("=X", "").replace("=x", "").replace("/", "").strip()
     if base.endswith("-USD"):
         base = base[:-4]
 
+    # Attempt to query MT5 terminal dynamically if it's already active
+    try:
+        global _mt5, _initialized
+        if _initialized and _mt5:
+            from axonai.dataflows.config import get_config
+            cfg = config or get_config()
+            config_suffix = cfg.get("mt5_symbol_suffix", "m")
+            
+            suffixes_to_try = [config_suffix, "", "m", "_i", ".pro", "_ecn"]
+            # Filter duplicates but keep order
+            seen = set()
+            suffixes_to_try = [x for x in suffixes_to_try if not (x in seen or seen.add(x))]
+            
+            for suffix in suffixes_to_try:
+                candidate = base + suffix
+                info = _mt5.symbol_info(candidate)
+                if info is not None:
+                    return candidate
+    except Exception as e:
+        logger.debug("Failed to dynamically auto-detect broker symbol suffix: %s", e)
+
+    # Fallback to configured default
+    from axonai.dataflows.config import get_config
+    cfg = config or get_config()
+    suffix = cfg.get("mt5_symbol_suffix", "m")
     return base + suffix
 
 
@@ -308,3 +327,46 @@ def get_mt5_atr(yf_symbol: str, period: int = 14,
 
     atr = tr.rolling(window=period).mean().iloc[-1]
     return float(atr) if pd.notna(atr) else None
+
+
+def get_broker_tz_offset(symbol: str = "EURUSDm") -> int:
+    """Get broker timezone offset from UTC in hours.
+    
+    If the market is open, computes it dynamically by comparing the latest tick time
+    to the system UTC clock. If the market is closed (e.g. weekend), falls back
+    to the standard EET/EEST (UTC+2/UTC+3) US DST transition rules used by almost
+    all MT5 forex brokers.
+    """
+    import time
+    try:
+        import MetaTrader5 as mt5
+        # mt5_initialize is cached and safe to call
+        if mt5_initialize():
+            tick = mt5.symbol_info_tick(symbol)
+            if tick is not None:
+                tick_time = tick.time
+                current_time = time.time()
+                # If tick is within 2 hours of current time, compute offset directly
+                if abs(tick_time - current_time) < 7200:
+                    return int(round((tick_time - current_time) / 3600))
+    except Exception as e:
+        logger.debug("Failed to determine broker offset dynamically: %s", e)
+
+    # Fallback: EET/EEST (UTC+2 / UTC+3) US DST rules
+    from datetime import datetime, timezone, timedelta
+    now_utc = datetime.now(timezone.utc)
+    year = now_utc.year
+    # US DST starts on second Sunday of March
+    dst_start = datetime(year, 3, 8, 7, tzinfo=timezone.utc)
+    while dst_start.weekday() != 6:
+        dst_start += timedelta(days=1)
+    # US DST ends on first Sunday of November
+    dst_end = datetime(year, 11, 1, 6, tzinfo=timezone.utc)
+    while dst_end.weekday() != 6:
+        dst_end += timedelta(days=1)
+
+    if dst_start <= now_utc < dst_end:
+        return 3  # EEST
+    else:
+        return 2  # EET
+

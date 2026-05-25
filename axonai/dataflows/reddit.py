@@ -3,7 +3,7 @@
 Uses Reddit's public JSON endpoints (``reddit.com/r/{sub}/search.json``)
 which do not require an API key. Public throughput is ~10 requests per
 minute per IP, well within budget for a single agent run that queries
-a handful of finance subreddits per ticker.
+a handful of forex subreddits per ticker.
 
 Returns formatted plaintext blocks ready for prompt injection. Degrades
 gracefully — returns a placeholder string rather than raising, so callers
@@ -25,10 +25,22 @@ logger = logging.getLogger(__name__)
 _API = "https://www.reddit.com/r/{sub}/search.json?{qs}"
 _UA = "axonai/0.2 (+https://github.com/AxonAI/AxonAI)"
 
-# Default subreddits ordered roughly by signal density for ticker-specific
-# discussion. wallstreetbets has the most volume but most noise; stocks /
-# investing trend more measured. Caller can override.
-DEFAULT_SUBREDDITS = ("wallstreetbets", "stocks", "investing")
+# Default subreddits ordered roughly by signal density for Forex-specific discussion.
+DEFAULT_SUBREDDITS = ("forex", "currencies", "FXTrading")
+
+
+def _clean_forex_ticker(ticker: str) -> str:
+    """Clean Forex symbols to standard readable formats.
+    e.g., 'EURUSD=X' -> 'EURUSD', 'EURUSDm' -> 'EURUSD'.
+    """
+    sym = ticker.strip().upper()
+    if "/" in sym:
+        sym = sym.replace("/", "")
+    if sym.endswith("=X"):
+        sym = sym[:-2]
+    if len(sym) == 7 and sym[:6].isalpha():
+        sym = sym[:6]
+    return sym
 
 
 def _fetch_subreddit(
@@ -63,18 +75,19 @@ def fetch_reddit_posts(
     timeout: float = 10.0,
     inter_request_delay: float = 0.4,
 ) -> str:
-    """Fetch recent Reddit posts mentioning ``ticker`` across finance
+    """Fetch recent Reddit posts mentioning ``ticker`` across forex
     subreddits and return them as a formatted plaintext block.
 
     ``inter_request_delay`` keeps us under Reddit's public rate limit
     (~10 req/min per IP) even if the caller queries many subreddits.
     """
+    cleaned_ticker = _clean_forex_ticker(ticker)
     blocks = []
     total_posts = 0
     for i, sub in enumerate(subreddits):
         if i > 0:
             time.sleep(inter_request_delay)
-        posts = _fetch_subreddit(ticker, sub, limit_per_sub, timeout)
+        posts = _fetch_subreddit(cleaned_ticker, sub, limit_per_sub, timeout)
         total_posts += len(posts)
         if not posts:
             blocks.append(f"r/{sub}: <no posts found mentioning {ticker.upper()} in the past 7 days>")

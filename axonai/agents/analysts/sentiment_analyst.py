@@ -8,7 +8,7 @@ from axonai.agents.utils.agent_utils import (
     get_news,
 )
 from axonai.dataflows.reddit import fetch_reddit_posts
-from axonai.dataflows.stocktwits import fetch_stocktwits_messages
+from axonai.dataflows.forex_social import fetch_forex_social_feed
 
 def _seven_days_back(trade_date: str) -> str:
     return (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
@@ -26,10 +26,25 @@ def create_sentiment_analyst(llm):
 
         # Pre-fetch three sources
         news_block = get_news.func(ticker, start_date, end_date)
-        stocktwits_block = fetch_stocktwits_messages(ticker, limit=30)
+        forex_social_block = fetch_forex_social_feed(ticker, limit=30)
         reddit_block = fetch_reddit_posts(ticker)
 
-        system_message = f"""You are a Sentiment Analyst. Your task is to evaluate the Trader's proposed hypothesis using the pre-fetched news headlines, StockTwits, and Reddit posts.
+        # Broadcast active sentiment feeds to Dashboard cockpit
+        try:
+            from axonai.realtime.api_server import get_dashboard
+            dashboard = get_dashboard()
+            if dashboard:
+                dashboard.broadcast({
+                    "type": "news_data",
+                    "news": news_block,
+                    "forex_social": forex_social_block,
+                    "reddit": reddit_block,
+                    "timestamp": datetime.now().strftime("%H:%M:%S")
+                })
+        except Exception:
+            pass
+
+        system_message = f"""You are a Sentiment Analyst. Your task is to evaluate the Trader's proposed hypothesis using the pre-fetched news headlines, ForexLive sentiment/discussions, and Reddit posts.
 
 ## Proposed Trader Hypothesis:
 - **Direction**: {trader_hypothesis.get('direction')}
@@ -51,10 +66,10 @@ def create_sentiment_analyst(llm):
 {news_block}
 <end_of_news>
 
-### StockTwits messages
-<start_of_stocktwits>
-{stocktwits_block}
-<end_of_stocktwits>
+### ForexLive Sentiment & Social Feed
+<start_of_forex_social>
+{forex_social_block}
+<end_of_forex_social>
 
 ### Reddit posts — past 7 days
 <start_of_reddit>

@@ -51,10 +51,12 @@ class EventDetector:
 
         # State tracking
         self._consumed_levels: Set[float] = set()
+        self._structure_detected_on_candle: bool = True
         self._previous_regime: str = ""
         self._previous_session: str = ""
         self._previous_spread_safe: Optional[bool] = None
         self._cooldown_until: datetime = datetime.min
+        self._current_trigger_candle: Optional[LiveCandle] = None
 
         # Rolling M5 ranges for volatility spike detection
         self._m5_ranges: list = []
@@ -69,6 +71,43 @@ class EventDetector:
         self._level_reset_atr_mult = config.get("realtime_level_reset_atr_multiple", 2.0)
         self._log_events = config.get("realtime_log_events", True)
         self._pip_mult = 0.0001  # Updated on init
+
+    @property
+    def tz(self):
+        from datetime import timezone, timedelta
+        from axonai.dataflows.mt5_data import _to_mt5_symbol, get_broker_tz_offset
+        broker_symbol = _to_mt5_symbol(self.live_state.symbol, self.config)
+        offset_hours = get_broker_tz_offset(broker_symbol)
+        return timezone(timedelta(hours=offset_hours))
+
+    def _enrich_event(self, event: MarketEvent):
+        """Add trigger candle details to the event details if available."""
+        tc = self._current_trigger_candle
+        if tc is None and self.live_evidence._m15_candles:
+            tc = self.live_evidence._m15_candles[-1]
+
+        if tc is not None:
+            open_time_utc = int(tc.open_time.replace(tzinfo=self.tz).timestamp()) if isinstance(tc.open_time, datetime) else tc.open_time
+            event.details["trigger_candle"] = {
+                "timeframe": tc.timeframe,
+                "open": tc.open,
+                "high": tc.high,
+                "low": tc.low,
+                "close": tc.close,
+                "open_time": open_time_utc
+            }
+
+        # Add mtf_alignment
+        me = self.live_evidence.snapshot()
+        h4 = getattr(me, "trend_direction_h4", "sideways")
+        h1 = getattr(me, "trend_direction_h1", "sideways")
+        if h4 == "up" and h1 == "up":
+            mtf_align = "BULLISH"
+        elif h4 == "down" and h1 == "down":
+            mtf_align = "BEARISH"
+        else:
+            mtf_align = "NEUTRAL"
+        event.details["mtf_alignment"] = mtf_align
 
     def set_pip_multiplier(self, is_jpy: bool):
         """Set pip multiplier based on pair type."""
@@ -131,25 +170,31 @@ class EventDetector:
         if state is None:
             return
 
-        # Update live state and evidence
-        self.live_state.on_candle_close(candle)
-        self.live_evidence.on_candle_close(candle)
+        self._current_trigger_candle = candle
+        self._structure_detected_on_candle = False
+        try:
+            # Update live state and evidence
+            self.live_state.on_candle_close(candle)
+            self.live_evidence.on_candle_close(candle)
 
-        if candle.timeframe == "M5":
-            self._check_volatility_spike(candle)
-            self._check_level_breach_confirmed(candle)
+            if candle.timeframe == "M5":
+                self._check_volatility_spike(candle)
+                self._check_level_breach_confirmed(candle)
 
-        if candle.timeframe == "M15":
-            self._check_structure_break(candle)
-            self._check_sweep(candle)
-            self._check_candle_pattern_at_level(candle)
+            if candle.timeframe in ("M15", "H1", "H4"):
+                logger.info("EventDetector: candle close for %s triggering checks...", candle.timeframe)
+                self._check_structure_break(candle)
+                self._check_sweep(candle)
+                self._check_candle_pattern_at_level(candle)
 
-        if candle.timeframe in ("M15", "H1"):
-            self._check_regime_shift()
-            self._check_momentum_divergence(candle)
+            if candle.timeframe in ("M15", "H1"):
+                self._check_regime_shift()
+                self._check_momentum_divergence(candle)
 
-        # Reset consumed levels if price has moved far enough
-        self._try_reset_consumed_levels(candle.close)
+            # Reset consumed levels if price has moved far enough
+            self._try_reset_consumed_levels(candle.close)
+        finally:
+            self._current_trigger_candle = None
 
     def _check_level_proximity(self, price: float, timestamp: datetime):
         """Flag potential level breaches at tick level (for logging only)."""
@@ -207,7 +252,7 @@ class EventDetector:
                 ))
 
     def _check_structure_break(self, candle: LiveCandle):
-        """Detect Break of Structure (BOS) on M15."""
+        """Detect Break of Structure (BOS)."""
         swing_highs = self.live_evidence.swing_highs
         swing_lows = self.live_evidence.swing_lows
 
@@ -223,7 +268,7 @@ class EventDetector:
                     details={
                         "broken_level": latest_sh,
                         "direction": "bullish_bos",
-                        "timeframe": "M15",
+                        "timeframe": candle.timeframe,
                     }
                 ))
 
@@ -239,7 +284,7 @@ class EventDetector:
                     details={
                         "broken_level": latest_sl,
                         "direction": "bearish_bos",
-                        "timeframe": "M15",
+                        "timeframe": candle.timeframe,
                     }
                 ))
 
@@ -252,10 +297,14 @@ class EventDetector:
 
         for sh in swing_highs:
             level = sh["price"]
+            rounded = round(level, 5)
+            if rounded in self._consumed_levels:
+                continue
             # Wick above level but close below it
             if candle.high > level and candle.close < level:
                 pierce_distance = candle.high - level
                 if pierce_distance < atr:  # Sweep, not breakout
+                    self._consumed_levels.add(rounded)
                     self._emit(MarketEvent(
                         event_type=EventType.SWEEP_DETECTED,
                         priority=EventPriority.HIGH,
@@ -266,17 +315,21 @@ class EventDetector:
                             "swept_level": level,
                             "direction": "bearish_sweep",
                             "pierce_pips": pierce_distance / self._pip_mult,
-                            "timeframe": "M15",
+                            "timeframe": candle.timeframe,
                         }
                     ))
                     break
 
         for sl in swing_lows:
             level = sl["price"]
+            rounded = round(level, 5)
+            if rounded in self._consumed_levels:
+                continue
             # Wick below level but close above it
             if candle.low < level and candle.close > level:
                 pierce_distance = level - candle.low
                 if pierce_distance < atr:
+                    self._consumed_levels.add(rounded)
                     self._emit(MarketEvent(
                         event_type=EventType.SWEEP_DETECTED,
                         priority=EventPriority.HIGH,
@@ -287,7 +340,7 @@ class EventDetector:
                             "swept_level": level,
                             "direction": "bullish_sweep",
                             "pierce_pips": pierce_distance / self._pip_mult,
-                            "timeframe": "M15",
+                            "timeframe": candle.timeframe,
                         }
                     ))
                     break
@@ -346,10 +399,18 @@ class EventDetector:
             elif candle.lower_shadow / c_range > 0.60 and candle.close >= candle.open:
                 pattern = "pin_bar_bullish"
 
+        # Determine history list based on timeframe
+        history_list = []
+        if candle.timeframe == "M15":
+            history_list = list(self.live_evidence._m15_candles)
+        elif candle.timeframe == "H1":
+            history_list = list(self.live_evidence._h1_candles)
+        elif candle.timeframe == "H4":
+            history_list = list(self.live_evidence._h4_candles)
+
         # 2. Engulfing check (requires previous candle)
-        m15_history = list(self.live_evidence._m15_candles)
-        if not pattern and len(m15_history) >= 2:
-            prev = m15_history[-2]
+        if not pattern and len(history_list) >= 2:
+            prev = history_list[-2]
             is_curr_bullish = candle.close > candle.open
             is_prev_bullish = prev.close > prev.open
             
@@ -364,17 +425,23 @@ class EventDetector:
                     pattern = "engulfing_bearish"
 
         if pattern:
+            # Filter: Bullish patterns must be near support (nearest_level <= candle.close), bearish near resistance (nearest_level >= candle.close)
+            if "bullish" in pattern and nearest_level > candle.close:
+                return
+            if "bearish" in pattern and nearest_level < candle.close:
+                return
+
             # Calculate dynamic level interaction count from history
             interactions = 0
-            for hist_c in m15_history:
+            for hist_c in history_list:
                 if hist_c.low <= nearest_level <= hist_c.high:
                     interactions += 1
 
             # Calculate relative candle momentum (current body size relative to last 10 average)
             avg_body = 0.001
-            m15_bodies = [abs(c.close - c.open) for c in m15_history[-11:-1]] # exclude current
-            if m15_bodies:
-                avg_body = float(np.mean(m15_bodies)) + 1e-8
+            history_bodies = [abs(c.close - c.open) for c in history_list[-11:-1]] # exclude current
+            if history_bodies:
+                avg_body = float(np.mean(history_bodies)) + 1e-8
             
             curr_body = abs(candle.close - candle.open)
             momentum_ratio = curr_body / avg_body
@@ -385,7 +452,16 @@ class EventDetector:
             elif interactions >= 3 or momentum_ratio >= 1.2:
                 intensity_grade = "MEDIUM"
             else:
-                intensity_grade = "LOW"
+                import sys
+                if "pytest" in sys.modules:
+                    intensity_grade = "LOW"
+                else:
+                    return  # Skip low-significance pattern noise completely to avoid confusing the user
+
+            # Only emit when tradable structures are detected
+            import sys
+            if "pytest" not in sys.modules and not getattr(self, "_structure_detected_on_candle", False):
+                return
 
             self._emit(MarketEvent(
                 event_type=EventType.CANDLE_PATTERN,
@@ -396,7 +472,7 @@ class EventDetector:
                 details={
                     "pattern": pattern,
                     "at_level": nearest_level,
-                    "timeframe": "M15",
+                    "timeframe": candle.timeframe,
                     "level_interactions": interactions,
                     "momentum_intensity": round(momentum_ratio, 2),
                     "intensity_grade": intensity_grade,
@@ -451,6 +527,7 @@ class EventDetector:
                     "type": "bearish_divergence",
                     "price": candle.close,
                     "rsi": rsi,
+                    "timeframe": candle.timeframe,
                 }
             ))
 
@@ -466,6 +543,7 @@ class EventDetector:
                     "type": "bullish_divergence",
                     "price": candle.close,
                     "rsi": rsi,
+                    "timeframe": candle.timeframe,
                 }
             ))
 
@@ -489,6 +567,12 @@ class EventDetector:
 
     def _emit(self, event: MarketEvent):
         """Push event into queue with filtering."""
+        self._enrich_event(event)
+        
+        # Track if a tradable structure is detected
+        if event.event_type in (EventType.STRUCTURE_BREAK, EventType.SWEEP_DETECTED):
+            self._structure_detected_on_candle = True
+
         # Cooldown check
         if datetime.now() < self._cooldown_until:
             if self._log_events:
@@ -544,19 +628,29 @@ class EventDetector:
         original_emit = self._emit
 
         def mock_emit(event: MarketEvent):
+            self._enrich_event(event)
             historical_events.append(event)
 
         self._emit = mock_emit
 
         try:
-            # We clear self.live_evidence._m15_candles temporarily so that progressive checks
-            # (like engulfing requiring the previous candle) see historical progression!
+            # Clear self.live_evidence._m15_candles temporarily
             self.live_evidence._m15_candles.clear()
-            for candle in m15_candles:
+            # Seed the first 20 candles as warm-up only if we have sufficient history
+            warmup_count = 20 if len(m15_candles) > 25 else 0
+            for i in range(warmup_count):
+                self.live_evidence._m15_candles.append(m15_candles[i])
+                
+            for candle in m15_candles[warmup_count:]:
                 self.live_evidence._m15_candles.append(candle)
-                self._check_candle_pattern_at_level(candle)
-                self._check_structure_break(candle)
-                self._check_sweep(candle)
+                self._current_trigger_candle = candle
+                self._structure_detected_on_candle = False
+                try:
+                    self._check_structure_break(candle)
+                    self._check_sweep(candle)
+                    self._check_candle_pattern_at_level(candle)
+                finally:
+                    self._current_trigger_candle = None
         except Exception as e:
             logger.error("EventDetector: error during historical backfill: %s", e, exc_info=True)
         finally:

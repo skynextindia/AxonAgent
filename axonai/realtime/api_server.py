@@ -48,12 +48,15 @@ class DashboardServer:
         self.active_connections: Set[WebSocket] = set()
         self._lock = threading.Lock()
 
+        self.daemon = None
+
         # In-memory history for hydrating newly connected clients instantly
         self.history: Dict[str, Any] = {
             "tick": None,
             "regime": None,
             "levels": None,
             "account": None,
+            "news_data": None,
             "candles": {},       # Map of timeframe -> latest candle dict
             "events": [],        # List of last 30 detected events
             "agent_trace": [],   # List of last 50 agent steps
@@ -75,6 +78,32 @@ class DashboardServer:
                     "connections": len(self.active_connections),
                     "uptime_seconds": (datetime.now() - self._start_time).total_seconds() if hasattr(self, "_start_time") else 0
                 }
+
+        @self.app.get("/config")
+        def get_config():
+            with self._lock:
+                if self.daemon:
+                    return {"status": "success", "config": self.daemon.config}
+                return {"status": "error", "message": "Daemon not registered"}
+
+        @self.app.post("/config")
+        def update_config(new_config: dict):
+            with self._lock:
+                if self.daemon:
+                    # Update config in daemon and dependent modules!
+                    self.daemon.config.update(new_config)
+                    # Expose configuration update to event_detector, tick_engine, live_state, etc.
+                    if hasattr(self.daemon, "tick_engine") and self.daemon.tick_engine:
+                        self.daemon.tick_engine.poll_interval_ms = int(self.daemon.config.get("tick_poll_interval_ms", 100))
+                    if hasattr(self.daemon, "event_detector") and self.daemon.event_detector:
+                        self.daemon.event_detector._suppress_asian = self.daemon.config.get("realtime_suppress_asian", True)
+                        self.daemon.event_detector._level_reset_atr_mult = float(self.daemon.config.get("realtime_level_reset_atr_multiple", 2.0))
+                    if hasattr(self.daemon, "live_state") and self.daemon.live_state:
+                        self.daemon.live_state.config.update(new_config)
+                    if hasattr(self.daemon, "live_evidence") and self.daemon.live_evidence:
+                        self.daemon.live_evidence.config.update(new_config)
+                    return {"status": "success", "config": self.daemon.config}
+                return {"status": "error", "message": "Daemon not registered"}
 
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
@@ -116,6 +145,14 @@ class DashboardServer:
     async def _hydrate_client(self, websocket: WebSocket):
         """Send all cached state history to a newly connected client."""
         with self._lock:
+            # Update candles dynamically from the active daemon if registered
+            if hasattr(self, "daemon") and self.daemon:
+                for tf in ["M15", "H1", "H4"]:
+                    try:
+                        self.history["candles"][tf] = self.daemon._get_candles_payload(tf)
+                    except Exception as e:
+                        logger.warning("Dashboard WS: failed to update active candle for %s: %s", tf, e)
+
             # 1. Account details
             if self.history["account"]:
                 await websocket.send_json(self.history["account"])
@@ -140,6 +177,9 @@ class DashboardServer:
             # 8. Latest final trade decision
             if self.history["decision"]:
                 await websocket.send_json(self.history["decision"])
+            # 9. Sentiment News Feed
+            if self.history["news_data"]:
+                await websocket.send_json(self.history["news_data"])
 
     def broadcast(self, message: Dict[str, Any]):
         """Thread-safe queueing of message broadcast across all websockets."""
@@ -151,11 +191,11 @@ class DashboardServer:
         with self._lock:
             # Update cache history
             save_needed = False
-            if msg_type in ["tick", "regime", "levels", "account", "decision"]:
+            if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data"]:
                 self.history[msg_type] = message
-                if msg_type == "decision":
+                if msg_type in ["decision", "news_data"]:
                     save_needed = True
-            elif msg_type == "candle":
+            elif msg_type in ["candle", "candles"]:
                 tf = message.get("timeframe")
                 if tf:
                     self.history["candles"][tf] = message
