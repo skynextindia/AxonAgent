@@ -1,26 +1,29 @@
 from axonai.agents.utils.agent_utils import get_language_instruction
 
 
+AGENT_NAME = "BUFFETT"
+AGENT_IDENTITY = "AxonAI bull case researcher. Finds the strongest reasons the proposed trade will succeed. Argues from evidence provided — not from general market knowledge."
+
 def create_bull_researcher(llm):
     def bull_node(state) -> dict:
         trader_hypothesis = state.get("trader_hypothesis", {})
         compressed_evidence = state.get("compressed_evidence", "")
         asset_type = state.get("asset_type", "stock")
 
-        prompt = f"""You are a Bull Analyst. Your task is to build the strongest possible case SUPPORTING the Trader's proposed hypothesis using the compressed market evidence.
+        prompt = """You are BUFFETT — AxonAI bull case researcher. Your job is to find the strongest reasons the proposed trade will succeed.
 
-## Proposed Trader Hypothesis:
-- **Direction**: {trader_hypothesis.get('direction')}
-- **Entry**: {trader_hypothesis.get('entry')}
-- **Stop Loss**: {trader_hypothesis.get('sl')}
-- **Take Profit**: {trader_hypothesis.get('tp')}
-- **Hypothesis**: {trader_hypothesis.get('hypothesis')}
+Critical rules:
+- You must argue FROM the compressed evidence provided — not from general market knowledge
+- Reference specific data points from WYCKOFF, KEYNES, REUTERS, and LIVERMORE reports
+- Find at least 3 distinct reasons supporting the bull case
+- Do not invent data not present in the evidence
+- Be specific — "H4 trend is bullish" is acceptable. "Markets tend to go up" is not.
+- Even if evidence is mixed argue the strongest possible bull case from what exists
 
-## Compressed Analyst Evidence:
-{compressed_evidence}
+Maximum 200 words total.
 
-Provide a robust, data-backed bullish argument advocating for this hypothesis. Focus on growth potential, technical alignment, and macroeconomic support. Counter potential bearish risks explicitly.
-""" + get_language_instruction()
+Respond with this exact JSON at the end of your response:
+{"position": "bull", "confidence": 0-100, "arguments": ["argument1 with evidence reference", "argument2 with evidence reference", "argument3 with evidence reference"], "key_risk": "single biggest risk to this bull case"}""" + get_language_instruction()
 
         response = llm.invoke(prompt)
         argument = f"Bull Analyst: {response.content}"

@@ -600,7 +600,22 @@ class AxonDaemon:
                     dash = get_dashboard()
                     if not dash:
                         return
-                    for node, content in chunk.items():
+                    AGENT_NAME_MAP = {
+                        "Market Analyst": "WYCKOFF",
+                        "Fundamentals Analyst": "KEYNES",
+                        "News Analyst": "REUTERS",
+                        "Sentiment Analyst": "LIVERMORE",
+                        "Bull Researcher": "BUFFETT",
+                        "Bear Researcher": "SOROS",
+                        "Research Manager": "MUNGER",
+                        "Trader": "TUDOR",
+                        "Aggressive Analyst": "SIMONS",
+                        "Conservative Analyst": "DALIO",
+                        "Neutral Analyst": "MARKS",
+                        "Portfolio Manager": "DRUCKENMILLER"
+                    }
+                    
+                    for node, content_val in chunk.items():
                         if node in ["__pregel_loop__", "checkpointer"]:
                             continue
                         
@@ -626,7 +641,7 @@ class AxonDaemon:
                             if (txt_content and txt_content.strip()) or tool_calls_list:
                                 dash.broadcast({
                                     "type": "agent",
-                                    "agent_name": node.replace("_", " ").title(),
+                                    "agent_name": AGENT_NAME_MAP.get(node, node),
                                     "status": "active",
                                     "message": txt_content or "",
                                     "tool_calls": tool_calls_list,

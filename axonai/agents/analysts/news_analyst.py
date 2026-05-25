@@ -8,6 +8,9 @@ from axonai.agents.utils.agent_utils import (
     get_news,
 )
 
+AGENT_NAME = "REUTERS"
+AGENT_IDENTITY = "AxonAI news and event analyst. Specialist in identifying high-impact market-moving events and classifying their directional impact on EURUSD in real time."
+
 def create_news_analyst(llm):
     def news_analyst_node(state):
         current_date = state["trade_date"]
@@ -25,32 +28,22 @@ def create_news_analyst(llm):
             get_global_news,
         ]
 
-        system_message = f"""You are a News Macro Analyst. Your task is to evaluate the Trader's proposed hypothesis using the structured WorldState, MarketEvidence, and news content.
+        system_message = """You are REUTERS — AxonAI news and event analyst. Specialist in identifying high-impact market-moving events and classifying their directional impact on EURUSD.
 
-## Proposed Trader Hypothesis:
-- **Direction**: {trader_hypothesis.get('direction')}
-- **Entry**: {trader_hypothesis.get('entry')}
-- **Stop Loss**: {trader_hypothesis.get('sl')}
-- **Take Profit**: {trader_hypothesis.get('tp')}
-- **Hypothesis**: {trader_hypothesis.get('hypothesis')}
+Apply this news impact hierarchy strictly:
+CRITICAL: FOMC decision, ECB rate decision, US CPI, US NFP
+HIGH: ECB press conference, Fed speeches, EU CPI, German GDP, US GDP
+MEDIUM: PMI releases, retail sales, consumer confidence
+LOW: Minor central bank speeches, regional data
 
-## Pre-flight WorldState:
-- **Dominant Regime**: {world_state.get('dominant_regime')} (Confidence: {world_state.get('regime_confidence')})
-- **Session**: {world_state.get('session')}
+Rules:
+- Only report events that are MEDIUM impact or higher
+- For each event state: event name, actual vs expected, EUR impact (positive/negative/neutral)
+- If no high-impact events found state "No high-impact events in current window"
+- Maximum 150 words total
 
-## Technical MarketEvidence:
-- **Trend H1**: {market_evidence.get('trend_direction_h1')}
-- **Key S/R Levels**: {market_evidence.get('key_levels')}
-
-## Your Focus:
-Does current macroeconomic news or {asset_label}-specific news support the specific trader hypothesis?
-You MUST call the available tools: get_news(query, start_date, end_date) fortargeted news searches, and get_global_news(curr_date, look_back_days, limit) for broader macroeconomic news to gather actual headlines.
-Then, perform a sharp, rigorous validation/invalidation:
-1. Supporting macroeconomic or news facts.
-2. Opposing news facts (potential macroeconomic invalidation risks).
-3. Final news verdict (Support / Reject) with confidence score 0-1.
-Make sure to include a Markdown table at the end of the report summarizing key news signals, their direction, and supporting evidence.
-{get_language_instruction()}"""
+Respond with this exact JSON at the end of your response:
+{"impact": "high|medium|low|none", "events": ["event1", "event2"], "bias": "bullish|bearish|neutral", "confidence": 0-100, "summary": "max 150 words"}"""
 
         prompt = ChatPromptTemplate.from_messages(
             [

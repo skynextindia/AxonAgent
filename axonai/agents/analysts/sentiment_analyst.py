@@ -13,6 +13,9 @@ from axonai.dataflows.forex_social import fetch_forex_social_feed
 def _seven_days_back(trade_date: str) -> str:
     return (datetime.strptime(trade_date, "%Y-%m-%d") - timedelta(days=7)).strftime("%Y-%m-%d")
 
+AGENT_NAME = "LIVERMORE"
+AGENT_IDENTITY = "AxonAI market sentiment analyst. Specialist in reading institutional positioning, COT data, DXY correlation, and crowd psychology to identify smart money direction."
+
 def create_sentiment_analyst(llm):
     def sentiment_analyst_node(state):
         ticker = state["company_of_interest"]
@@ -44,45 +47,20 @@ def create_sentiment_analyst(llm):
         except Exception:
             pass
 
-        system_message = f"""You are a Sentiment Analyst. Your task is to evaluate the Trader's proposed hypothesis using the pre-fetched news headlines, ForexLive sentiment/discussions, and Reddit posts.
+        system_message = """You are LIVERMORE — AxonAI market sentiment analyst. Specialist in reading institutional positioning, COT data, DXY correlation, and crowd psychology.
 
-## Proposed Trader Hypothesis:
-- **Direction**: {trader_hypothesis.get('direction')}
-- **Entry**: {trader_hypothesis.get('entry')}
-- **Stop Loss**: {trader_hypothesis.get('sl')}
-- **Take Profit**: {trader_hypothesis.get('tp')}
-- **Hypothesis**: {trader_hypothesis.get('hypothesis')}
+Your analysis must focus on:
+- COT positioning: are large speculators net long or short EUR? Is positioning extreme?
+- DXY correlation: is USD strengthening or weakening independently of EUR?
+- Risk sentiment: is the market risk-on (EUR positive) or risk-off (EUR negative)?
+- Retail vs institutional divergence: are retail traders positioned against smart money?
+- Positioning extremes: is the market too long or too short creating reversal risk?
 
-## Pre-flight WorldState:
-- **Dominant Regime**: {world_state.get('dominant_regime')} (Confidence: {world_state.get('regime_confidence')})
-- **Session**: {world_state.get('session')}
+Only analyze data you receive. Do not invent positioning data.
+Maximum 150 words in your summary.
 
-## Technical MarketEvidence:
-- **Trend H1**: {market_evidence.get('trend_direction_h1')}
-
-## Data sources (pre-fetched):
-### News headlines — Yahoo Finance, past 7 days
-<start_of_news>
-{news_block}
-<end_of_news>
-
-### ForexLive Sentiment & Social Feed
-<start_of_forex_social>
-{forex_social_block}
-<end_of_forex_social>
-
-### Reddit posts — past 7 days
-<start_of_reddit>
-{reddit_block}
-<end_of_reddit>
-
-## Your Focus:
-Does the crowd and news sentiment support the specific trader hypothesis? Perform a sharp, rigorous validation/invalidation:
-1. Supporting sentiment facts (cite message ratios or notable comments).
-2. Opposing sentiment facts (potential crowd invalidation risks).
-3. Final sentiment verdict (Support / Reject) with confidence score 0-1.
-Make sure to include a Markdown table at the end of the report summarizing key sentiment signals, their direction, and supporting evidence.
-{get_language_instruction()}"""
+Respond with this exact JSON at the end of your response:
+{"bias": "bullish|bearish|neutral", "confidence": 0-100, "summary": "max 150 words", "positioning": "crowded_long|crowded_short|balanced|unknown"}"""
 
         prompt = ChatPromptTemplate.from_messages(
             [

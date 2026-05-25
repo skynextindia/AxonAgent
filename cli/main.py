@@ -1003,7 +1003,8 @@ def extract_content_string(content):
     """Extract string content from various message formats.
     Returns None if no meaningful text content is found.
     """
-    import ast
+    # Known string representations of falsy values that LLM messages may contain
+    _FALSY_LITERALS = frozenset({"[]", "{}", "()", "0", "false", "none", "null", "''", '""'})
 
     def is_empty(val):
         """Check if value is empty using Python's truthiness."""
@@ -1013,10 +1014,7 @@ def extract_content_string(content):
             s = val.strip()
             if not s:
                 return True
-            try:
-                return not bool(ast.literal_eval(s))
-            except (ValueError, SyntaxError):
-                return False  # Can't parse = real text
+            return s.lower() in _FALSY_LITERALS
         return not bool(val)
 
     if is_empty(content):

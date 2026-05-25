@@ -12,12 +12,29 @@ from .conditional_logic import ConditionalLogic
 
 
 def evidence_compressor_node(state: AgentState) -> dict:
+    """Compress analyst reports before passing to researchers."""
+    from axonai.graph.evidence_compressor import compress_evidence
+
+    compressed = compress_evidence(dict(state))
+
+    # Format as a readable text block for downstream agents
     parts = []
-    report_keys = ["market_report", "sentiment_report", "news_report", "fundamentals_report"]
-    for k in report_keys:
-        val = state.get(k) or ""
-        label = k.replace("_", " ").title()
-        parts.append(f"### {label} (Truncated):\n{val[:4000]}")
+    for key in ("market_summary", "fundamental_summary", "news_summary", "sentiment_summary"):
+        label = key.replace("_", " ").title()
+        val = compressed.get(key, "")
+        if val:
+            parts.append(f"### {label}:\n{val}")
+
+    if compressed.get("critical_events"):
+        parts.append("### Critical Events:\n" + "\n".join(
+            f"- {ev}" for ev in compressed["critical_events"]
+        ))
+
+    parts.append(
+        f"\n[Compression: {compressed['total_input_tokens_approx']} → "
+        f"{compressed['total_output_tokens_approx']} tokens, "
+        f"{compressed['compression_ratio']:.0%} reduction]"
+    )
 
     from langchain_core.messages import RemoveMessage, HumanMessage
     removal_ops = [RemoveMessage(id=m.id) for m in state.get("messages", [])]
@@ -26,6 +43,7 @@ def evidence_compressor_node(state: AgentState) -> dict:
         "compressed_evidence": "\n\n".join(parts),
         "messages": removal_ops + [HumanMessage(content="Continue")]
     }
+
 
 
 class GraphSetup:
@@ -102,13 +120,10 @@ class GraphSetup:
         workflow.add_node("Portfolio Manager", portfolio_manager_node)
         workflow.add_node("Evidence Compressor", evidence_compressor_node)
 
-        # Define edges (Directed Acyclic Graph topology with parallel paths)
-        # Start with the Trader first to create a hypothesis
-        workflow.add_edge(START, "Trader")
-
-        # Connect Trader to each Analyst node in parallel
+        # Define edges (Directed Acyclic Graph topology)
+        # Start with the Analysts in parallel
         for spec in plan.specs:
-            workflow.add_edge("Trader", spec.agent_node)
+            workflow.add_edge(START, spec.agent_node)
 
         # Analyst loops: Analyst -> tool or clear
         for spec in plan.specs:
@@ -127,25 +142,30 @@ class GraphSetup:
             # Connect each analyst's clear node to the Evidence Compressor
             workflow.add_edge(current_clear, "Evidence Compressor")
 
-        # Evidence Compressor to Bull & Bear Researchers in parallel
+        # Evidence Compressor -> BUFFETT
         workflow.add_edge("Evidence Compressor", "Bull Researcher")
-        workflow.add_edge("Evidence Compressor", "Bear Researcher")
-
-        # Bull & Bear Researchers to Research Manager (fan-in)
-        workflow.add_edge("Bull Researcher", "Research Manager")
+        
+        # BUFFETT -> SOROS
+        workflow.add_edge("Bull Researcher", "Bear Researcher")
+        
+        # SOROS -> MUNGER
         workflow.add_edge("Bear Researcher", "Research Manager")
-
-        # Research Manager to the three risk analysts in parallel
-        workflow.add_edge("Research Manager", "Aggressive Analyst")
-        workflow.add_edge("Research Manager", "Conservative Analyst")
-        workflow.add_edge("Research Manager", "Neutral Analyst")
-
-        # Risk analysts to Portfolio Manager (fan-in)
-        workflow.add_edge("Aggressive Analyst", "Portfolio Manager")
-        workflow.add_edge("Conservative Analyst", "Portfolio Manager")
+        
+        # MUNGER -> TUDOR
+        workflow.add_edge("Research Manager", "Trader")
+        
+        # TUDOR -> SIMONS + DALIO in parallel
+        workflow.add_edge("Trader", "Aggressive Analyst")
+        workflow.add_edge("Trader", "Conservative Analyst")
+        
+        # SIMONS + DALIO -> MARKS
+        workflow.add_edge("Aggressive Analyst", "Neutral Analyst")
+        workflow.add_edge("Conservative Analyst", "Neutral Analyst")
+        
+        # MARKS -> DRUCKENMILLER
         workflow.add_edge("Neutral Analyst", "Portfolio Manager")
-
-        # PM to end
+        
+        # DRUCKENMILLER -> END
         workflow.add_edge("Portfolio Manager", END)
 
         return workflow

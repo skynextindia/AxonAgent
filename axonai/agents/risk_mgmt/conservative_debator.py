@@ -1,6 +1,9 @@
 from axonai.agents.utils.agent_utils import get_language_instruction
 
 
+AGENT_NAME = "DALIO"
+AGENT_IDENTITY = "AxonAI conservative risk analyst. Prioritizes capital preservation above all else. Argues for position size reduction or rejection when any significant risk factor is present."
+
 def create_conservative_debator(llm):
     def conservative_node(state) -> dict:
         risk_debate_state = state["risk_debate_state"]
@@ -19,19 +22,26 @@ def create_conservative_debator(llm):
         fundamentals_label = "Macroeconomic Fundamentals Report" if asset_type == "forex" else "Company Fundamentals Report"
         trader_decision = state["trader_investment_plan"]
 
-        prompt = f"""As the Conservative Risk Analyst, your primary objective is to protect assets, minimize volatility, and ensure steady, reliable growth. You prioritize stability, security, and risk mitigation, carefully assessing potential losses, economic downturns, and market volatility. When evaluating the trader's decision or plan, critically examine high-risk elements, pointing out where the decision may expose the firm to undue risk and where more cautious alternatives could secure long-term gains. Here is the trader's decision:
+        prompt = """You are DALIO — AxonAI conservative risk analyst. Capital preservation is your primary mandate.
 
-{trader_decision}
+You receive TUDOR's execution parameters, MUNGER's verdict, and SIMONS's recommendation.
+Your job: identify every risk factor and argue for the most conservative viable position.
 
-Your task is to actively counter the arguments of the Aggressive and Neutral Analysts, highlighting where their views may overlook potential threats or fail to prioritize sustainability. Respond directly to their points, drawing from the following data sources to build a convincing case for a low-risk approach adjustment to the trader's decision:
+Always reduce size when any of these are present:
+- Upcoming high-impact news within 60 minutes
+- Spread above 1.5 pips
+- Confidence below 70
+- H4 trend conflicts with trade direction
+- Three or more consecutive losses in memory log
 
-Market Research Report: {market_research_report}
-Social Media Sentiment Report: {sentiment_report}
-Latest World Affairs Report: {news_report}
-{fundamentals_label}: {fundamentals_report}
-Here is the current conversation history: {history} Here is the last response from the aggressive analyst: {current_aggressive_response} Here is the last response from the neutral analyst: {current_neutral_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
+Always reject when:
+- Asian session active
+- Spread above 2.5 pips
+- CRITICAL news event within 30 minutes
+- Account drawdown exceeds 3% this session
 
-Engage by questioning their optimism and emphasizing the potential downsides they may have overlooked. Address each of their counterpoints to showcase why a conservative stance is ultimately the safest path for the firm's assets. Focus on debating and critiquing their arguments to demonstrate the strength of a low-risk strategy over their approaches. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()
+Respond with this exact JSON:
+{"recommendation": "approve|reduce|reject", "suggested_lot_multiplier": 0.25-1.0, "risk_score": 0-100, "reason": "one sentence", "primary_concern": "single biggest risk identified"}""" + get_language_instruction()
 
         response = llm.invoke(prompt)
 

@@ -19,9 +19,64 @@ so that:
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
+
+
+# ---------------------------------------------------------------------------
+# Validation schemas for analyst, researcher, and risk agents
+# ---------------------------------------------------------------------------
+
+
+class AnalystOutput(BaseModel):
+    """Post-hoc validation schema for all 4 analyst agents."""
+    bias: Literal["bullish", "bearish", "neutral"] = Field(
+        description="Directional bias of the analysis.",
+    )
+    confidence: int = Field(
+        ge=0, le=100,
+        description="Confidence in the bias, 0-100.",
+    )
+    summary: str = Field(
+        description="Summary of the analyst's findings, max 150 words.",
+    )
+    key_factors: List[str] = Field(
+        max_length=3,
+        description="Top 3 key factors driving the bias.",
+    )
+
+
+class ResearchOutput(BaseModel):
+    """Post-hoc validation schema for bull/bear researchers."""
+    position: Literal["bull", "bear"] = Field(
+        description="Whether this is a bull or bear argument.",
+    )
+    arguments: List[str] = Field(
+        max_length=3,
+        description="Top 3 arguments, each max 50 words.",
+    )
+    confidence: int = Field(
+        ge=0, le=100,
+        description="Confidence in the position, 0-100.",
+    )
+    key_risk: str = Field(
+        description="Single most important risk to the position.",
+    )
+
+
+class RiskOutput(BaseModel):
+    """Post-hoc validation schema for risk debator agents."""
+    recommendation: Literal["approve", "reduce", "reject"] = Field(
+        description="Risk recommendation for the trade.",
+    )
+    risk_score: int = Field(
+        ge=0, le=100,
+        description="Aggregate risk score, 0-100.",
+    )
+    reason: str = Field(
+        description="Primary reason for the recommendation.",
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -253,3 +308,35 @@ def render_pm_decision(decision: PortfolioDecision) -> str:
     if decision.time_horizon:
         parts.extend(["", f"**Time Horizon**: {decision.time_horizon}"])
     return "\n".join(parts)
+from pydantic import BaseModel, Field
+from typing import List, Optional
+
+class MungerVerdict(BaseModel):
+    direction: str = Field(description="BUY, SELL, or HOLD")
+    confidence: int = Field(description="0-100")
+    bull_score: int = Field(description="0-100")
+    bear_score: int = Field(description="0-100")
+    key_conflict: str = Field(description="single sentence describing main unresolved conflict")
+    missing_assumption: str = Field(description="single sentence describing critical unresolved assumption")
+    supporting_arguments: List[str] = Field(description="top bull args")
+    opposing_arguments: List[str] = Field(description="top bear args")
+    overall_confidence: int = Field(description="0-100")
+
+class TudorExecution(BaseModel):
+    direction: str = Field(description="BUY, SELL, or HOLD")
+    entry: float = Field(description="Entry price")
+    sl: float = Field(description="Stop loss price")
+    tp: float = Field(description="Take profit price")
+    lot_size: float = Field(description="Lot size")
+    sl_pips: float = Field(description="SL pips")
+    tp_pips: float = Field(description="TP pips")
+    rr_ratio: float = Field(description="Risk/Reward ratio")
+    hypothesis: str = Field(description="one sentence explaining the trade")
+
+class DruckenmillerDecision(BaseModel):
+    execute: bool = Field(description="True to execute, False to reject")
+    direction: str = Field(description="BUY, SELL, or HOLD")
+    final_lot_size: float = Field(description="Final approved lot size")
+    confidence: int = Field(description="0-100")
+    reason: str = Field(description="one sentence explaining the decision")
+    abort_reason: Optional[str] = Field(description="null if executing, exact rejection rule if rejecting")

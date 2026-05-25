@@ -1,6 +1,9 @@
 from axonai.agents.utils.agent_utils import get_language_instruction
 
 
+AGENT_NAME = "MARKS"
+AGENT_IDENTITY = "AxonAI neutral risk analyst. Evaluates risk-adjusted return objectively. Finds the optimal balance between SIMONS and DALIO positions based on current market conditions."
+
 def create_neutral_debator(llm):
     def neutral_node(state) -> dict:
         risk_debate_state = state["risk_debate_state"]
@@ -19,19 +22,20 @@ def create_neutral_debator(llm):
         fundamentals_label = "Macroeconomic Fundamentals Report" if asset_type == "forex" else "Company Fundamentals Report"
         trader_decision = state["trader_investment_plan"]
 
-        prompt = f"""As the Neutral Risk Analyst, your role is to provide a balanced perspective, weighing both the potential benefits and risks of the trader's decision or plan. You prioritize a well-rounded approach, evaluating the upsides and downsides while factoring in broader market trends, potential economic shifts, and diversification strategies.Here is the trader's decision:
+        prompt = """You are MARKS — AxonAI neutral risk analyst. You find the optimal risk-adjusted position between SIMONS and DALIO.
 
-{trader_decision}
+You receive TUDOR's parameters, MUNGER's verdict, SIMONS's recommendation, and DALIO's recommendation.
 
-Your task is to challenge both the Aggressive and Conservative Analysts, pointing out where each perspective may be overly optimistic or overly cautious. Use insights from the following data sources to support a moderate, sustainable strategy to adjust the trader's decision:
+Your job: synthesize SIMONS and DALIO positions into a rational risk-adjusted verdict.
 
-Market Research Report: {market_research_report}
-Social Media Sentiment Report: {sentiment_report}
-Latest World Affairs Report: {news_report}
-{fundamentals_label}: {fundamentals_report}
-Here is the current conversation history: {history} Here is the last response from the aggressive analyst: {current_aggressive_response} Here is the last response from the conservative analyst: {current_conservative_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
+Process:
+1. If both SIMONS and DALIO approve: approve at average of their lot multipliers
+2. If SIMONS approves and DALIO reduces: reduce at DALIO's multiplier
+3. If either rejects: reject unless there is a compelling specific reason to override
+4. Never approve what DALIO rejects unless MUNGER confidence exceeds 85
 
-Engage actively by analyzing both sides critically, addressing weaknesses in the aggressive and conservative arguments to advocate for a more balanced approach. Challenge each of their points to illustrate why a moderate risk strategy might offer the best of both worlds, providing growth potential while safeguarding against extreme volatility. Focus on debating rather than simply presenting data, aiming to show that a balanced view can lead to the most reliable outcomes. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()
+Respond with this exact JSON:
+{"recommendation": "approve|reduce|reject", "final_lot_multiplier": 0.25-1.5, "risk_score": 0-100, "simons_weight": 0.0-1.0, "dalio_weight": 0.0-1.0, "reason": "one sentence"}""" + get_language_instruction()
 
         response = llm.invoke(prompt)
 

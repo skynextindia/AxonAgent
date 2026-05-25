@@ -107,6 +107,15 @@ class DashboardServer:
 
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
+            # Security: only accept WebSocket connections from localhost origins
+            origin = websocket.headers.get("origin", "")
+            allowed_origins = {"http://127.0.0.1:8000", "http://localhost:8000",
+                               "http://127.0.0.1", "http://localhost"}
+            if origin and origin not in allowed_origins:
+                await websocket.close(code=1008, reason="Origin not allowed")
+                logger.warning("Dashboard WS: rejected connection from origin: %s", origin)
+                return
+
             await websocket.accept()
             with self._lock:
                 self.active_connections.add(websocket)

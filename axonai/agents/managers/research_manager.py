@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from axonai.agents.schemas import ResearchPlan, render_research_plan
+from axonai.agents.schemas import MungerVerdict
 from axonai.agents.utils.agent_utils import (
     build_instrument_context,
     get_language_instruction,
@@ -13,8 +13,11 @@ from axonai.agents.utils.structured import (
 )
 
 
+AGENT_NAME = "MUNGER"
+AGENT_IDENTITY = "AxonAI research synthesis manager. Weighs bull and bear arguments, scores conviction on both sides, identifies unresolved conflicts, and produces the final directional verdict."
+
 def create_research_manager(llm):
-    structured_llm = bind_structured(llm, ResearchPlan, "Research Manager")
+    structured_llm = llm.with_structured_output(MungerVerdict)
 
     def research_manager_node(state) -> dict:
         instrument_context = build_instrument_context(state["company_of_interest"])
@@ -24,42 +27,49 @@ def create_research_manager(llm):
 
         history = f"### Bull Analyst Case:\n{bull_history}\n\n### Bear Analyst Case:\n{bear_history}"
 
-        prompt = f"""As the Research Manager and debate facilitator, your role is to critically evaluate the arguments made by the Bull and Bear analysts, score their arguments, and deliver a clear, structured investment plan.
+        prompt = """You are MUNGER — AxonAI research synthesis manager. You receive BUFFETT's bull case and SOROS's bear case and produce the definitive directional verdict.
 
-{instrument_context}
+Your process must be explicit:
+1. Score BUFFETT's arguments: evaluate each argument 0-100 for strength and evidence quality
+2. Score SOROS's arguments: evaluate each counter-argument 0-100 for strength
+3. Identify the single most important unresolved conflict between them
+4. Identify the single most important assumption that if wrong invalidates the trade
+5. Produce a final verdict with overall confidence
 
----
+Scoring rules:
+- Arguments backed by specific data score higher than general claims
+- Arguments that reference provided evidence score higher than general knowledge
+- If confidence is below 55 the verdict must be HOLD regardless of direction
 
-**Rating Scale** (use exactly one):
-- **Buy**: Strong conviction in the bull thesis; recommend taking or growing the position
-- **Overweight**: Constructive view; recommend gradually increasing exposure
-- **Hold**: Balanced view; recommend maintaining the current position
-- **Underweight**: Cautious view; recommend trimming exposure
-- **Sell**: Strong conviction in the bear thesis; recommend exiting or avoiding the position
+Respond with this exact JSON structure — no other text:
+{
+  "direction": "BUY|SELL|HOLD",
+  "confidence": 0-100,
+  "bull_score": 0-100,
+  "bear_score": 0-100,
+  "key_conflict": "single sentence describing main unresolved conflict",
+  "missing_assumption": "single sentence describing critical unresolved assumption",
+  "supporting_arguments": ["top bull arg", "second bull arg", "third bull arg"],
+  "opposing_arguments": ["top bear arg", "second bear arg", "third bear arg"],
+  "overall_confidence": 0-100
+}""" + get_language_instruction()
 
-Commit to a clear stance whenever the debate's strongest arguments warrant one; reserve Hold for situations where the evidence on both sides is genuinely balanced.
-
----
-
-**Bull and Bear Case Content:**
-{history}
-
-You MUST explicitly evaluate, score, and populate the following in your structured response:
-1. **supporting_arguments**: Identify the 3 strongest supporting arguments for the trader's hypothesis, each scored with a confidence between 0-1 (e.g. '- H1 EMA alignment indicates strong momentum (Confidence: 0.85)').
-2. **opposing_arguments**: Identify the 3 strongest opposing arguments against the trader's hypothesis, each scored with a confidence between 0-1.
-3. **missing_assumptions**: List key missing assumptions or market blind spots.
-4. **overall_confidence**: Set a final overall confidence score (0-1) reflecting your overall conviction in the final recommendation.
-5. **recommendation**, **rationale**, and **strategic_actions**: Set your rating recommendation, natural rationale, and tactical sizing/position guidance for the trader.
-""" + get_language_instruction()
-
-        investment_plan = invoke_structured_or_freetext(
-            structured_llm,
-            llm,
-            prompt,
-            render_research_plan,
-            "Research Manager",
-            schema=ResearchPlan,
-        )
+        try:
+            investment_plan = structured_llm.invoke(prompt)
+            investment_plan_dict = investment_plan.dict() if hasattr(investment_plan, "dict") else investment_plan
+        except Exception as e:
+            investment_plan_dict = {
+                "direction": "HOLD",
+                "confidence": 0,
+                "bull_score": 0,
+                "bear_score": 0,
+                "key_conflict": "Error: structured output failed",
+                "missing_assumption": str(e),
+                "supporting_arguments": [],
+                "opposing_arguments": [],
+                "overall_confidence": 0
+            }
+        investment_plan = investment_plan_dict
 
         new_investment_debate_state = {
             "judge_decision": investment_plan,

@@ -1,26 +1,29 @@
 from axonai.agents.utils.agent_utils import get_language_instruction
 
 
+AGENT_NAME = "SOROS"
+AGENT_IDENTITY = "AxonAI bear case researcher. Finds the strongest structural weaknesses and failure modes in the proposed trade. Argues specifically against the bull case."
+
 def create_bear_researcher(llm):
     def bear_node(state) -> dict:
         trader_hypothesis = state.get("trader_hypothesis", {})
         compressed_evidence = state.get("compressed_evidence", "")
         asset_type = state.get("asset_type", "stock")
 
-        prompt = f"""You are a Bear Analyst. Your task is to build the strongest possible case OPPOSING the Trader's proposed hypothesis using the compressed market evidence.
+        prompt = """You are SOROS — AxonAI bear case researcher. Your job is to find the strongest structural weaknesses and failure modes in the proposed trade.
 
-## Proposed Trader Hypothesis:
-- **Direction**: {trader_hypothesis.get('direction')}
-- **Entry**: {trader_hypothesis.get('entry')}
-- **Stop Loss**: {trader_hypothesis.get('sl')}
-- **Take Profit**: {trader_hypothesis.get('tp')}
-- **Hypothesis**: {trader_hypothesis.get('hypothesis')}
+Critical rules:
+- You must argue specifically AGAINST the bull case BUFFETT presented
+- Do not argue against trading in general — argue against THIS specific trade
+- Reference specific weaknesses in BUFFETT's arguments
+- Find hidden risks, conflicting signals, and structural vulnerabilities
+- Even if evidence leans bullish find the strongest possible bear case
+- Be specific — attack BUFFETT's specific claims with counter-evidence
 
-## Compressed Analyst Evidence:
-{compressed_evidence}
+Maximum 200 words total.
 
-Provide a robust, data-backed bearish argument challenging this hypothesis. Focus on downside risks, technical invalidation levels, macro headwinds, and potential pitfalls. Counter potential bullish points explicitly.
-""" + get_language_instruction()
+Respond with this exact JSON at the end of your response:
+{"position": "bear", "confidence": 0-100, "arguments": ["counter to buffett arg1", "counter to buffett arg2", "counter to buffett arg3"], "fatal_flaw": "single most likely reason this trade fails"}""" + get_language_instruction()
 
         response = llm.invoke(prompt)
         argument = f"Bear Analyst: {response.content}"

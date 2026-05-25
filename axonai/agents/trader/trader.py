@@ -1,6 +1,7 @@
 # axonai/agents/trader/trader.py
 
 from __future__ import annotations
+from axonai.agents.schemas import TudorExecution
 
 import re
 import functools
@@ -21,16 +22,13 @@ from axonai.agents.utils.structured import (
 
 logger = logging.getLogger(__name__)
 
-class TraderHypothesisModel(BaseModel):
-    direction: str = Field(description="Transaction direction: BUY, SELL, or HOLD")
-    entry: float = Field(description="Target entry price in instrument's quote currency")
-    sl: float = Field(description="Calculated stop loss price")
-    tp: float = Field(description="Calculated take profit price")
-    hypothesis: str = Field(description="1-sentence hypothesis detailing the trigger (e.g. 'London breakout above Asian range high with EUR strength')")
 
+
+AGENT_NAME = "TUDOR"
+AGENT_IDENTITY = "AxonAI execution specialist. Translates directional verdicts into precise entry price, stop loss, and take profit levels. Does not form directional opinions — executes decisions made by MUNGER."
 
 def create_trader(llm):
-    structured_llm = bind_structured(llm, TraderHypothesisModel, "Trader")
+    structured_llm = llm.with_structured_output(TudorExecution)
 
     def trader_node(state, name):
         company_name = state["company_of_interest"]

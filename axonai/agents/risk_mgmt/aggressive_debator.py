@@ -1,6 +1,9 @@
 from axonai.agents.utils.agent_utils import get_language_instruction
 
 
+AGENT_NAME = "SIMONS"
+AGENT_IDENTITY = "AxonAI aggressive risk analyst. Advocates for maximum position sizing when mathematical edge is confirmed. Argues for full execution when signal quality is high."
+
 def create_aggressive_debator(llm):
     def aggressive_node(state) -> dict:
         risk_debate_state = state["risk_debate_state"]
@@ -19,19 +22,30 @@ def create_aggressive_debator(llm):
         fundamentals_label = "Macroeconomic Fundamentals Report" if asset_type == "forex" else "Company Fundamentals Report"
         trader_decision = state["trader_investment_plan"]
 
-        prompt = f"""As the Aggressive Risk Analyst, your role is to actively champion high-reward, high-risk opportunities, emphasizing bold strategies and competitive advantages. When evaluating the trader's decision or plan, focus intently on the potential upside, growth potential, and innovative benefits—even when these come with elevated risk. Use the provided market data and sentiment analysis to strengthen your arguments and challenge the opposing views. Specifically, respond directly to each point made by the conservative and neutral analysts, countering with data-driven rebuttals and persuasive reasoning. Highlight where their caution might miss critical opportunities or where their assumptions may be overly conservative. Here is the trader's decision:
+        prompt = """You are SIMONS — AxonAI aggressive risk analyst. You advocate for maximum position sizing when mathematical edge is confirmed.
 
-{trader_decision}
+You receive TUDOR's execution parameters and MUNGER's verdict.
+Your job: argue for full execution at the proposed lot size when signal quality justifies it.
 
-Your task is to create a compelling case for the trader's decision by questioning and critiquing the conservative and neutral stances to demonstrate why your high-reward perspective offers the best path forward. Incorporate insights from the following sources into your arguments:
+Approve full execution when:
+- MUNGER confidence is above 70
+- RR ratio is above 1.5
+- Session is London or New York or Overlap
+- Spread is below 1.5 pips
+- No CRITICAL news events in the next 30 minutes
 
-Market Research Report: {market_research_report}
-Social Media Sentiment Report: {sentiment_report}
-Latest World Affairs Report: {news_report}
-{fundamentals_label}: {fundamentals_report}
-Here is the current conversation history: {history} Here are the last arguments from the conservative analyst: {current_conservative_response} Here are the last arguments from the neutral analyst: {current_neutral_response}. If there are no responses from the other viewpoints yet, present your own argument based on the available data.
+Argue for size reduction (not rejection) when:
+- Confidence is 60-70
+- RR ratio is 1.3-1.5
+- Session is approaching rollover
 
-Engage actively by addressing any specific concerns raised, refuting the weaknesses in their logic, and asserting the benefits of risk-taking to outpace market norms. Maintain a focus on debating and persuading, not just presenting data. Challenge each counterpoint to underscore why a high-risk approach is optimal. Output conversationally as if you are speaking without any special formatting.""" + get_language_instruction()
+Always reject when:
+- MUNGER confidence below 60
+- Spread above 2.5 pips
+- Asian session
+
+Respond with this exact JSON:
+{"recommendation": "approve|reduce|reject", "suggested_lot_multiplier": 0.5-1.5, "risk_score": 0-100, "reason": "one sentence"}""" + get_language_instruction()
 
         response = llm.invoke(prompt)
 

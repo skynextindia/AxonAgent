@@ -10,6 +10,9 @@ from axonai.agents.utils.agent_utils import (
     get_language_instruction,
 )
 
+AGENT_NAME = "KEYNES"
+AGENT_IDENTITY = "AxonAI macro fundamental analyst. Specialist in central bank policy, interest rate differentials, inflation dynamics, and economic cycle positioning for EURUSD."
+
 def create_fundamentals_analyst(llm):
     def fundamentals_analyst_node(state):
         current_date = state["trade_date"]
@@ -39,29 +42,21 @@ def create_fundamentals_analyst(llm):
                 "Highlight key corporate financial metrics, balance sheet strengths, income statements, and cashflows."
             )
 
-        system_message = f"""{role_description}
+        system_message = """You are KEYNES — AxonAI macro fundamental analyst. Specialist in central bank policy, interest rate differentials, inflation dynamics, and economic cycle positioning for EURUSD.
 
-## Proposed Trader Hypothesis:
-- **Direction**: {trader_hypothesis.get('direction')}
-- **Entry**: {trader_hypothesis.get('entry')}
-- **Stop Loss**: {trader_hypothesis.get('sl')}
-- **Take Profit**: {trader_hypothesis.get('tp')}
-- **Hypothesis**: {trader_hypothesis.get('hypothesis')}
+Your analysis must focus on these EURUSD-specific drivers in priority order:
+1. ECB vs Fed rate differential — is the gap widening or narrowing?
+2. EUR CPI vs USD CPI — which currency has higher real rates?
+3. German PMI — leading indicator for EUR economic health
+4. EUR GDP growth vs US GDP growth — relative economic momentum
+5. ECB forward guidance vs Fed forward guidance — policy divergence signals
 
-## Pre-flight WorldState:
-- **Dominant Regime**: {world_state.get('dominant_regime')} (Confidence: {world_state.get('regime_confidence')})
-- **EUR strength**: {world_state.get('eur_strength')}
-- **USD strength**: {world_state.get('usd_strength')}
+Only analyze factors present in the data you receive.
+Do not invent data points not provided.
+Maximum 150 words in your summary.
 
-## Your Focus:
-Does the fundamental macroeconomic or corporate profile support the specific trader hypothesis?
-You MUST call the available tools: `get_fundamentals` to retrieve fundamental data, and other financial statement tools as needed to justify your evaluation.
-Then, perform a sharp, rigorous validation/invalidation:
-1. Supporting fundamental facts.
-2. Opposing fundamental facts (potential monetary or financial invalidation risks).
-3. Final fundamental verdict (Support / Reject) with confidence score 0-1.
-Make sure to include a Markdown table at the end of the report summarizing key fundamental signals, their direction, and supporting evidence.
-{get_language_instruction()}"""
+Respond with this exact JSON at the end of your response:
+{"bias": "bullish|bearish|neutral", "confidence": 0-100, "summary": "max 150 words", "key_factors": ["factor1", "factor2", "factor3"]}"""
 
         prompt = ChatPromptTemplate.from_messages(
             [
