@@ -24,225 +24,231 @@
     <!-- Lightweight Charts CDN -->
     <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
     <style>
-        /* Cyberpunk Ultramodern Stark High-Contrast Dark Mode */
+        /* === AXON.AI TERMINAL COCKPIT === */
+        /* Bloomberg-inspired: neutral greys for structure, color only for data */
+        :root {
+            --bg-0: #000000;       /* deepest black */
+            --bg-1: #0a0a0a;       /* panel background */
+            --bg-2: #111111;       /* hover / elevated */
+            --border: #2a2a2a;     /* neutral structural border */
+            --border-dim: #1a1a1a; /* subtle dividers */
+            --text-primary: #e0e0e0;
+            --text-secondary: #888888;
+            --text-dim: #444444;
+            --green: #00c853;      /* buy / positive */
+            --red: #ff3d3d;        /* sell / negative */
+            --cyan: #00b8d4;       /* info / label accent */
+            --amber: #ffab00;      /* warning */
+            --purple: #9c27b0;     /* signal */
+            --white: #ffffff;
+        }
+
+        * { box-sizing: border-box; }
+
         body {
-            background-color: #000000;
-            background-image: radial-gradient(circle at 50% 50%, #060608 0%, #000000 100%);
-            color: #ffffff;
+            background-color: var(--bg-0);
+            color: var(--text-primary);
             font-family: 'JetBrains Mono', monospace;
             overflow: hidden;
             height: 100vh;
             max-height: 100vh;
+            font-size: 11px;
         }
 
-        /* Razor Sharp Zero-Curve Panels */
+        /* Panels: neutral grey borders, not green */
         .cyber-panel {
-            background: #040406;
-            border: 1px solid #1f1f2e;
-            box-shadow: 0 10px 40px rgba(0, 0, 0, 0.95);
-            transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+            background: var(--bg-1);
+            border: 1px solid var(--border);
+            box-shadow: none;
+            transition: border-color 0.15s;
         }
-        .cyber-panel:hover {
-            border-color: #38384f;
-            background-color: #06060a;
+        .cyber-panel:hover { border-color: #3a3a3a; }
+
+        /* Data color classes */
+        .accent-cyan    { color: var(--cyan); }
+        .accent-rose    { color: var(--red); }
+        .accent-emerald { color: var(--green); }
+        .accent-purple  { color: var(--purple); }
+        .accent-amber   { color: var(--amber); }
+
+        .border-glow-cyan   { border-color: var(--cyan) !important; }
+        .border-glow-rose   { border-color: var(--red) !important; }
+        .border-glow-emerald{ border-color: var(--green) !important; }
+
+        /* Section labels */
+        .section-label {
+            font-size: 9px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            font-weight: 700;
         }
 
-        /* Animated High Contrast Neon Outlines */
-        .accent-cyan { color: #00f0ff; text-shadow: 0 0 8px rgba(0, 240, 255, 0.4); }
-        .accent-rose { color: #ff0055; text-shadow: 0 0 8px rgba(255, 0, 85, 0.4); }
-        .accent-emerald { color: #00ff66; text-shadow: 0 0 8px rgba(0, 255, 102, 0.4); }
-        .accent-purple { color: #9d00ff; text-shadow: 0 0 8px rgba(157, 0, 255, 0.4); }
-        .accent-orange { color: #ffaa00; text-shadow: 0 0 8px rgba(255, 170, 0, 0.4); }
-
-        .border-glow-cyan {
-            border-color: rgba(0, 240, 255, 0.5) !important;
-            box-shadow: 0 0 15px rgba(0, 240, 255, 0.08);
+        /* Currency pair navigator */
+        #pair-navigator {
+            display: flex;
+            gap: 4px;
+            overflow-x: auto;
+            scrollbar-width: none;
+            flex-shrink: 0;
         }
-        .border-glow-rose {
-            border-color: rgba(255, 0, 85, 0.6) !important;
-            box-shadow: 0 0 15px rgba(255, 0, 85, 0.1);
+        #pair-navigator::-webkit-scrollbar { display: none; }
+        .pair-btn {
+            flex-shrink: 0;
+            padding: 4px 10px;
+            border: 1px solid var(--border);
+            background: var(--bg-1);
+            color: var(--text-secondary);
+            font-size: 10px;
+            font-family: 'JetBrains Mono', monospace;
+            font-weight: 700;
+            cursor: pointer;
+            letter-spacing: 0.05em;
+            transition: all 0.12s;
         }
-        .border-glow-emerald {
-            border-color: rgba(0, 255, 102, 0.6) !important;
-            box-shadow: 0 0 15px rgba(0, 255, 102, 0.1);
+        .pair-btn:hover {
+            border-color: var(--cyan);
+            color: var(--cyan);
         }
-
-        /* Speed Heartbeat Pulse */
-        @keyframes pulse-cyan {
-            0%, 100% { background-color: #00f0ff; opacity: 1; transform: scale(1); box-shadow: 0 0 6px #00f0ff; }
-            50% { background-color: #9d00ff; opacity: 0.7; transform: scale(1.1); box-shadow: 0 0 2px #9d00ff; }
-        }
-        .tick-heartbeat {
-            animation: pulse-cyan 0.8s infinite;
-        }
-
-        /* Hazard stripe styling for extreme events */
-        .hazard-bg-buy {
-            background: repeating-linear-gradient(
-                -45deg,
-                rgba(0, 255, 102, 0.06),
-                rgba(0, 255, 102, 0.06) 10px,
-                transparent 10px,
-                transparent 20px
-            );
-        }
-        .hazard-bg-sell {
-            background: repeating-linear-gradient(
-                -45deg,
-                rgba(255, 0, 85, 0.06),
-                rgba(255, 0, 85, 0.06) 10px,
-                transparent 10px,
-                transparent 20px
-            );
+        .pair-btn.active {
+            border-color: var(--cyan);
+            background: rgba(0,184,212,0.08);
+            color: var(--cyan);
         }
 
-        /* Blinking cursor */
+        /* Tick heartbeat */
+        @keyframes pulse-dot {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+        .tick-heartbeat { animation: pulse-dot 1s infinite; }
+
+        /* Blink cursor */
         .cursor {
             display: inline-block;
-            width: 5px;
-            height: 11px;
-            background-color: #00f0ff;
-            animation: blink 0.8s step-end infinite;
+            width: 6px;
+            height: 12px;
+            background: var(--cyan);
+            animation: blink 1s step-end infinite;
             vertical-align: middle;
         }
-        @keyframes blink {
-            from, to { opacity: 0 }
-            50% { opacity: 1 }
+        @keyframes blink { from,to{opacity:0} 50%{opacity:1} }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 3px; height: 3px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #2a2a2a; }
+        ::-webkit-scrollbar-thumb:hover { background: #444; }
+
+        /* Hazard stripes */
+        .hazard-bg-buy {
+            background: repeating-linear-gradient(-45deg,
+                rgba(0,200,83,0.04), rgba(0,200,83,0.04) 10px,
+                transparent 10px, transparent 20px);
+        }
+        .hazard-bg-sell {
+            background: repeating-linear-gradient(-45deg,
+                rgba(255,61,61,0.04), rgba(255,61,61,0.04) 10px,
+                transparent 10px, transparent 20px);
         }
 
-        /* Monospace custom scrollbar styling */
-        ::-webkit-scrollbar {
-            width: 3px;
-            height: 3px;
-        }
-        ::-webkit-scrollbar-track {
-            background: transparent;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #252538;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #00f0ff;
-        }
-
-        /* Ultra thin scanlines */
-        .scanlines {
-            position: fixed;
-            top: 0; left: 0; width: 100%; height: 100%;
-            background: linear-gradient(
-                rgba(18, 16, 16, 0) 50%, 
-                rgba(0, 0, 0, 0.25) 50%
-            );
-            background-size: 100% 4px;
-            z-index: 9999;
-            pointer-events: none;
-            opacity: 0.15;
-        }
-
-        /* Absolutely hide any TradingView branding links, popups or logo overlays */
+        /* Hide TradingView attribution */
         a[href*="tradingview.com"],
         div[class*="attribution"],
         span[class*="attribution"],
         *[class*="tv-logo"] {
             display: none !important;
-            visibility: hidden !important;
-            opacity: 0 !important;
-            pointer-events: none !important;
             height: 0 !important;
             width: 0 !important;
         }
     </style>
 </head>
-<body class="p-3 antialiased selection:bg-[#9d00ff]/30 selection:text-white flex flex-col h-screen max-h-screen">
-    
-    <!-- Thin retro-futuristic scanline layer -->
-    <div class="scanlines"></div>
 
-    <!-- HEADER PANEL -->
-    <header class="cyber-panel h-[56px] flex-shrink-0 px-4 flex items-center justify-between border-b border-[#1f1f2e] mb-3 relative overflow-hidden">
-        <!-- Top neon line indicator -->
-        <div class="absolute top-0 left-0 right-0 h-[1.5px] bg-gradient-to-r from-[#9d00ff] via-[#00f0ff] to-[#00ff66]"></div>
-        
-        <div class="flex items-center gap-3">
-            <div class="h-6 w-6 bg-black border border-[#00f0ff] flex items-center justify-center relative">
-                <span class="absolute inset-0 bg-[#00f0ff]/10 animate-ping"></span>
-                <span class="text-xs text-[#00f0ff] font-extrabold">&Omega;</span>
-            </div>
-            <div>
-                <h1 class="text-xs font-black tracking-widest uppercase leading-none">AXON<span class="accent-cyan">.AI</span></h1>
-                <p class="text-[7.5px] text-zinc-500 uppercase tracking-widest font-bold mt-1.5 flex items-center gap-1.5 font-mono">
-                    <span class="w-1.5 h-1.5 bg-[#00ff66] animate-pulse shadow-sm shadow-[#00ff66]"></span>
-                    CORE_DAEMON_LIVE_v4.0
-                </p>
-            </div>
-        </div>
-        
-        <!-- BROKER METRICS HEADER ROW -->
-        <div class="flex items-center gap-4 text-[8px] font-mono border border-[#1f1f2e] px-3 py-1 bg-black/80 rounded-sm">
-            <div class="flex flex-col items-center">
-                <span class="text-[5.5px] text-zinc-500 uppercase tracking-widest font-extrabold">BALANCE</span>
-                <span id="broker-balance-val" class="text-white font-extrabold text-[9px] mt-0.5">$0.00</span>
-            </div>
-            <div class="h-4.5 w-[1px] bg-zinc-850"></div>
-            <div class="flex flex-col items-center">
-                <span class="text-[5.5px] text-zinc-500 uppercase tracking-widest font-extrabold">EQUITY</span>
-                <span id="broker-equity-val" class="text-white font-extrabold text-[9px] mt-0.5">$0.00</span>
-            </div>
-            <div class="h-4.5 w-[1px] bg-zinc-850"></div>
-            <div class="flex flex-col items-center">
-                <span class="text-[5.5px] text-zinc-500 uppercase tracking-widest font-extrabold">PROFIT</span>
-                <span id="broker-profit-val" class="text-[#00ff66] font-extrabold text-[9px] mt-0.5">+$0.00</span>
-            </div>
-            <div class="h-4.5 w-[1px] bg-zinc-850"></div>
-            <div class="flex flex-col items-center">
-                <span class="text-[5.5px] text-zinc-500 uppercase tracking-widest font-extrabold">MARGIN</span>
-                <span id="broker-margin-val" class="text-white font-extrabold text-[9px] mt-0.5">$0.00</span>
-            </div>
-            <div class="h-4.5 w-[1px] bg-zinc-850"></div>
-            <div class="flex flex-col items-center">
-                <span class="text-[5.5px] text-zinc-500 uppercase tracking-widest font-extrabold">M_LEVEL</span>
-                <span id="broker-marginlevel-val" class="text-[#00f0ff] font-extrabold text-[9px] mt-0.5">0.00%</span>
+<body style="margin:0;padding:8px;display:flex;flex-direction:column;height:100vh;max-height:100vh;overflow:hidden;background:var(--bg-0);">
+
+    <!-- ═══════════════════════════════════ HEADER ═══════════════════════════════════ -->
+    <header style="display:flex;align-items:center;gap:16px;height:44px;flex-shrink:0;border-bottom:1px solid var(--border);padding:0 12px;margin-bottom:6px;">
+        <!-- Logo -->
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <span style="color:var(--cyan);font-size:16px;font-weight:900;letter-spacing:0.05em;">AXON<span style="color:var(--text-secondary);">.AI</span></span>
+            <div style="display:flex;align-items:center;gap:5px;">
+                <span id="socket-light" style="width:7px;height:7px;border-radius:50%;background:#ff3d3d;flex-shrink:0;"></span>
+                <span id="socket-status" style="font-size:9px;color:#ff3d3d;font-weight:700;letter-spacing:0.1em;">OFFLINE</span>
             </div>
         </div>
 
-        <div class="flex items-center gap-6 text-[10px] font-mono">
-            <div class="flex flex-col items-end">
-                <span class="text-[7.5px] text-zinc-500 uppercase tracking-wider font-bold">INSTRUMENT</span>
-                <span id="header-ticker" class="text-white font-bold tracking-wide">EURUSD</span>
+        <!-- Separator -->
+        <div style="width:1px;height:28px;background:var(--border);flex-shrink:0;"></div>
+
+        <!-- Account metrics -->
+        <div style="display:flex;gap:20px;align-items:center;">
+            <div style="display:flex;flex-direction:column;">
+                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">BALANCE</span>
+                <span id="broker-balance-val" style="font-size:13px;font-weight:700;color:var(--text-primary);">$0.00</span>
             </div>
-            <div class="h-6 w-[1px] bg-zinc-800"></div>
-            <div class="flex flex-col items-end">
-                <span class="text-[7.5px] text-zinc-500 uppercase tracking-wider font-bold">UPTIME</span>
-                <span id="header-uptime" class="text-zinc-200 font-medium">00:00:00</span>
+            <div style="display:flex;flex-direction:column;">
+                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">EQUITY</span>
+                <span id="broker-equity-val" style="font-size:13px;font-weight:700;color:var(--text-primary);">$0.00</span>
             </div>
-            <div class="h-6 w-[1px] bg-zinc-800"></div>
-            <div class="flex flex-col items-end">
-                <span class="text-[7.5px] text-zinc-500 uppercase tracking-wider font-bold">RTT_LATENCY</span>
-                <span id="header-latency" class="text-[#00f0ff] font-bold">--ms</span>
+            <div style="display:flex;flex-direction:column;">
+                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">PROFIT</span>
+                <span id="broker-profit-val" style="font-size:13px;font-weight:700;color:var(--green);">+$0.00</span>
             </div>
-            <div class="h-6 w-[1px] bg-zinc-800"></div>
-            <div class="flex items-center gap-2">
-                <button id="settings-trigger-btn" class="hover:bg-[#9d00ff]/10 hover:border-[#9d00ff] hover:text-[#9d00ff] transition-all uppercase border border-zinc-850 px-2 py-0.5 bg-black font-mono text-[8px] tracking-widest text-zinc-400 font-extrabold flex items-center gap-1">
-                    <span class="w-1 h-1 bg-[#9d00ff] rounded-full animate-pulse shadow-sm shadow-[#9d00ff]"></span> SETTINGS
-                </button>
-                <div class="flex items-center gap-2 bg-black border border-[#252538] px-2.5 py-1">
-                    <span id="socket-light" class="w-1.5 h-1.5 bg-rose-600 shadow-sm shadow-rose-600"></span>
-                    <span id="socket-status" class="text-rose-500 font-extrabold text-[8px] uppercase tracking-widest">OFFLINE</span>
-                </div>
+            <div style="display:flex;flex-direction:column;">
+                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">FREE MARGIN</span>
+                <span id="broker-margin-val" style="font-size:13px;font-weight:700;color:var(--text-primary);">$0.00</span>
             </div>
+            <div style="display:flex;flex-direction:column;">
+                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">MARGIN LVL</span>
+                <span id="broker-marginlevel-val" style="font-size:13px;font-weight:700;color:var(--cyan);">0%</span>
+            </div>
+        </div>
+
+        <!-- Spacer -->
+        <div style="flex:1;"></div>
+
+        <!-- Right: Uptime + Latency + Settings -->
+        <div style="display:flex;align-items:center;gap:16px;">
+            <div style="display:flex;flex-direction:column;align-items:flex-end;">
+                <span style="font-size:9px;color:var(--text-dim);">UPTIME</span>
+                <span id="header-uptime" style="font-size:12px;font-weight:600;color:var(--text-primary);">00:00:00</span>
+            </div>
+            <div style="display:flex;flex-direction:column;align-items:flex-end;">
+                <span style="font-size:9px;color:var(--text-dim);">LATENCY</span>
+                <span id="header-latency" style="font-size:12px;font-weight:600;color:var(--cyan);">--ms</span>
+            </div>
+            <button id="settings-trigger-btn" style="border:1px solid var(--border);background:var(--bg-1);color:var(--text-secondary);font-family:inherit;font-size:10px;font-weight:700;padding:4px 10px;cursor:pointer;letter-spacing:0.08em;">⚙ SETTINGS</button>
         </div>
     </header>
 
-    <!-- COCKPIT NAVIGATION WORKSPACES -->
-    <nav class="flex-shrink-0 bg-black border border-[#1f1f2e] p-1.5 flex justify-between items-center mb-3 text-[9.5px] font-mono font-bold tracking-widest relative overflow-hidden z-20">
-        <div class="flex gap-2.5">
-            <button id="main-tab-cockpit-btn" class="border border-[#00f0ff] bg-[#00f0ff]/10 text-[#00f0ff] px-5 py-2 uppercase transition-all rounded-sm flex items-center gap-2 font-extrabold shadow-md shadow-[#00f0ff]/5">
-                <span class="w-1.5 h-1.5 bg-[#00f0ff] rounded-full animate-pulse"></span> [1] COCKPIT_DESK
-            </button>
-            <button id="main-tab-intel-btn" class="border border-[#1f1f2e] text-zinc-500 px-5 py-2 uppercase transition-all rounded-sm flex items-center gap-2 font-extrabold">
-                <span class="w-1.5 h-1.5 bg-zinc-700 rounded-full"></span> [2] INTELLIGENCE_HUB
-            </button>
+    <!-- ═══════════════════════ CURRENCY PAIR NAVIGATOR ═══════════════════════ -->
+    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;border-bottom:1px solid var(--border);padding:5px 4px;margin-bottom:6px;">
+        <span style="font-size:9px;color:var(--text-dim);font-weight:700;letter-spacing:0.1em;white-space:nowrap;flex-shrink:0;">PAIRS ›</span>
+        <div id="pair-navigator">
+            <button class="pair-btn active" data-pair="EURUSD=X" data-mt5="EURUSDm">EUR/USD</button>
+            <button class="pair-btn" data-pair="GBPUSD=X" data-mt5="GBPUSDm">GBP/USD</button>
+            <button class="pair-btn" data-pair="USDJPY=X" data-mt5="USDJPYm">USD/JPY</button>
+            <button class="pair-btn" data-pair="USDCHF=X" data-mt5="USDCHFm">USD/CHF</button>
+            <button class="pair-btn" data-pair="AUDUSD=X" data-mt5="AUDUSDm">AUD/USD</button>
+            <button class="pair-btn" data-pair="NZDUSD=X" data-mt5="NZDUSDm">NZD/USD</button>
+            <button class="pair-btn" data-pair="USDCAD=X" data-mt5="USDCADm">USD/CAD</button>
+            <button class="pair-btn" data-pair="EURGBP=X" data-mt5="EURGBPm">EUR/GBP</button>
+            <button class="pair-btn" data-pair="EURJPY=X" data-mt5="EURJPYm">EUR/JPY</button>
+            <button class="pair-btn" data-pair="GBPJPY=X" data-mt5="GBPJPYm">GBP/JPY</button>
+            <button class="pair-btn" data-pair="XAUUSD=X" data-mt5="XAUUSD">XAU/USD</button>
         </div>
+        <div style="flex:1;"></div>
+        <!-- Active pair display -->
+        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
+            <span style="font-size:9px;color:var(--text-dim);">ACTIVE</span>
+            <span id="header-ticker" style="font-size:13px;font-weight:700;color:var(--cyan);letter-spacing:0.05em;">EURUSD</span>
+        </div>
+    </div>
+
+    <!-- ══════════════════════════ WORKSPACE TABS ══════════════════════════ -->
+    <nav style="display:flex;gap:4px;flex-shrink:0;margin-bottom:6px;">
+        <button id="main-tab-cockpit-btn" style="border:1px solid var(--cyan);background:rgba(0,184,212,0.08);color:var(--cyan);font-family:inherit;font-size:10px;font-weight:700;padding:5px 16px;cursor:pointer;letter-spacing:0.08em;">▶ COCKPIT</button>
+        <button id="main-tab-intel-btn" style="border:1px solid var(--border);background:transparent;color:var(--text-secondary);font-family:inherit;font-size:10px;font-weight:700;padding:5px 16px;cursor:pointer;letter-spacing:0.08em;">◈ INTELLIGENCE</button>
     </nav>
 
     <!-- MAIN VIEWPORT -->
@@ -717,6 +723,32 @@
                     };
                 }
 
+
+                // === MULTI-CURRENCY PAIR NAVIGATOR ===
+                const pairBtns = document.querySelectorAll('.pair-btn');
+                pairBtns.forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        pairBtns.forEach(b => b.classList.remove('active'));
+                        btn.classList.add('active');
+                        const pair = btn.dataset.pair;
+                        const mt5  = btn.dataset.mt5;
+                        const label = btn.textContent.replace('/', '');
+                        const ticker = document.getElementById('header-ticker');
+                        if (ticker) ticker.textContent = label;
+                        this.pipMult = (pair.includes('JPY') || pair.includes('XAU')) ? 0.01 : 0.0001;
+                        this.m15Candles = [];
+                        this.h1Candles  = [];
+                        this.h4Candles  = [];
+                        this.timeframeLoaded = { M15: false, H1: false, H4: false };
+                        this.currentBid = 0;
+                        this.currentAsk = 0;
+                        if (this.chart) this.candleSeries.setData([]);
+                        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+                            this.ws.send(JSON.stringify({ type: 'switch_pair', pair: pair, mt5: mt5 }));
+                        }
+                        this.triggerBeep(1000, 0.03);
+                    });
+                });
                 // Timeframe toggle buttons
                 const m15Btn = document.getElementById("tf-m15-btn");
                 const h1Btn = document.getElementById("tf-h1-btn");
@@ -877,9 +909,9 @@
                 this.ws = new WebSocket(wsUri);
 
                 this.ws.onopen = () => {
-                    this.socketLight.className = "w-1.5 h-1.5 bg-[#00ff66] shadow-sm shadow-[#00ff66]";
-                    this.socketStatus.innerText = "ONLINE";
-                    this.socketStatus.className = "text-[#00ff66] font-extrabold text-[8px] uppercase tracking-widest";
+                    this.socketLight.style.background = 'var(--green)'; this.socketLight.style.borderRadius = '50%';
+                    this.socketStatus.innerText = 'ONLINE';
+                    this.socketStatus.style.color = 'var(--green)';
                     logger("Dashboard WS: connected.");
                     this.triggerBeep(1100, 0.08); // high frequency startup chirp
                     
@@ -896,10 +928,10 @@
                 };
 
                 this.ws.onclose = () => {
-                    this.socketLight.className = "w-1.5 h-1.5 bg-rose-600 shadow-sm shadow-rose-600";
-                    this.socketStatus.innerText = "OFFLINE";
-                    this.socketStatus.className = "text-[#ff0055] font-extrabold text-[8px] uppercase tracking-widest";
-                    this.latency.innerText = "--ms";
+                    this.socketLight.style.background = 'var(--red)'; this.socketLight.style.borderRadius = '50%';
+                    this.socketStatus.innerText = 'OFFLINE';
+                    this.socketStatus.style.color = 'var(--red)';
+                    if (this.latency) this.latency.innerText = '--ms';
                     
                     if (this.pingInterval) {
                         clearInterval(this.pingInterval);
@@ -2241,9 +2273,12 @@
                     this.eventsLog.removeChild(this.eventsLog.lastChild);
                 }
 
-                // Only print on chart when high-priority tradable structures are detected (Sweep or Structure Break)
+                // Print on chart when key actionable events are detected
                 const isSignificant = data.event_type === "sweep_detected" || 
-                                      data.event_type === "structure_break";
+                                      data.event_type === "structure_break" ||
+                                      data.event_type === "candle_pattern" ||
+                                      data.event_type === "level_breach" ||
+                                      data.event_type === "momentum_divergence";
                 if (isSignificant && data.details && data.details.trigger_candle) {
                     const tc = data.details.trigger_candle;
                     let timeSec = typeof tc.open_time === 'number' ? tc.open_time : Math.floor(Date.parse(tc.open_time) / 1000);
@@ -2341,25 +2376,51 @@
                 const consoleDiv = document.createElement("div");
                 consoleDiv.className = `border-b border-zinc-900 pb-2.5 last:border-0 ${isHistorical ? 'opacity-50' : ''}`;
 
-                                  let agentColor = "text-cyan-400 bg-cyan-950/20 border border-cyan-800/30";
-                  if (isHistorical) {
-                      agentColor = "text-zinc-500 bg-zinc-950 border border-zinc-900";
-                  } else {
-                      const name = data.agent_name.toUpperCase();
-                      if (["WYCKOFF", "KEYNES", "REUTERS", "LIVERMORE"].includes(name)) {
-                          agentColor = "text-[#00f0ff] bg-cyan-950/20 border border-[#00f0ff]/30";
-                      } else if (["BUFFETT", "SOROS"].includes(name)) {
-                          agentColor = "text-[#ffaa00] bg-amber-950/20 border border-[#ffaa00]/30";
-                      } else if (name === "MUNGER") {
-                          agentColor = "text-[#9d00ff] bg-purple-950/20 border border-[#9d00ff]/30 font-bold";
-                      } else if (name === "TUDOR") {
-                          agentColor = "text-[#00ff66] bg-emerald-950/20 border border-[#00ff66]/30 font-bold";
-                      } else if (["SIMONS", "DALIO", "MARKS"].includes(name)) {
-                          agentColor = "text-[#ff6600] bg-orange-950/20 border border-[#ff6600]/30";
-                      } else if (name === "DRUCKENMILLER") {
-                          agentColor = "text-[#ff0055] bg-rose-950/20 border border-[#ff0055]/30 font-bold";
-                      }
-                  }
+                let agentColor = "text-cyan-400 bg-cyan-950/20 border border-cyan-800/30";
+                if (isHistorical) {
+                    agentColor = "text-zinc-500 bg-zinc-950 border border-zinc-900";
+                } else {
+                    const name = data.agent_name.toUpperCase();
+                    if (["WYCKOFF", "KEYNES", "REUTERS", "LIVERMORE"].includes(name)) {
+                        agentColor = "text-[#00f0ff] bg-cyan-950/20 border border-[#00f0ff]/30";
+                    } else if (["BUFFETT", "SOROS"].includes(name)) {
+                        agentColor = "text-[#ffaa00] bg-amber-950/20 border border-[#ffaa00]/30";
+                    } else if (name === "MUNGER") {
+                        agentColor = "text-[#9d00ff] bg-purple-950/20 border border-[#9d00ff]/30 font-bold";
+                    } else if (name === "TUDOR") {
+                        agentColor = "text-[#00ff66] bg-emerald-950/20 border border-[#00ff66]/30 font-bold";
+                    } else if (["SIMONS", "DALIO", "MARKS"].includes(name)) {
+                        agentColor = "text-[#ff6600] bg-orange-950/20 border border-[#ff6600]/30";
+                    } else if (name === "DRUCKENMILLER") {
+                        agentColor = "text-[#ff0055] bg-rose-950/20 border border-[#ff0055]/30 font-bold";
+                    }
+                }
+
+                let toolContent = "";
+                if (data.tool_calls && data.tool_calls.length > 0) {
+                    toolContent = data.tool_calls.map(tc => `
+                        <div class="bg-black border border-zinc-900 px-2 py-0.5 text-[8px] text-zinc-500 font-mono mt-1.5 w-fit flex items-center gap-1.5">
+                            <span class="w-1 h-1 bg-[#00f0ff] animate-ping"></span>
+                            <span>[USE_TOOL]</span> <span class="text-[#00f0ff] font-mono">${tc}</span>
+                        </div>
+                    `).join("");
+                }
+
+                consoleDiv.innerHTML = `
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-[8px] text-zinc-500 font-semibold">${data.timestamp}</span>
+                        <span class="text-[7.5px] uppercase tracking-wider px-1.5 py-0.2 font-bold ${agentColor}">${data.agent_name.toUpperCase()}</span>
+                    </div>
+                    <p class="text-zinc-300 font-mono pl-2 text-[9px] leading-relaxed">${data.message || ""}</p>
+                    ${toolContent}
+                `;
+
+                this.consoleBody.appendChild(consoleDiv);
+                this.consoleBody.scrollTop = this.consoleBody.scrollHeight;
+                if (!isHistorical) {
+                    this.triggerBeep(1000, 0.01);
+                }
+            }
 
             handleDecision(data) {
                 const action = data.signal.toUpperCase();

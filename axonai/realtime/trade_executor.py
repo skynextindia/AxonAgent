@@ -8,6 +8,9 @@ from __future__ import annotations
 import logging
 from typing import Dict, Any, Optional
 
+from axonai.realtime.risk_guard import RiskGuard
+from axonai.realtime.alerts import send_alert
+
 logger = logging.getLogger(__name__)
 
 
@@ -19,8 +22,9 @@ class MT5TradeExecutor:
         self.magic = config.get("realtime_magic_number", 123456)
         self.deviation = config.get("realtime_deviation", 20)
         self.default_lot_size = config.get("realtime_default_lot_size", 0.01)
+        self.risk_guard = RiskGuard(config)
 
-    def execute_signal(self, symbol: str, signal: str) -> Optional[dict]:
+    def execute_signal(self, symbol: str, signal: str, live_state: Optional[Any] = None) -> Optional[dict]:
         """Convert a 5-tier signal into an MT5 order action.
 
         Signals: Buy, Overweight, Hold, Underweight, Sell
@@ -29,16 +33,27 @@ class MT5TradeExecutor:
 
         logger.info("TradeExecutor: Evaluating signal: %s for %s", signal, symbol)
 
+        # Drawdown circuit breaker check
+        if mt5 and mt5.terminal_info():
+            acc = mt5.account_info()
+            if acc:
+                self.risk_guard.update_equity(acc.equity, acc.balance)
+                halted, reason = self.risk_guard.is_halted(acc.equity)
+                if halted:
+                    logger.error("TradeExecutor: Risk circuit breaker active: %s. Order rejected.", reason)
+                    send_alert(f"Risk Circuit Breaker Active: {reason}. Trade rejected.", self.config)
+                    return {"retcode": -1, "comment": f"RiskGuard halted: {reason}", "order": 0}
+
         if signal in ["Buy", "Overweight"]:
-            return self.send_order(symbol, mt5.ORDER_TYPE_BUY)
+            return self.send_order(symbol, mt5.ORDER_TYPE_BUY, live_state)
         elif signal in ["Sell", "Underweight"]:
-            return self.send_order(symbol, mt5.ORDER_TYPE_SELL)
+            return self.send_order(symbol, mt5.ORDER_TYPE_SELL, live_state)
         else:
             logger.info("TradeExecutor: Signal is %s. No order action taken (HOLD).", signal)
             return None
 
-    def send_order(self, symbol: str, order_type: int) -> Optional[dict]:
-        """Send a market order to MT5."""
+    def send_order(self, symbol: str, order_type: int, live_state: Optional[Any] = None) -> Optional[dict]:
+        """Send a market order with dynamic SL/TP and position sizing to MT5."""
         import MetaTrader5 as mt5
 
         # Check connection
@@ -57,14 +72,105 @@ class MT5TradeExecutor:
                 logger.error("TradeExecutor: Failed to select symbol %s.", symbol)
                 return None
 
-        # Determine price & volume
-        lot = self.default_lot_size
         tick = mt5.symbol_info_tick(symbol)
         if tick is None:
             logger.error("TradeExecutor: Failed to get tick for %s.", symbol)
             return None
 
         price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
+
+        # Position conflict guard: skip if same-direction position already open
+        if not self.config.get("realtime_allow_multiple_positions", False):
+            existing = mt5.positions_get(symbol=symbol)
+            if existing:
+                for pos in existing:
+                    same_dir = (
+                        (order_type == mt5.ORDER_TYPE_BUY and pos.type == mt5.POSITION_TYPE_BUY) or
+                        (order_type == mt5.ORDER_TYPE_SELL and pos.type == mt5.POSITION_TYPE_SELL)
+                    )
+                    if same_dir:
+                        logger.info("TradeExecutor: Position already open (%s). Skipping duplicate.", symbol)
+                        return None
+
+        # 1. Fetch H1 ATR for SL/TP calculations
+        atr = 0.0
+        if live_state is not None:
+            if hasattr(live_state, "snapshot"):
+                snap = live_state.snapshot()
+                atr = getattr(snap, "atr_14_h1", 0.0)
+            elif hasattr(live_state, "atr_14_h1"):
+                atr = getattr(live_state, "atr_14_h1", 0.0)
+            elif isinstance(live_state, dict):
+                atr = live_state.get("atr_14_h1", 0.0)
+
+        # Fallback if ATR is unavailable or zero
+        if atr <= 0.0:
+            atr = price * 0.0015  # default to 0.15% of price
+            logger.info("TradeExecutor: ATR unavailable. Using fallback value: %.5f", atr)
+
+        # 2. Calculate ATR-based Stop Loss & Take Profit
+        sl_mult = self.config.get("realtime_sl_atr_multiplier", 1.5)
+        tp_mult = self.config.get("realtime_tp_atr_multiplier", 3.0)
+
+        if order_type == mt5.ORDER_TYPE_BUY:
+            sl = price - (atr * sl_mult)
+            tp = price + (atr * tp_mult)
+        else:
+            sl = price + (atr * sl_mult)
+            tp = price - (atr * tp_mult)
+
+        # Format price to correct number of digits
+        digits = getattr(symbol_info, "digits", 5)
+        if not isinstance(digits, int):
+            digits = 5
+        sl = round(sl, digits)
+        tp = round(tp, digits)
+        price = round(price, digits)
+
+        # 3. Dynamic Position Sizing based on Account Equity & Risk Percentage
+        lot = self.default_lot_size
+        acc = mt5.account_info()
+        is_mock_env = self.config.get("realtime_dry_run", False)
+        if acc and not is_mock_env:
+            risk_pct = self.config.get("realtime_risk_pct", 1.0)
+            risk_amount = acc.equity * (risk_pct / 100.0)
+            
+            sl_points = abs(price - sl)
+            
+            tick_size = getattr(symbol_info, "trade_tick_size", 0.0)
+            if not isinstance(tick_size, (int, float)) or tick_size <= 0:
+                tick_size = 10 ** (-digits)
+                
+            tick_value = getattr(symbol_info, "trade_tick_value", 0.0)
+            if not isinstance(tick_value, (int, float)) or tick_value <= 0:
+                tick_value = 1.0
+            
+            sl_ticks = sl_points / tick_size
+            if sl_ticks > 0 and tick_value > 0:
+                calculated_lot = risk_amount / (sl_ticks * tick_value)
+                
+                # Respect MT5 symbol lot limits and steps
+                min_volume = getattr(symbol_info, "volume_min", 0.01)
+                if not isinstance(min_volume, (int, float)):
+                    min_volume = 0.01
+                    
+                max_volume = getattr(symbol_info, "volume_max", 100.0)
+                if not isinstance(max_volume, (int, float)):
+                    max_volume = 100.0
+                    
+                volume_step = getattr(symbol_info, "volume_step", 0.01)
+                if not isinstance(volume_step, (int, float)) or volume_step <= 0:
+                    volume_step = 0.01
+                
+                lot = round(calculated_lot / volume_step) * volume_step
+                lot = max(min_volume, min(max_volume, lot))
+                lot = round(lot, 2)
+                
+                logger.info(
+                    "TradeExecutor: Account equity: %.2f | Risk amount: %.2f | "
+                    "SL points: %.5f | Calculated lot: %.4f | Final lot: %.2f",
+                    acc.equity, risk_amount, sl_points, calculated_lot, lot
+                )
 
         # Prepare request
         request = {
@@ -73,6 +179,8 @@ class MT5TradeExecutor:
             "volume": lot,
             "type": order_type,
             "price": price,
+            "sl": sl,
+            "tp": tp,
             "deviation": self.deviation,
             "magic": self.magic,
             "comment": f"AxonAI {order_type} execution",
@@ -81,15 +189,24 @@ class MT5TradeExecutor:
         }
 
         # Send request
-        logger.info("TradeExecutor: Sending order request: %s", request)
+        logger.info("TradeExecutor: Sending order request with SL/TP: %s", request)
         result = mt5.order_send(request)
         if result is None:
             logger.error("TradeExecutor: order_send returned None")
             return None
 
+        # Track PnL if trade fails or succeeds
         if result.retcode != mt5.TRADE_RETCODE_DONE:
             logger.error("TradeExecutor: Order failed. Retcode: %d, Comment: %s",
                          result.retcode, result.comment)
+            
+            # Send alert
+            send_alert(
+                f"Trade FAILED: {symbol} | Type: {'BUY' if order_type == mt5.ORDER_TYPE_BUY else 'SELL'} "
+                f"| Retcode: {result.retcode} | Comment: {result.comment}",
+                self.config
+            )
+            
             # Try with another filling type if FOK fails (e.g. IOC)
             if result.retcode in [mt5.TRADE_RETCODE_INVALID_FILL, mt5.TRADE_RETCODE_LIMIT_VOLUME]:
                 logger.info("TradeExecutor: Retrying with ORDER_FILLING_IOC...")
@@ -97,10 +214,20 @@ class MT5TradeExecutor:
                 result = mt5.order_send(request)
                 if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                     logger.info("TradeExecutor: Order successful on retry! Ticket: %d", result.order)
+                    send_alert(
+                        f"Trade Executed on Retry: {symbol} | Type: {'BUY' if order_type == mt5.ORDER_TYPE_BUY else 'SELL'} "
+                        f"| Volume: {lot:.2f} | Price: {price:.5f} | SL: {sl:.5f} | TP: {tp:.5f} | Ticket: {result.order}",
+                        self.config
+                    )
                     return self._result_to_dict(result)
             return self._result_to_dict(result)
 
         logger.info("TradeExecutor: Order executed successfully! Ticket: %d", result.order)
+        send_alert(
+            f"Trade Executed: {symbol} | Type: {'BUY' if order_type == mt5.ORDER_TYPE_BUY else 'SELL'} "
+            f"| Volume: {lot:.2f} | Price: {price:.5f} | SL: {sl:.5f} | TP: {tp:.5f} | Ticket: {result.order}",
+            self.config
+        )
         return self._result_to_dict(result)
 
     def _result_to_dict(self, result) -> dict:

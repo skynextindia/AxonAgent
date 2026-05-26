@@ -27,6 +27,7 @@ from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
 from axonai.realtime.event_detector import EventDetector
 from axonai.realtime.graph_executor import GraphExecutor
 from axonai.realtime.trade_executor import MT5TradeExecutor
+from axonai.realtime.api_server import get_dashboard
 
 logger = logging.getLogger(__name__)
 
@@ -48,8 +49,8 @@ class AxonDaemon:
         self.yf_symbol = clean_sym + "=X"  # e.g. "EURUSD=X"
         self.mt5_symbol = _to_mt5_symbol(symbol, config)
         self.config = config
-        self.offset_hours = get_broker_tz_offset(self.mt5_symbol)
-        self.tz = timezone(timedelta(hours=self.offset_hours))
+        self.offset_hours = 0
+        self.tz = timezone.utc
         self.event_queue: queue.Queue = queue.Queue(maxsize=100)
         self._running = False
 
@@ -173,8 +174,7 @@ class AxonDaemon:
         if not market_closed and mt5:
             tick = mt5.symbol_info_tick(self.mt5_symbol)
             if tick is not None:
-                last_tick_utc = datetime.utcfromtimestamp(tick.time) - timedelta(hours=offset_hours)
-                last_tick_utc = last_tick_utc.replace(tzinfo=timezone.utc)
+                last_tick_utc = datetime.fromtimestamp(tick.time, tz=timezone.utc) - timedelta(hours=offset_hours)
                 if (now_utc - last_tick_utc).total_seconds() > 10800:
                     market_closed = True
                     # Next weekday at 22:00 UTC
@@ -260,7 +260,7 @@ class AxonDaemon:
             target_deque = self.live_evidence._m15_candles
 
         candles_list = [{
-            "time": int(c.open_time.replace(tzinfo=self.tz).timestamp()),
+            "time": int(c.open_time.replace(tzinfo=timezone.utc).timestamp()),
             "open": c.open,
             "high": c.high,
             "low": c.low,
@@ -272,7 +272,7 @@ class AxonDaemon:
             builder = self.tick_engine.candle_builders.get(timeframe)
             if builder and builder.current:
                 cur = builder.current
-                cur_time = int(cur.open_time.replace(tzinfo=self.tz).timestamp())
+                cur_time = int(cur.open_time.replace(tzinfo=timezone.utc).timestamp())
                 # Avoid duplicating if the last candle in history matches cur_time
                 if not candles_list or candles_list[-1]["time"] != cur_time:
                     candles_list.append({
@@ -344,7 +344,6 @@ class AxonDaemon:
         logger.info("="*60)
 
         # Register daemon with dashboard server if available
-        from axonai.realtime.api_server import get_dashboard
         dashboard = get_dashboard()
         if dashboard:
             dashboard.daemon = self
@@ -354,6 +353,13 @@ class AxonDaemon:
             logger.error("AxonDaemon: MT5 initialization failed. Cannot start.")
             return
         logger.info("Step 1/4: MT5 connected")
+
+        # Now that MT5 is connected, dynamically detect active broker offset!
+        from axonai.dataflows.mt5_data import _ensure_symbol_visible
+        _ensure_symbol_visible(self.mt5_symbol)
+        self.offset_hours = get_broker_tz_offset(self.mt5_symbol)
+        self.tz = timezone(timedelta(hours=self.offset_hours))
+        logger.info("Step 1/4: Broker timezone offset detected: %d hours", self.offset_hours)
 
         # 2. Cold-start state from historical bars
         logger.info("Step 2/4: Cold-starting live state...")
@@ -387,7 +393,6 @@ class AxonDaemon:
         logger.info("Step 4/4: Tick engine running")
 
         # Broadcast initial state to hydrate dashboard instantly
-        from axonai.realtime.api_server import get_dashboard
         dashboard = get_dashboard()
         if dashboard:
             logger.info("Broadcasting initial telemetry states to dashboard...")
@@ -419,7 +424,7 @@ class AxonDaemon:
                     "bid": bid,
                     "ask": ask,
                     "spread": spread,
-                    "time": tick.time,
+                    "time": int(timestamp.replace(tzinfo=timezone.utc).timestamp()),
                     "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
                 })
 
@@ -439,7 +444,6 @@ class AxonDaemon:
         self.event_detector.on_tick(bid, ask, timestamp)
         
         # Broadcast tick to dashboard WebSocket
-        from axonai.realtime.api_server import get_dashboard
         dashboard = get_dashboard()
         if dashboard:
             dashboard.broadcast({
@@ -448,7 +452,7 @@ class AxonDaemon:
                 "bid": bid,
                 "ask": ask,
                 "spread": self.tick_engine.spread / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001),
-                "time": int(timestamp.replace(tzinfo=self.tz).timestamp()),
+                "time": int(timestamp.replace(tzinfo=timezone.utc).timestamp()),
                 "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
             })
             
@@ -468,7 +472,6 @@ class AxonDaemon:
                      candle.timeframe, candle.close, candle.high, candle.low)
                      
         # Broadcast closed candle
-        from axonai.realtime.api_server import get_dashboard
         dashboard = get_dashboard()
         if dashboard:
             dashboard.broadcast({
@@ -479,7 +482,7 @@ class AxonDaemon:
                 "low": candle.low,
                 "close": candle.close,
                 "volume": candle.volume,
-                "time": int(candle.open_time.replace(tzinfo=self.tz).timestamp()),
+                "time": int(candle.open_time.replace(tzinfo=timezone.utc).timestamp()),
                 "timestamp": candle.open_time.strftime("%Y-%m-%d %H:%M:%S")
             })
             
@@ -491,10 +494,15 @@ class AxonDaemon:
 
     def _event_loop(self):
         """Main thread: blocks on event queue, fires graph on valid events."""
+        import time as pytime
+        last_stats_time = pytime.time()
         while self._running:
             try:
                 event = self.event_queue.get(timeout=1.0)
             except queue.Empty:
+                if pytime.time() - last_stats_time > 10.0:
+                    self._log_stats()
+                    last_stats_time = pytime.time()
                 continue
 
             self._events_detected += 1
@@ -503,7 +511,6 @@ class AxonDaemon:
             logger.info("EVENT #%d: %s", self._events_detected, event)
             logger.info("="*50)
 
-            from axonai.realtime.api_server import get_dashboard
             dashboard = get_dashboard()
             if dashboard:
                 dashboard.broadcast({
@@ -615,7 +622,7 @@ class AxonDaemon:
                         "Portfolio Manager": "DRUCKENMILLER"
                     }
                     
-                    for node, content_val in chunk.items():
+                    for node, content in chunk.items():
                         if node in ["__pregel_loop__", "checkpointer"]:
                             continue
                         
@@ -666,7 +673,7 @@ class AxonDaemon:
                 # Execute order on MT5 terminal
                 trade_result = None
                 try:
-                    trade_result = self.trade_executor.execute_signal(self.mt5_symbol, signal)
+                    trade_result = self.trade_executor.execute_signal(self.mt5_symbol, signal, self.live_state)
                     if trade_result:
                         logger.info("AxonDaemon: Order execution complete: %s", trade_result)
                 except Exception as ex_err:

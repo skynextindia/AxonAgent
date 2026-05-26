@@ -338,7 +338,7 @@ class LiveWorldState:
             self._state.session_quality = min(candle.volume / (avg_vol + 1e-8), 1.0)
 
     def _recompute_belief(self):
-        """Recompute belief score and gate decision."""
+        """Recompute belief score and gate decision with dynamic thresholds."""
         if self._state is None:
             return
 
@@ -356,12 +356,32 @@ class LiveWorldState:
             + spread_score * 0.20
         )
 
+        # Dynamic belief threshold based on volatility and dominant regime
+        base_threshold = self.config.get("realtime_belief_threshold", 0.60)
+        
+        # Adjust threshold based on dominant regime & volatility
+        regime = self._state.dominant_regime.lower() if self._state.dominant_regime else "sideways"
+        vol = self._state.volatility_regime.lower() if self._state.volatility_regime else "medium"
+        
+        adjustment = 0.0
+        if "ranging" in regime or "sideways" in regime:
+            adjustment += 0.05  # raise threshold to filter ranging noise
+        elif "trending" in regime:
+            adjustment -= 0.05  # lower threshold to capture trends
+            
+        if "low" in vol:
+            adjustment += 0.05  # raise in low volatility
+        elif "high" in vol:
+            adjustment -= 0.02  # lower slightly in high volatility
+            
+        dynamic_threshold = float(np.clip(base_threshold + adjustment, 0.45, 0.75))
+
         gated = self._state.belief_score * self._state.session_penalty
-        self._state.should_run_graph = gated > 0.60
+        self._state.should_run_graph = gated > dynamic_threshold
 
         if not self._state.should_run_graph:
             reasons = []
-            if self._state.belief_score <= 0.60:
+            if gated <= dynamic_threshold:
                 reasons.append("low_conviction")
             if self._state.session_penalty < 1.0:
                 reasons.append(f"{self._state.session}_session")
@@ -372,9 +392,74 @@ class LiveWorldState:
             self._state.abort_reason = ""
 
     def _update_currency_strength(self):
-        """Update base and quote currency strength dynamically using a single-pair momentum proxy."""
+        """Update base and quote currency strength dynamically using cross-pair correlation if MT5 is available, otherwise momentum proxy."""
         if self._state is None:
             return
+            
+        # Try cross-pair strength calculation via MT5
+        try:
+            import MetaTrader5 as mt5
+            if mt5 and mt5.terminal_info():
+                usd_pairs = {
+                    "EURUSD": -1.0,  # USD is quote
+                    "GBPUSD": -1.0,  # USD is quote
+                    "USDJPY": 1.0,   # USD is base
+                    "USDCHF": 1.0,   # USD is base
+                    "AUDUSD": -1.0,  # USD is quote
+                    "USDCAD": 1.0,   # USD is base
+                }
+                eur_pairs = {
+                    "EURUSD": 1.0,   # EUR is base
+                    "EURJPY": 1.0,   # EUR is base
+                    "EURGBP": 1.0,   # EUR is base
+                    "EURCHF": 1.0,   # EUR is base
+                }
+                
+                def get_pair_momentum(symbol_name: str) -> float:
+                    from axonai.dataflows.mt5_data import _ensure_symbol_visible
+                    _ensure_symbol_visible(symbol_name)
+                    rates = mt5.copy_rates_from_pos(symbol_name, mt5.TIMEFRAME_H1, 0, 4)
+                    if rates is not None and len(rates) >= 4:
+                        closes = [r["close"] for r in rates]
+                        r1 = (closes[-1] - closes[-2]) / (closes[-2] + 1e-8)
+                        r2 = (closes[-2] - closes[-3]) / (closes[-3] + 1e-8)
+                        r3 = (closes[-3] - closes[-4]) / (closes[-4] + 1e-8)
+                        return float(r1 + r2 + r3)
+                    return 0.0
+                
+                usd_mom_list = []
+                for sym, direction in usd_pairs.items():
+                    actual_symbol = sym
+                    if not mt5.symbol_info(actual_symbol):
+                        actual_symbol = sym + "m"
+                        if not mt5.symbol_info(actual_symbol):
+                            continue
+                    
+                    mom = get_pair_momentum(actual_symbol)
+                    usd_mom_list.append(mom * direction)
+                    
+                eur_mom_list = []
+                for sym, direction in eur_pairs.items():
+                    actual_symbol = sym
+                    if not mt5.symbol_info(actual_symbol):
+                        actual_symbol = sym + "m"
+                        if not mt5.symbol_info(actual_symbol):
+                            continue
+                            
+                    mom = get_pair_momentum(actual_symbol)
+                    eur_mom_list.append(mom * direction)
+                    
+                if usd_mom_list and eur_mom_list:
+                    usd_strength = float(np.clip(np.mean(usd_mom_list) * 100, -1.0, 1.0))
+                    eur_strength = float(np.clip(np.mean(eur_mom_list) * 100, -1.0, 1.0))
+                    
+                    self._state.eur_strength = eur_strength
+                    self._state.usd_strength = usd_strength
+                    return
+        except Exception as e:
+            logger.warning("Failed cross-pair currency strength calculation: %s. Falling back to single-pair momentum.", e)
+            
+        # Fallback to single-pair momentum proxy
         if len(self._h1_closes) >= 4:
             closes = list(self._h1_closes)
             r1 = (closes[-1] - closes[-2]) / (closes[-2] + 1e-8)
@@ -382,8 +467,6 @@ class LiveWorldState:
             r3 = (closes[-3] - closes[-4]) / (closes[-4] + 1e-8)
             base_strength = float(np.clip((r1 + r2 + r3) * 100, -1.0, 1.0))
             quote_strength = -base_strength
-            
-            # Map dynamic strengths to correct state attributes for backward-compatibility
             self._state.eur_strength = base_strength
             self._state.usd_strength = quote_strength
 
@@ -710,7 +793,7 @@ class LiveMarketEvidence:
             self._evidence.ny_range_low = 0.0
 
     def _update_swing_points(self):
-        """Detect new swing highs/lows from H1 candle history."""
+        """Detect new swing highs/lows from H1 candle history with time-weighted decay and re-validation."""
         candles = list(self._h1_candles)
         if len(candles) < 5:
             return
@@ -720,20 +803,107 @@ class LiveMarketEvidence:
         c = candles[i]
         left1, left2 = candles[i-1], candles[i-2]
         right1, right2 = candles[i+1], candles[i+2]
+        
+        pip_2 = 2.0 * self._pip_mult
+        now_time = datetime.now()
 
-        # Swing high
+        # Update and decay existing highs
+        updated_highs = []
+        for sh in self._evidence.swing_highs:
+            try:
+                level_dt = datetime.strptime(sh["time"], "%Y-%m-%d %H:%M")
+                hours_elapsed = (now_time - level_dt).total_seconds() / 3600.0
+            except Exception:
+                hours_elapsed = 0
+            
+            # Decay strength by 0.01 per hour elapsed since creation
+            base_strength = sh.get("strength", 3.0)
+            decayed_strength = base_strength - (hours_elapsed * 0.01)
+            
+            # Check if price re-tested this level (within 2 pips of candle close)
+            last_high = candles[-1].high
+            touches = sh.get("touches", 1)
+            if abs(last_high - sh["price"]) <= pip_2:
+                touches += 1
+                decayed_strength = min(decayed_strength + 1.0, 5.0)
+                sh["time"] = now_time.strftime("%Y-%m-%d %H:%M") # Refresh time
+                
+            sh["strength"] = round(float(np.clip(decayed_strength, 0.5, 5.0)), 2)
+            sh["touches"] = touches
+            
+            if sh["strength"] > 1.0:
+                updated_highs.append(sh)
+
+        # Detect new swing high
         if (c.high > left1.high and c.high > left2.high and
                 c.high > right1.high and c.high > right2.high):
-            new_sh = {"price": c.high, "time": c.open_time.strftime("%Y-%m-%d %H:%M")}
-            self._evidence.swing_highs.insert(0, new_sh)
-            self._evidence.swing_highs = self._evidence.swing_highs[:5]  # Keep last 5
+            duplicate = False
+            for sh in updated_highs:
+                if abs(sh["price"] - c.high) <= pip_2:
+                    duplicate = True
+                    sh["touches"] = sh.get("touches", 1) + 1
+                    sh["strength"] = min(sh.get("strength", 3.0) + 1.0, 5.0)
+                    sh["time"] = c.open_time.strftime("%Y-%m-%d %H:%M")
+                    break
+            if not duplicate:
+                new_sh = {
+                    "price": float(c.high), 
+                    "time": c.open_time.strftime("%Y-%m-%d %H:%M"),
+                    "strength": 3.0,
+                    "touches": 1
+                }
+                updated_highs.insert(0, new_sh)
 
-        # Swing low
+        updated_highs = sorted(updated_highs, key=lambda x: (-x.get("strength", 3.0), -x.get("touches", 1)))
+        self._evidence.swing_highs = updated_highs[:5]
+
+        # Update and decay existing lows
+        updated_lows = []
+        for sl in self._evidence.swing_lows:
+            try:
+                level_dt = datetime.strptime(sl["time"], "%Y-%m-%d %H:%M")
+                hours_elapsed = (now_time - level_dt).total_seconds() / 3600.0
+            except Exception:
+                hours_elapsed = 0
+                
+            base_strength = sl.get("strength", 3.0)
+            decayed_strength = base_strength - (hours_elapsed * 0.01)
+            
+            last_low = candles[-1].low
+            touches = sl.get("touches", 1)
+            if abs(last_low - sl["price"]) <= pip_2:
+                touches += 1
+                decayed_strength = min(decayed_strength + 1.0, 5.0)
+                sl["time"] = now_time.strftime("%Y-%m-%d %H:%M")
+                
+            sl["strength"] = round(float(np.clip(decayed_strength, 0.5, 5.0)), 2)
+            sl["touches"] = touches
+            
+            if sl["strength"] > 1.0:
+                updated_lows.append(sl)
+
+        # Detect new swing low
         if (c.low < left1.low and c.low < left2.low and
                 c.low < right1.low and c.low < right2.low):
-            new_sl = {"price": c.low, "time": c.open_time.strftime("%Y-%m-%d %H:%M")}
-            self._evidence.swing_lows.insert(0, new_sl)
-            self._evidence.swing_lows = self._evidence.swing_lows[:5]
+            duplicate = False
+            for sl in updated_lows:
+                if abs(sl["price"] - c.low) <= pip_2:
+                    duplicate = True
+                    sl["touches"] = sl.get("touches", 1) + 1
+                    sl["strength"] = min(sl.get("strength", 3.0) + 1.0, 5.0)
+                    sl["time"] = c.open_time.strftime("%Y-%m-%d %H:%M")
+                    break
+            if not duplicate:
+                new_sl = {
+                    "price": float(c.low), 
+                    "time": c.open_time.strftime("%Y-%m-%d %H:%M"),
+                    "strength": 3.0,
+                    "touches": 1
+                }
+                updated_lows.insert(0, new_sl)
+
+        updated_lows = sorted(updated_lows, key=lambda x: (-x.get("strength", 3.0), -x.get("touches", 1)))
+        self._evidence.swing_lows = updated_lows[:5]
 
     def _update_key_levels(self, current_price: float):
         """Refresh key levels within 20 pips of current price."""

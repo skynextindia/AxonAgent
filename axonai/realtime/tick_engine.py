@@ -131,7 +131,7 @@ class TickEngine(threading.Thread):
         self.on_candle_close_callback: Optional[Callable] = None
 
         # Internal state for polling
-        self._last_tick_time: Optional[datetime] = None
+        self._last_tick_time_msc: Optional[int] = None
         self._mt5 = None
         self._tick_count: int = 0
 
@@ -155,13 +155,13 @@ class TickEngine(threading.Thread):
             # Pre-seed active candles from MT5
             self._preseed_active_candles()
 
-            # Initialize last tick time to current tick
+            # Initialize last tick time to current tick using millisecond timestamp
             tick = mt5.symbol_info_tick(self.symbol)
             if tick is not None:
-                self._last_tick_time = datetime.utcfromtimestamp(tick.time)
-                logger.info("TickEngine: Set last tick time to %s", self._last_tick_time)
+                self._last_tick_time_msc = int(tick.time_msc)
+                logger.info("TickEngine: Set last tick time msc to %d", self._last_tick_time_msc)
             else:
-                self._last_tick_time = datetime.utcnow()
+                self._last_tick_time_msc = int(time.time() * 1000)
 
             return True
         except ImportError:
@@ -213,30 +213,30 @@ class TickEngine(threading.Thread):
         if self._mt5 is None:
             return []
         try:
-            if self._last_tick_time is None:
+            if self._last_tick_time_msc is None:
                 # First poll — get last 100 ticks
                 from_time = datetime.utcnow() - timedelta(seconds=10)
                 ticks = self._mt5.copy_ticks_from(
                     self.symbol, from_time, 100, self._mt5.COPY_TICKS_ALL
                 )
             else:
-                # Subsequent polls — get ticks since last known
+                # Subsequent polls — get ticks since last known using millisecond timestamp converted to seconds
+                from_sec = int(self._last_tick_time_msc // 1000)
                 ticks = self._mt5.copy_ticks_from(
-                    self.symbol, self._last_tick_time, 1000, self._mt5.COPY_TICKS_ALL
+                    self.symbol, from_sec, 1000, self._mt5.COPY_TICKS_ALL
                 )
             if ticks is None or len(ticks) == 0:
                 return []
 
-            # Filter out already-seen ticks
+            # Filter out already-seen ticks using millisecond accuracy to support multiple ticks per second
             new_ticks = []
             for t in ticks:
-                tick_time = datetime.utcfromtimestamp(t['time'])
-                if self._last_tick_time is None or tick_time > self._last_tick_time:
+                tick_msc = int(t['time_msc'])
+                if self._last_tick_time_msc is None or tick_msc > self._last_tick_time_msc:
                     new_ticks.append(t)
 
             if new_ticks:
-                last = new_ticks[-1]
-                self._last_tick_time = datetime.utcfromtimestamp(last['time'])
+                self._last_tick_time_msc = int(new_ticks[-1]['time_msc'])
 
             return new_ticks
         except Exception as e:

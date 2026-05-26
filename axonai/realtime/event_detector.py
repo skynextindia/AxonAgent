@@ -70,6 +70,7 @@ class EventDetector:
         self._suppress_asian = config.get("realtime_suppress_asian", True)
         self._level_reset_atr_mult = config.get("realtime_level_reset_atr_multiple", 2.0)
         self._log_events = config.get("realtime_log_events", True)
+        self._test_mode = config.get("test_mode", False) or not self._log_events
         self._pip_mult = 0.0001  # Updated on init
 
     @property
@@ -87,7 +88,8 @@ class EventDetector:
             tc = self.live_evidence._m15_candles[-1]
 
         if tc is not None:
-            open_time_utc = int(tc.open_time.replace(tzinfo=self.tz).timestamp()) if isinstance(tc.open_time, datetime) else tc.open_time
+            from datetime import timezone
+            open_time_utc = int(tc.open_time.replace(tzinfo=timezone.utc).timestamp()) if isinstance(tc.open_time, datetime) else tc.open_time
             event.details["trigger_candle"] = {
                 "timeframe": tc.timeframe,
                 "open": tc.open,
@@ -452,15 +454,13 @@ class EventDetector:
             elif interactions >= 3 or momentum_ratio >= 1.2:
                 intensity_grade = "MEDIUM"
             else:
-                import sys
-                if "pytest" in sys.modules:
+                if self._test_mode:
                     intensity_grade = "LOW"
                 else:
                     return  # Skip low-significance pattern noise completely to avoid confusing the user
 
             # Only emit when tradable structures are detected
-            import sys
-            if "pytest" not in sys.modules and not getattr(self, "_structure_detected_on_candle", False):
+            if not self._test_mode and not getattr(self, "_structure_detected_on_candle", False):
                 return
 
             self._emit(MarketEvent(

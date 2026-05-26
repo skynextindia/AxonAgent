@@ -131,11 +131,38 @@ class DashboardServer:
                 while True:
                     try:
                         data = await websocket.receive_json()
-                        if isinstance(data, dict) and data.get("type") == "ping":
-                            await websocket.send_json({
-                                "type": "pong",
-                                "timestamp": data.get("timestamp")
-                            })
+                        if isinstance(data, dict):
+                            msg_type = data.get("type")
+                            if msg_type == "ping":
+                                await websocket.send_json({
+                                    "type": "pong",
+                                    "timestamp": data.get("timestamp")
+                                })
+                            elif msg_type == "switch_pair":
+                                pair = data.get("pair")
+                                mt5_symbol = data.get("mt5")
+                                is_active = False
+                                with self._lock:
+                                    if self.daemon:
+                                        d_clean = self.daemon.mt5_symbol.replace("=X", "").replace("=x", "").upper()
+                                        p_clean = mt5_symbol.replace("=X", "").replace("=x", "").upper() if mt5_symbol else ""
+                                        yf_clean = self.daemon.yf_symbol.replace("=X", "").replace("=x", "").upper()
+                                        if d_clean in p_clean or p_clean in d_clean or yf_clean in p_clean or p_clean in yf_clean:
+                                            is_active = True
+                                
+                                if is_active:
+                                    logger.info("Dashboard WS: client switched back to active symbol, re-hydrating")
+                                    await self._hydrate_client(websocket)
+                                else:
+                                    daemon_sym = self.daemon.yf_symbol if self.daemon else "EURUSD=X"
+                                    await websocket.send_json({
+                                        "type": "agent",
+                                        "agent_name": "SYSTEM",
+                                        "status": "active",
+                                        "message": f"[WARNING] The trading daemon is currently locked to {daemon_sym}. Live telemetry and cognitive execution are active for that pair only. To monitor or trade {pair}, restart the daemon using: python cli/main.py live --ticker \"{pair}\"",
+                                        "tool_calls": [],
+                                        "timestamp": datetime.now().strftime("%H:%M:%S")
+                                    })
                     except Exception:
                         try:
                             # Clear buffer if raw string is sent instead
