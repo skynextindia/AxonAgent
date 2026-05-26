@@ -107,94 +107,36 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
             if reasoning is not None:
                 generation.message.additional_kwargs["reasoning_content"] = reasoning
         return chat_result
-
-
-class MinimaxChatOpenAI(NormalizedChatOpenAI):
-    """MiniMax-specific overrides on top of the OpenAI-compatible client.
-
-    M2.x reasoning models embed ``<think>...</think>`` blocks directly in
-    ``message.content`` by default, which would pollute saved reports.
-    Per platform.minimax.io/docs/api-reference/text-openai-api, setting
-    ``reasoning_split=True`` in the request body redirects the thinking
-    block into ``reasoning_details`` so ``content`` stays clean.
-
-    The flag is gated by ``ModelCapabilities.requires_reasoning_split``
-    because non-reasoning MiniMax endpoints (Coding Plan, MiniMax-Text-01)
-    reject the parameter via the openai SDK's strict kwarg validation
-    (#826).
-
-    Tool-choice handling for M2.x — those models accept only the string
-    enum ``{"none", "auto"}`` and reject langchain's function-spec dict —
-    is handled by the capability dispatch in
-    ``NormalizedChatOpenAI.with_structured_output``, not here.
-    """
-
-    def _get_request_payload(self, input_, *, stop=None, **kwargs):
-        payload = super()._get_request_payload(input_, stop=stop, **kwargs)
-        if get_capabilities(self.model_name).requires_reasoning_split:
-            payload.setdefault("reasoning_split", True)
-        return payload
-
-
 # Kwargs forwarded from user config to ChatOpenAI
 _PASSTHROUGH_KWARGS = (
     "timeout", "max_retries", "reasoning_effort",
     "api_key", "callbacks", "http_client", "http_async_client",
 )
 
-# Provider base URLs. API-key env vars live in api_key_env.PROVIDER_API_KEY_ENV
-# (one canonical mapping consulted by both this client and the CLI's
-# interactive key-prompt). Dual-region providers (qwen/glm/minimax) keep
-# separate endpoints because international and China accounts cannot share
-# credentials (#758).
 _PROVIDER_BASE_URL = {
-    "xai":        "https://api.x.ai/v1",
     "deepseek":   "https://api.deepseek.com",
-    "qwen":       "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-    "qwen-cn":    "https://dashscope.aliyuncs.com/compatible-mode/v1",
-    "glm":        "https://api.z.ai/api/paas/v4/",
-    "glm-cn":     "https://open.bigmodel.cn/api/paas/v4/",
-    "minimax":    "https://api.minimax.io/v1",
-    "minimax-cn": "https://api.minimaxi.com/v1",
-    "openrouter": "https://openrouter.ai/api/v1",
-    "ollama":     "http://localhost:11434/v1",
 }
 
 
 def _resolve_provider_base_url(provider: str) -> Optional[str]:
-    """Default base URL for ``provider``, with env-var overrides where defined.
-
-    Currently only Ollama supports an env-var override (``OLLAMA_BASE_URL``),
-    matching the convention in the broader Ollama tooling ecosystem so users
-    can point at a remote ollama-serve without editing code. The check is
-    call-time, not import-time, so tests that monkeypatch the env after
-    import behave correctly.
-    """
-    if provider == "ollama":
-        env_url = os.environ.get("OLLAMA_BASE_URL")
-        if env_url:
-            return env_url
+    """Default base URL for ``provider``."""
     return _PROVIDER_BASE_URL.get(provider)
 
 
 class OpenAIClient(BaseLLMClient):
-    """Client for OpenAI, Ollama, OpenRouter, and xAI providers.
-
-    For native OpenAI models, uses the Responses API (/v1/responses) which
-    supports reasoning_effort with function tools across all model families
-    (GPT-4.1, GPT-5). Third-party compatible providers (xAI, OpenRouter,
-    Ollama) use standard Chat Completions.
-    """
+    """Client for DeepSeek provider."""
 
     def __init__(
         self,
         model: str,
         base_url: Optional[str] = None,
-        provider: str = "openai",
+        provider: str = "deepseek",
         **kwargs,
     ):
         super().__init__(model, base_url, **kwargs)
         self.provider = provider.lower()
+        if self.provider != "deepseek":
+            raise ValueError(f"Unsupported LLM provider: {provider}")
 
     def get_llm(self) -> Any:
         """Return configured ChatOpenAI instance."""
@@ -204,42 +146,26 @@ class OpenAIClient(BaseLLMClient):
         # Provider-specific base URL and auth. An explicit base_url on the
         # client (e.g. a corporate proxy) takes precedence over the
         # provider default so users can route through their own gateway.
-        if self.provider in _PROVIDER_BASE_URL:
-            llm_kwargs["base_url"] = self.base_url or _resolve_provider_base_url(self.provider)
-            api_key_env = get_api_key_env(self.provider)
-            if api_key_env:
-                api_key = os.environ.get(api_key_env)
-                if api_key:
-                    llm_kwargs["api_key"] = api_key
-                else:
-                    raise ValueError(
-                        f"API key for provider '{self.provider}' is not set. "
-                        f"Please set the {api_key_env} environment variable "
-                        f"(e.g. add {api_key_env}=your_key to your .env file)."
-                    )
+        llm_kwargs["base_url"] = self.base_url or _resolve_provider_base_url(self.provider)
+        api_key_env = get_api_key_env(self.provider)
+        if api_key_env:
+            api_key = os.environ.get(api_key_env)
+            if api_key:
+                llm_kwargs["api_key"] = api_key
             else:
-                llm_kwargs["api_key"] = "ollama"
-        elif self.base_url:
-            llm_kwargs["base_url"] = self.base_url
+                raise ValueError(
+                    f"API key for provider '{self.provider}' is not set. "
+                    f"Please set the {api_key_env} environment variable "
+                    f"(e.g. add {api_key_env}=your_key to your .env file)."
+                )
 
         # Forward user-provided kwargs
         for key in _PASSTHROUGH_KWARGS:
             if key in self.kwargs:
                 llm_kwargs[key] = self.kwargs[key]
 
-        # Native OpenAI: use Responses API for consistent behavior across
-        # all model families. Third-party providers use Chat Completions.
-        if self.provider == "openai":
-            llm_kwargs["use_responses_api"] = True
-
-        # Provider-specific quirks live in their own subclasses so the
-        # base NormalizedChatOpenAI stays free of provider branches.
-        if self.provider == "deepseek":
-            chat_cls = DeepSeekChatOpenAI
-        elif self.provider in ("minimax", "minimax-cn"):
-            chat_cls = MinimaxChatOpenAI
-        else:
-            chat_cls = NormalizedChatOpenAI
+        # DeepSeek-specific quirks live in DeepSeekChatOpenAI
+        chat_cls = DeepSeekChatOpenAI
         return chat_cls(**llm_kwargs)
 
     def validate_model(self) -> bool:

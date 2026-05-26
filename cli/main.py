@@ -613,24 +613,14 @@ def get_user_selections(
     selected_llm_provider = None
     backend_url = None
     providers_map = {
-        "openai": "https://api.openai.com/v1",
-        "google": None,
-        "anthropic": "https://api.anthropic.com/",
-        "xai": "https://api.x.ai/v1",
         "deepseek": "https://api.deepseek.com",
-        "qwen": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        "glm": "https://open.bigmodel.cn/api/paas/v4/",
-        "minimax": "https://api.minimax.io/v1",
-        "openrouter": "https://openrouter.ai/api/v1",
-        "azure": None,
-        "ollama": os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434/v1"
     }
 
     if provider:
         selected_llm_provider = provider.lower()
         backend_url = providers_map.get(selected_llm_provider)
     elif non_interactive:
-        selected_llm_provider = (os.environ.get("AXONAI_LLM_PROVIDER") or DEFAULT_CONFIG.get("llm_provider", "ollama")).lower()
+        selected_llm_provider = (os.environ.get("AXONAI_LLM_PROVIDER") or DEFAULT_CONFIG.get("llm_provider", "deepseek")).lower()
         backend_url = providers_map.get(selected_llm_provider)
     else:
         console.print(
@@ -639,17 +629,6 @@ def get_user_selections(
             )
         )
         selected_llm_provider, backend_url = select_llm_provider()
-
-        if selected_llm_provider == "qwen":
-            selected_llm_provider, backend_url = ask_qwen_region()
-        elif selected_llm_provider == "minimax":
-            selected_llm_provider, backend_url = ask_minimax_region()
-        elif selected_llm_provider == "glm":
-            selected_llm_provider, backend_url = ask_glm_region()
-
-        if selected_llm_provider == "ollama":
-            confirm_ollama_endpoint(backend_url)
-
         ensure_api_key(selected_llm_provider)
 
     # Step 7: Thinking agents
@@ -659,7 +638,7 @@ def get_user_selections(
     if shallow_thinker:
         selected_shallow_thinker = shallow_thinker
     elif non_interactive:
-        selected_shallow_thinker = os.environ.get("AXONAI_QUICK_THINK_LLM") or DEFAULT_CONFIG.get("quick_think_llm", "qwen2.5-coder:3b")
+        selected_shallow_thinker = os.environ.get("AXONAI_QUICK_THINK_LLM") or DEFAULT_CONFIG.get("quick_think_llm", "deepseek-chat")
     else:
         console.print(
             create_question_box(
@@ -671,55 +650,9 @@ def get_user_selections(
     if deep_thinker:
         selected_deep_thinker = deep_thinker
     elif non_interactive:
-        selected_deep_thinker = os.environ.get("AXONAI_DEEP_THINK_LLM") or DEFAULT_CONFIG.get("deep_think_llm", "qwen2.5-coder:3b")
+        selected_deep_thinker = os.environ.get("AXONAI_DEEP_THINK_LLM") or DEFAULT_CONFIG.get("deep_think_llm", "deepseek-reasoner")
     else:
         selected_deep_thinker = select_deep_thinking_agent(selected_llm_provider)
-
-    # Step 8: Provider-specific thinking configuration
-    thinking_level = None
-    reasoning_effort = None
-    anthropic_effort = None
-
-    provider_lower = selected_llm_provider.lower()
-    if provider_lower == "google":
-        if google_thinking_level:
-            thinking_level = google_thinking_level
-        elif non_interactive:
-            thinking_level = os.environ.get("AXONAI_GOOGLE_THINKING_LEVEL") or DEFAULT_CONFIG.get("google_thinking_level", "high")
-        else:
-            console.print(
-                create_question_box(
-                    "Step 8: Thinking Mode",
-                    "Configure Gemini thinking mode"
-                )
-            )
-            thinking_level = ask_gemini_thinking_config()
-    elif provider_lower == "openai":
-        if openai_reasoning_effort:
-            reasoning_effort = openai_reasoning_effort
-        elif non_interactive:
-            reasoning_effort = os.environ.get("AXONAI_OPENAI_REASONING_EFFORT") or DEFAULT_CONFIG.get("openai_reasoning_effort", "medium")
-        else:
-            console.print(
-                create_question_box(
-                    "Step 8: Reasoning Effort",
-                    "Configure OpenAI reasoning effort level"
-                )
-            )
-            reasoning_effort = ask_openai_reasoning_effort()
-    elif provider_lower == "anthropic":
-        if anthropic_effort:
-            anthropic_effort = anthropic_effort
-        elif non_interactive:
-            anthropic_effort = os.environ.get("AXONAI_ANTHROPIC_EFFORT") or DEFAULT_CONFIG.get("anthropic_effort", "high")
-        else:
-            console.print(
-                create_question_box(
-                    "Step 8: Effort Level",
-                    "Configure Claude effort level"
-                )
-            )
-            anthropic_effort = ask_anthropic_effort()
 
     return {
         "ticker": selected_ticker,
@@ -731,9 +664,9 @@ def get_user_selections(
         "backend_url": backend_url,
         "shallow_thinker": selected_shallow_thinker,
         "deep_thinker": selected_deep_thinker,
-        "google_thinking_level": thinking_level,
-        "openai_reasoning_effort": reasoning_effort,
-        "anthropic_effort": anthropic_effort,
+        "google_thinking_level": None,
+        "openai_reasoning_effort": None,
+        "anthropic_effort": None,
         "output_language": output_language,
         "non_interactive": non_interactive,
     }

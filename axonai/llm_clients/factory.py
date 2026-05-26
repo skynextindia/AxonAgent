@@ -4,11 +4,7 @@ from .base_client import BaseLLMClient
 
 # Providers that use the OpenAI-compatible chat completions API
 _OPENAI_COMPATIBLE = (
-    "openai", "xai", "deepseek",
-    "qwen", "qwen-cn",
-    "glm", "glm-cn",
-    "minimax", "minimax-cn",
-    "ollama", "openrouter",
+    "deepseek",
 )
 
 
@@ -36,30 +32,10 @@ def create_llm_client(
     Raises:
         ValueError: If provider is not supported
     """
-    from .model_catalog import resolve_provider_from_model
-    resolved_provider = resolve_provider_from_model(model)
+    provider_lower = provider.lower() if provider else "deepseek"
+    if provider_lower != "deepseek":
+        raise ValueError(f"Unsupported LLM provider: {provider}")
 
-    current_provider_lower = provider.lower() if provider else "openai"
-    if resolved_provider and resolved_provider != current_provider_lower:
-        if current_provider_lower not in ("openrouter", "ollama", "azure"):
-            provider = resolved_provider
+    from .openai_client import OpenAIClient
+    return OpenAIClient(model, base_url, provider=provider_lower, **kwargs)
 
-    provider_lower = provider.lower() if provider else "openai"
-
-    if provider_lower in _OPENAI_COMPATIBLE:
-        from .openai_client import OpenAIClient
-        return OpenAIClient(model, base_url, provider=provider_lower, **kwargs)
-
-    if provider_lower == "anthropic":
-        from .anthropic_client import AnthropicClient
-        return AnthropicClient(model, base_url, **kwargs)
-
-    if provider_lower == "google":
-        from .google_client import GoogleClient
-        return GoogleClient(model, base_url, **kwargs)
-
-    if provider_lower == "azure":
-        from .azure_client import AzureOpenAIClient
-        return AzureOpenAIClient(model, base_url, **kwargs)
-
-    raise ValueError(f"Unsupported LLM provider: {provider}")
