@@ -74,6 +74,12 @@ Respond with this exact JSON — no other text:
 
         prompt += f"\n{lessons_line}"
 
+        prompt += "\n\n--- REQUIRED CONTEXT ---\n"
+        prompt += f"Instrument: {instrument_context}\n\n"
+        prompt += f"Research Plan (MUNGER):\n{research_plan}\n\n"
+        prompt += f"Trader Action (TUDOR):\n{trader_plan}\n\n"
+        prompt += f"Risk Analysis (MARKS):\n{history}\n"
+
         try:
             final_trade_decision = structured_llm.invoke(prompt)
             final_trade_decision = final_trade_decision.dict() if hasattr(final_trade_decision, "dict") else final_trade_decision
@@ -99,6 +105,18 @@ Respond with this exact JSON — no other text:
             "current_neutral_response": risk_debate_state["current_neutral_response"],
             "count": risk_debate_state["count"],
         }
+
+        if isinstance(final_trade_decision, dict):
+            # Render to markdown to match expected downstream format
+            final_trade_decision = (
+                f"**Final Decision**: {final_trade_decision.get('direction', 'HOLD')}\n"
+                f"**Execute**: {final_trade_decision.get('execute', False)}\n"
+                f"**Confidence**: {final_trade_decision.get('confidence', 0)}%\n"
+                f"**Lot Size**: {final_trade_decision.get('final_lot_size', 0.0)}\n"
+                f"**Reason**: {final_trade_decision.get('reason', '')}\n"
+                f"**Abort Reason**: {final_trade_decision.get('abort_reason', '')}\n"
+                f"\nFINAL TRANSACTION PROPOSAL: **{final_trade_decision.get('direction', 'HOLD')}**"
+            )
 
         return {
             "risk_debate_state": new_risk_debate_state,

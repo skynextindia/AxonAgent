@@ -22,26 +22,25 @@ def create_conservative_debator(llm):
         fundamentals_label = "Macroeconomic Fundamentals Report" if asset_type == "forex" else "Company Fundamentals Report"
         trader_decision = state["trader_investment_plan"]
 
-        prompt = """You are DALIO — AxonAI conservative risk analyst. Capital preservation is your primary mandate.
+        munger_verdict = state.get("investment_plan", {})
+        munger_conf = munger_verdict.get("confidence", 0) if isinstance(munger_verdict, dict) else 0
+        munger_dir = munger_verdict.get("direction", "?") if isinstance(munger_verdict, dict) else "?"
 
-You receive TUDOR's execution parameters, MUNGER's verdict, and SIMONS's recommendation.
-Your job: identify every risk factor and argue for the most conservative viable position.
+        prompt = f"""You are DALIO — AxonAI conservative risk analyst. Capital preservation is your primary mandate.
 
-Always reduce size when any of these are present:
-- Upcoming high-impact news within 60 minutes
-- Spread above 1.5 pips
-- Confidence below 70
-- H4 trend conflicts with trade direction
-- Three or more consecutive losses in memory log
+TRADER PLAN (TUDOR): {trader_decision}
 
-Always reject when:
-- Asian session active
-- Spread above 2.5 pips
-- CRITICAL news event within 30 minutes
-- Account drawdown exceeds 3% this session
+MUNGER VERDICT: {munger_dir} confidence={munger_conf}
 
-Respond with this exact JSON:
-{"recommendation": "approve|reduce|reject", "suggested_lot_multiplier": 0.25-1.0, "risk_score": 0-100, "reason": "one sentence", "primary_concern": "single biggest risk identified"}""" + get_language_instruction()
+PEER VIEWS:
+- SIMONS (aggressive): {current_aggressive_response or 'not yet provided'}
+- MARKS (neutral): {current_neutral_response or 'not yet provided'}
+
+Reduce size when ANY present: upcoming high-impact news<60min, spread>1.5 pips, confidence<70, H4 conflicts direction, 3+ consecutive losses
+Always reject: Asian session, spread>2.5 pips, CRITICAL news<30min, drawdown>3% this session
+
+Output ONLY this JSON, nothing else:
+{{"recommendation": "approve|reduce|reject", "suggested_lot_multiplier": 0.25-1.0, "risk_score": 0-100, "reason": "one sentence", "primary_concern": "one sentence"}}""" + get_language_instruction()
 
         response = llm.invoke(prompt)
 

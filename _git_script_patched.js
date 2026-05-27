@@ -1,651 +1,4 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AXON.AI // Cognitive Intelligence System</title>
-    <!-- Google Fonts: JetBrains Mono for full terminal cockpit style -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&display=swap" rel="stylesheet">
-    <!-- Tailwind CSS (CDN) -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    fontFamily: {
-                        mono: ['"JetBrains Mono"', 'monospace'],
-                    },
-                }
-            }
-        }
-    </script>
-    <!-- Lightweight Charts CDN -->
-    <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
-    <style>
-        /* === AXON.AI TERMINAL COCKPIT === */
-        /* Bloomberg-inspired: neutral greys for structure, color only for data */
-        :root {
-            --bg-0: #000000;       /* deepest black */
-            --bg-1: #0a0a0a;       /* panel background */
-            --bg-2: #111111;       /* hover / elevated */
-            --border: #2a2a2a;     /* neutral structural border */
-            --border-dim: #1a1a1a; /* subtle dividers */
-            --text-primary: #e0e0e0;
-            --text-secondary: #888888;
-            --text-dim: #444444;
-            --green: #00c853;      /* buy / positive */
-            --red: #ff3d3d;        /* sell / negative */
-            --cyan: #00b8d4;       /* info / label accent */
-            --amber: #ffab00;      /* warning */
-            --purple: #9c27b0;     /* signal */
-            --white: #ffffff;
-        }
 
-        * { box-sizing: border-box; }
-
-        body {
-            background-color: var(--bg-0);
-            color: var(--text-primary);
-            font-family: 'JetBrains Mono', monospace;
-            overflow: hidden;
-            height: 100vh;
-            max-height: 100vh;
-            font-size: 11px;
-        }
-
-        /* Panels: neutral grey borders, not green */
-        .cyber-panel {
-            background: var(--bg-1);
-            border: 1px solid var(--border);
-            box-shadow: none;
-            transition: border-color 0.15s;
-        }
-        .cyber-panel:hover { border-color: #3a3a3a; }
-
-        /* Data color classes */
-        .accent-cyan    { color: var(--cyan); }
-        .accent-rose    { color: var(--red); }
-        .accent-emerald { color: var(--green); }
-        .accent-purple  { color: var(--purple); }
-        .accent-amber   { color: var(--amber); }
-
-        .border-glow-cyan   { border-color: var(--cyan) !important; }
-        .border-glow-rose   { border-color: var(--red) !important; }
-        .border-glow-emerald{ border-color: var(--green) !important; }
-
-        /* Section labels */
-        .section-label {
-            font-size: 9px;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            color: var(--text-secondary);
-            font-weight: 700;
-        }
-
-        /* Currency pair navigator */
-        #pair-navigator {
-            display: flex;
-            gap: 4px;
-            overflow-x: auto;
-            scrollbar-width: none;
-            flex-shrink: 0;
-        }
-        #pair-navigator::-webkit-scrollbar { display: none; }
-        .pair-btn {
-            flex-shrink: 0;
-            padding: 4px 10px;
-            border: 1px solid var(--border);
-            background: var(--bg-1);
-            color: var(--text-secondary);
-            font-size: 10px;
-            font-family: 'JetBrains Mono', monospace;
-            font-weight: 700;
-            cursor: pointer;
-            letter-spacing: 0.05em;
-            transition: all 0.12s;
-        }
-        .pair-btn:hover {
-            border-color: var(--cyan);
-            color: var(--cyan);
-        }
-        .pair-btn.active {
-            border-color: var(--cyan);
-            background: rgba(0,184,212,0.08);
-            color: var(--cyan);
-        }
-
-        /* Tick heartbeat */
-        @keyframes pulse-dot {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.3; }
-        }
-        .tick-heartbeat { animation: pulse-dot 1s infinite; }
-
-        /* Blink cursor */
-        .cursor {
-            display: inline-block;
-            width: 6px;
-            height: 12px;
-            background: var(--cyan);
-            animation: blink 1s step-end infinite;
-            vertical-align: middle;
-        }
-        @keyframes blink { from,to{opacity:0} 50%{opacity:1} }
-
-        /* Scrollbars */
-        ::-webkit-scrollbar { width: 3px; height: 3px; }
-        ::-webkit-scrollbar-track { background: transparent; }
-        ::-webkit-scrollbar-thumb { background: #2a2a2a; }
-        ::-webkit-scrollbar-thumb:hover { background: #444; }
-
-        /* Hazard stripes */
-        .hazard-bg-buy {
-            background: repeating-linear-gradient(-45deg,
-                rgba(0,200,83,0.04), rgba(0,200,83,0.04) 10px,
-                transparent 10px, transparent 20px);
-        }
-        .hazard-bg-sell {
-            background: repeating-linear-gradient(-45deg,
-                rgba(255,61,61,0.04), rgba(255,61,61,0.04) 10px,
-                transparent 10px, transparent 20px);
-        }
-
-        /* Hide TradingView attribution */
-        a[href*="tradingview.com"],
-        div[class*="attribution"],
-        span[class*="attribution"],
-        *[class*="tv-logo"] {
-            display: none !important;
-            height: 0 !important;
-            width: 0 !important;
-        }
-    </style>
-</head>
-
-<body style="margin:0;padding:8px;display:flex;flex-direction:column;height:100vh;max-height:100vh;overflow:hidden;background:var(--bg-0);">
-
-    <!-- ═══════════════════════════════════ HEADER ═══════════════════════════════════ -->
-    <header style="display:flex;align-items:center;gap:16px;height:44px;flex-shrink:0;border-bottom:1px solid var(--border);padding:0 12px;margin-bottom:6px;">
-        <!-- Logo -->
-        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-            <span style="color:var(--cyan);font-size:16px;font-weight:900;letter-spacing:0.05em;">AXON<span style="color:var(--text-secondary);">.AI</span></span>
-            <div style="display:flex;align-items:center;gap:5px;">
-                <span id="socket-light" style="width:7px;height:7px;border-radius:50%;background:#ff3d3d;flex-shrink:0;"></span>
-                <span id="socket-status" style="font-size:9px;color:#ff3d3d;font-weight:700;letter-spacing:0.1em;">OFFLINE</span>
-            </div>
-        </div>
-
-        <!-- Separator -->
-        <div style="width:1px;height:28px;background:var(--border);flex-shrink:0;"></div>
-
-        <!-- Account metrics -->
-        <div style="display:flex;gap:20px;align-items:center;">
-            <div style="display:flex;flex-direction:column;">
-                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">BALANCE</span>
-                <span id="broker-balance-val" style="font-size:13px;font-weight:700;color:var(--text-primary);">$0.00</span>
-            </div>
-            <div style="display:flex;flex-direction:column;">
-                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">EQUITY</span>
-                <span id="broker-equity-val" style="font-size:13px;font-weight:700;color:var(--text-primary);">$0.00</span>
-            </div>
-            <div style="display:flex;flex-direction:column;">
-                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">PROFIT</span>
-                <span id="broker-profit-val" style="font-size:13px;font-weight:700;color:var(--green);">+$0.00</span>
-            </div>
-            <div style="display:flex;flex-direction:column;">
-                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">FREE MARGIN</span>
-                <span id="broker-margin-val" style="font-size:13px;font-weight:700;color:var(--text-primary);">$0.00</span>
-            </div>
-            <div style="display:flex;flex-direction:column;">
-                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">MARGIN LVL</span>
-                <span id="broker-marginlevel-val" style="font-size:13px;font-weight:700;color:var(--cyan);">0%</span>
-            </div>
-        </div>
-
-        <!-- Token Consumption Metrics -->
-        <div style="display:flex;gap:20px;align-items:center;border-left:1px solid var(--border);padding-left:20px;margin-left:20px;">
-            <div style="display:flex;flex-direction:column;">
-                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">TOTAL TOKENS</span>
-                <span id="token-total-val" style="font-size:13px;font-weight:700;color:var(--purple);">0</span>
-            </div>
-            <div style="display:flex;flex-direction:column;">
-                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">INPUT TOKENS</span>
-                <span id="token-input-val" style="font-size:11px;font-weight:600;color:var(--cyan);">0</span>
-            </div>
-            <div style="display:flex;flex-direction:column;">
-                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">OUTPUT TOKENS</span>
-                <span id="token-output-val" style="font-size:11px;font-weight:600;color:var(--amber);">0</span>
-            </div>
-            <div style="display:flex;flex-direction:column;">
-                <span style="font-size:9px;color:var(--text-dim);letter-spacing:0.08em;">LLM / TOOL CALLS</span>
-                <span id="token-calls-val" style="font-size:11px;font-weight:600;color:var(--text-primary);">0 / 0</span>
-            </div>
-        </div>
-
-        <!-- Spacer -->
-        <div style="flex:1;"></div>
-
-        <!-- Right: Uptime + Latency + Settings -->
-        <div style="display:flex;align-items:center;gap:16px;">
-            <div style="display:flex;flex-direction:column;align-items:flex-end;">
-                <span style="font-size:9px;color:var(--text-dim);">UPTIME</span>
-                <span id="header-uptime" style="font-size:12px;font-weight:600;color:var(--text-primary);">00:00:00</span>
-            </div>
-            <div style="display:flex;flex-direction:column;align-items:flex-end;">
-                <span style="font-size:9px;color:var(--text-dim);">LATENCY</span>
-                <span id="header-latency" style="font-size:12px;font-weight:600;color:var(--cyan);">--ms</span>
-            </div>
-            <button id="settings-trigger-btn" style="border:1px solid var(--border);background:var(--bg-1);color:var(--text-secondary);font-family:inherit;font-size:10px;font-weight:700;padding:4px 10px;cursor:pointer;letter-spacing:0.08em;">⚙ SETTINGS</button>
-        </div>
-    </header>
-
-    <!-- ═══════════════════════ CURRENCY PAIR NAVIGATOR ═══════════════════════ -->
-    <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;border-bottom:1px solid var(--border);padding:5px 4px;margin-bottom:6px;">
-        <span style="font-size:9px;color:var(--text-dim);font-weight:700;letter-spacing:0.1em;white-space:nowrap;flex-shrink:0;">PAIRS ›</span>
-        <div id="pair-navigator">
-            <button class="pair-btn active" data-pair="EURUSD=X" data-mt5="EURUSDm">EUR/USD</button>
-            <button class="pair-btn" data-pair="GBPUSD=X" data-mt5="GBPUSDm">GBP/USD</button>
-            <button class="pair-btn" data-pair="USDJPY=X" data-mt5="USDJPYm">USD/JPY</button>
-            <button class="pair-btn" data-pair="USDCHF=X" data-mt5="USDCHFm">USD/CHF</button>
-            <button class="pair-btn" data-pair="AUDUSD=X" data-mt5="AUDUSDm">AUD/USD</button>
-            <button class="pair-btn" data-pair="NZDUSD=X" data-mt5="NZDUSDm">NZD/USD</button>
-            <button class="pair-btn" data-pair="USDCAD=X" data-mt5="USDCADm">USD/CAD</button>
-            <button class="pair-btn" data-pair="EURGBP=X" data-mt5="EURGBPm">EUR/GBP</button>
-            <button class="pair-btn" data-pair="EURJPY=X" data-mt5="EURJPYm">EUR/JPY</button>
-            <button class="pair-btn" data-pair="GBPJPY=X" data-mt5="GBPJPYm">GBP/JPY</button>
-            <button class="pair-btn" data-pair="XAUUSD=X" data-mt5="XAUUSD">XAU/USD</button>
-        </div>
-        <div style="flex:1;"></div>
-        <!-- Active pair display -->
-        <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;">
-            <span style="font-size:9px;color:var(--text-dim);">ACTIVE</span>
-            <span id="header-ticker" style="font-size:13px;font-weight:700;color:var(--cyan);letter-spacing:0.05em;">EURUSD</span>
-        </div>
-    </div>
-
-    <!-- ══════════════════════════ WORKSPACE TABS ══════════════════════════ -->
-    <nav style="display:flex;gap:4px;flex-shrink:0;margin-bottom:6px;">
-        <button id="main-tab-cockpit-btn" style="border:1px solid var(--cyan);background:rgba(0,184,212,0.08);color:var(--cyan);font-family:inherit;font-size:10px;font-weight:700;padding:5px 16px;cursor:pointer;letter-spacing:0.08em;">▶ COCKPIT</button>
-        <button id="main-tab-intel-btn" style="border:1px solid var(--border);background:transparent;color:var(--text-secondary);font-family:inherit;font-size:10px;font-weight:700;padding:5px 16px;cursor:pointer;letter-spacing:0.08em;">◈ INTELLIGENCE</button>
-    </nav>
-
-    <!-- MAIN VIEWPORT -->
-    <main class="flex-grow min-h-0 overflow-hidden relative">
-
-        <!-- TAB 1: COCKPIT (Price Chart & Live Technical Telemetry side-by-side!) -->
-        <div id="main-tab-panel-cockpit" class="absolute inset-0 flex gap-3 min-h-0 overflow-hidden">
-            
-            <!-- Left Sidebar (Live technical metrics & Strength LED bars) -->
-            <div class="w-[260px] flex-shrink-0 flex flex-col gap-3 min-h-0 h-full overflow-y-auto pr-1">
-                <!-- CORE DIAGNOSTICS -->
-                <div class="cyber-panel p-3 flex flex-col justify-between h-[155px] flex-shrink-0 border-l-[3px] border-l-[#00f0ff] bg-[#040406]">
-                    <div class="flex justify-between items-center">
-                        <span class="text-[8px] text-zinc-400 uppercase tracking-widest font-bold flex items-center gap-1.5">
-                            <span class="w-1.5 h-1.5 tick-heartbeat"></span> CORE_FEED_DIAGNOSTICS
-                        </span>
-                        <div id="tick-activity-strip" class="flex gap-[1px] items-center">
-                            <span class="w-1.5 h-2.5 bg-zinc-950 border border-zinc-900"></span>
-                            <span class="w-1.5 h-2.5 bg-zinc-950 border border-zinc-900"></span>
-                            <span class="w-1.5 h-2.5 bg-zinc-950 border border-zinc-900"></span>
-                            <span class="w-1.5 h-2.5 bg-zinc-950 border border-zinc-900"></span>
-                            <span class="w-1.5 h-2.5 bg-zinc-950 border border-zinc-900"></span>
-                            <span class="w-1.5 h-2.5 bg-zinc-950 border border-zinc-900"></span>
-                        </div>
-                    </div>
-                    
-                    <div class="grid grid-cols-2 gap-2 mt-1.5 flex-shrink-0">
-                        <div class="bg-black border border-[#1f1f2e] py-1 px-2 text-center">
-                            <span class="text-[6.5px] text-zinc-500 uppercase block font-extrabold tracking-widest mb-0.5">BID</span>
-                            <span id="price-bid" class="text-xs font-black tracking-tight text-white">0.00000</span>
-                        </div>
-                        <div class="bg-black border border-[#1f1f2e] py-1 px-2 text-center">
-                            <span class="text-[6.5px] text-zinc-500 uppercase block font-extrabold tracking-widest mb-0.5">ASK</span>
-                            <span id="price-ask" class="text-xs font-black tracking-tight text-white">0.00000</span>
-                        </div>
-                    </div>
-
-                    <div class="flex flex-col gap-1 text-[8px] mt-1 border-t border-[#1f1f2e]/50 pt-1">
-                        <div class="flex justify-between items-center text-[7.5px]">
-                            <span class="text-zinc-500 font-bold uppercase">REACTIVE_COOLDOWN</span>
-                            <span id="ctrl-cooldown" class="text-[#00ff66] font-bold">READY</span>
-                        </div>
-                        <div class="w-full bg-[#0d0d0f] border border-[#1f1f2e] h-0.5 overflow-hidden">
-                            <div id="cooldown-bar" class="h-full bg-amber-500 transition-all duration-1000" style="width: 0%"></div>
-                        </div>
-                        <div class="grid grid-cols-3 gap-1 mt-0.5 text-center text-[7.5px] font-mono">
-                            <div class="bg-black border border-zinc-900 py-0.5">
-                                <span class="text-[5.5px] text-zinc-500 block font-bold">DETECTED</span>
-                                <span id="stats-detected" class="text-white font-bold">0</span>
-                            </div>
-                            <div class="bg-black border border-zinc-900 py-0.5">
-                                <span class="text-[5.5px] text-zinc-500 block font-bold">FIRED</span>
-                                <span id="stats-fired" class="text-[#00ff66] font-bold">0</span>
-                            </div>
-                            <div class="bg-black border border-zinc-900 py-0.5">
-                                <span class="text-[5.5px] text-zinc-500 block font-bold">GATED</span>
-                                <span id="stats-skipped" class="text-amber-500 font-bold">0</span>
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-3 gap-1 mt-1 text-center text-[7.5px] font-mono">
-                            <div class="bg-black border border-zinc-900 py-0.5">
-                                <span class="text-[5.5px] text-zinc-500 block font-bold">TOKENS IN</span>
-                                <span id="tokens-in" class="text-blue-400 font-bold">0</span>
-                            </div>
-                            <div class="bg-black border border-zinc-900 py-0.5">
-                                <span class="text-[5.5px] text-zinc-500 block font-bold">TOKENS OUT</span>
-                                <span id="tokens-out" class="text-fuchsia-400 font-bold">0</span>
-                            </div>
-                            <div class="bg-black border border-zinc-900 py-0.5">
-                                <span class="text-[5.5px] text-zinc-500 block font-bold">TOTAL TOKENS</span>
-                                <span id="tokens-total" class="text-[#00f0ff] font-bold">0</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- SIDEBAR TECHNICAL METRICS -->
-                <div class="cyber-panel p-3.5 flex-grow overflow-y-auto flex flex-col gap-4 font-mono text-[10px] bg-[#040406]">
-                    <!-- MTF Bias -->
-                    <div class="flex flex-col gap-2">
-                        <span class="text-[8.5px] text-[#00f0ff] uppercase tracking-widest font-black">MTF_BIAS</span>
-                        <div class="space-y-1.5 text-[9.5px]">
-                            <div class="flex justify-between border-b border-[#1f1f2e]/60 pb-1">H4 <span id="mtf-h4" class="ml-2 font-bold">--</span></div>
-                            <div class="flex justify-between border-b border-[#1f1f2e]/60 pb-1">H1 <span id="mtf-h1" class="ml-2 font-bold">--</span></div>
-                            <div class="flex justify-between pb-0.5">M15 <span id="mtf-m15" class="ml-2 font-bold">--</span></div>
-                        </div>
-                    </div>
-                    
-                    <!-- Strength -->
-                    <div class="flex flex-col gap-2 border-t border-[#1f1f2e]/50 pt-3">
-                        <span class="text-[8.5px] text-[#00f0ff] uppercase tracking-widest font-black">CURRENCY_STRENGTH</span>
-                        <div class="space-y-2.5 leading-none">
-                            <div class="flex justify-between items-center">
-                                <span class="text-zinc-400 font-bold w-6">EUR</span>
-                                <div class="flex items-center gap-1.5">
-                                    <span id="eur-bar" class="text-[10px] leading-none tracking-wide font-mono"></span>
-                                    <span id="eur-val" class="font-bold text-white text-[9px] w-7 text-right">--</span>
-                                </div>
-                            </div>
-                            <div class="flex justify-between items-center">
-                                <span class="text-zinc-400 font-bold w-6">USD</span>
-                                <div class="flex items-center gap-1.5">
-                                    <span id="usd-bar" class="text-[10px] leading-none tracking-wide font-mono"></span>
-                                    <span id="usd-val" class="font-bold text-white text-[9px] w-7 text-right">--</span>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- Regime Scores -->
-                    <div class="flex flex-col gap-2 border-t border-[#1f1f2e]/50 pt-3">
-                        <span class="text-[8.5px] text-[#00f0ff] uppercase tracking-widest font-black">REGIME_SCORES</span>
-                        <div id="regime-scores" class="flex flex-col gap-1.5 leading-none">
-                            <div class="text-zinc-600 italic">Awaiting regime scores...</div>
-                        </div>
-                    </div>
-
-                    <!-- London Session -->
-                    <div class="flex flex-col gap-2 border-t border-[#1f1f2e]/50 pt-3">
-                        <span class="text-[8.5px] text-[#00f0ff] uppercase tracking-widest font-black">LONDON_SESSION</span>
-                        <div class="space-y-1.5 text-[9.5px]">
-                            <div class="flex justify-between border-b border-[#1f1f2e]/60 pb-1">BIAS <span id="london-bias" class="ml-2 font-bold">--</span></div>
-                            <div class="flex justify-between border-b border-[#1f1f2e]/60 pb-1">LDN HIGH <span id="london-high-val" class="ml-2 text-white font-bold">--</span></div>
-                            <div class="flex justify-between pb-0.5">LDN LOW <span id="london-low-val" class="ml-2 text-white font-bold">--</span></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Right Column (Price Chart & HUD Viewport) -->
-            <div class="flex-grow flex flex-col gap-3 min-h-0 h-full overflow-hidden">
-                <!-- TOP STATS ROW -->
-                <div class="grid grid-cols-12 gap-3 h-[75px] flex-shrink-0">
-                    <!-- CONVICTION -->
-                    <div class="cyber-panel p-3 flex flex-col justify-between border-t border-t-[#9d00ff] col-span-2 bg-[#040406]">
-                        <div class="flex justify-between items-center">
-                            <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold">CONVICTION_BELIEF</span>
-                            <span id="belief-abort-flag" class="hidden text-[6px] bg-rose-950/30 border border-[#ff0055]/30 text-[#ff0055] px-1 py-0.2 font-bold animate-pulse">GATED_STATE</span>
-                        </div>
-                        <div class="flex items-end gap-3 mt-1">
-                            <span id="belief-val" class="text-lg font-black text-white leading-none">0.00</span>
-                            <div class="flex-1 h-1 bg-[#0d0d0f] border border-zinc-900 overflow-hidden relative mb-0.5">
-                                <div id="belief-bar" class="h-full bg-gradient-to-r from-[#9d00ff] via-[#00f0ff] to-[#00ff66]" style="width: 0%"></div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- DOMINANT REGIME -->
-                    <div class="cyber-panel p-3 flex flex-col justify-between border-t border-t-[#00f0ff] col-span-3 bg-[#040406]">
-                        <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold">MARKET_REGIME</span>
-                        <div class="flex justify-between items-end mt-1">
-                            <div class="flex flex-col">
-                                <span id="regime-type" class="text-sm font-black text-[#00f0ff] uppercase tracking-wider leading-none">UNKNOWN</span>
-                                <span id="regime-vol" class="text-[6.5px] text-zinc-500 mt-1 uppercase font-bold">VOL: MED | ATR: 0.0</span>
-                            </div>
-                            <div class="flex flex-col items-end">
-                                <span id="regime-conf" class="text-xs font-bold text-white">--%</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- ACTIVE TRADING SESSIONS -->
-                    <div class="cyber-panel p-3 flex flex-col justify-between col-span-5 border-t border-t-[#9d00ff] bg-[#040406]">
-                        <div class="flex justify-between items-center">
-                            <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold">SESSION_TIMELINE</span>
-                            <span id="market-status-badge" class="text-[6.5px] bg-[#00ff66]/10 text-[#00ff66] border border-[#00ff66]/20 px-1.5 py-0.2 font-bold tracking-wider uppercase rounded-sm">MARKET_OPEN</span>
-                        </div>
-                        <!-- Market Closed Countdown -->
-                        <div id="market-closed-countdown" class="hidden flex-grow flex flex-col justify-center items-center py-1 text-center">
-                            <span class="text-[6.5px] text-rose-500 font-extrabold tracking-widest uppercase animate-pulse mb-0.5">MARKET_CLOSED / HOLIDAY</span>
-                            <span id="countdown-timer" class="text-xs font-black text-white tracking-widest uppercase font-mono">--d --h --m --s</span>
-                            <span class="text-[5.5px] text-zinc-500 font-bold uppercase mt-0.5">RESUMES SUN 22:00 UTC</span>
-                        </div>
-                        <div id="session-stack" class="grid grid-cols-4 gap-2.5 mt-1 flex-grow items-center">
-                            <div class="sess-row flex flex-col justify-between h-full py-0.5" data-sess="Sydney">
-                                <div class="flex items-center justify-between">
-                                    <span class="sess-name text-[7px] font-extrabold tracking-wider uppercase" style="color:#555 font-bold">SYD</span>
-                                    <span class="sess-time text-[5.5px] font-bold text-zinc-700 tracking-wider">22-07 UTC</span>
-                                </div>
-                                <div class="sess-track" style="height:3px;background:#111;border:1px solid #222;margin-top:1.5px;position:relative;overflow:hidden;border-radius:1px;">
-                                    <div class="sess-bar" style="height:100%;width:0%;transition:width 1s linear;"></div>
-                                </div>
-                            </div>
-                            <div class="sess-row flex flex-col justify-between h-full py-0.5" data-sess="Tokyo">
-                                <div class="flex items-center justify-between">
-                                    <span class="sess-name text-[7px] font-extrabold tracking-wider uppercase" style="color:#555 font-bold">TYO</span>
-                                    <span class="sess-time text-[5.5px] font-bold text-zinc-700 tracking-wider">00-09 UTC</span>
-                                </div>
-                                <div class="sess-track" style="height:3px;background:#111;border:1px solid #222;margin-top:1.5px;position:relative;overflow:hidden;border-radius:1px;">
-                                    <div class="sess-bar" style="height:100%;width:0%;transition:width 1s linear;"></div>
-                                </div>
-                            </div>
-                            <div class="sess-row flex flex-col justify-between h-full py-0.5" data-sess="London">
-                                <div class="flex items-center justify-between">
-                                    <span class="sess-name text-[7px] font-extrabold tracking-wider uppercase" style="color:#555 font-bold">LDN</span>
-                                    <span class="sess-time text-[5.5px] font-bold text-zinc-700 tracking-wider">08-16 UTC</span>
-                                </div>
-                                <div class="sess-track" style="height:3px;background:#111;border:1px solid #222;margin-top:1.5px;position:relative;overflow:hidden;border-radius:1px;">
-                                    <div class="sess-bar" style="height:100%;width:0%;transition:width 1s linear;"></div>
-                                </div>
-                            </div>
-                            <div class="sess-row flex flex-col justify-between h-full py-0.5" data-sess="New York">
-                                <div class="flex items-center justify-between">
-                                    <span class="sess-name text-[7px] font-extrabold tracking-wider uppercase" style="color:#555 font-bold">NYC</span>
-                                    <span class="sess-time text-[5.5px] font-bold text-zinc-700 tracking-wider">13-22 UTC</span>
-                                </div>
-                                <div class="sess-track" style="height:3px;background:#111;border:1px solid #222;margin-top:1.5px;position:relative;overflow:hidden;border-radius:1px;">
-                                    <div class="sess-bar" style="height:100%;width:0%;transition:width 1s linear;"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- LIVE SPREAD TELEMETRY -->
-                    <div class="cyber-panel p-3 flex flex-col justify-between border-t border-t-[#00ff66] col-span-2 bg-[#040406]">
-                        <div class="flex justify-between items-center">
-                            <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold">SPREAD_MONITOR</span>
-                            <span id="spread-label" class="text-[6px] text-zinc-500 uppercase font-bold tracking-widest">TELEMETRY_SAFE</span>
-                        </div>
-                        <div class="flex justify-between items-center mt-1">
-                            <div class="flex items-baseline gap-0.5">
-                                <span id="spread-val" class="text-lg font-black text-[#00ff66] leading-none">0.0</span>
-                                <span class="text-[6.5px] text-zinc-500 font-bold uppercase">Pips</span>
-                            </div>
-                            <div id="spread-box" class="px-2.5 py-0.5 border border-zinc-900 bg-black flex items-center justify-center">
-                                <span id="spread-status-text" class="text-[#00ff66] font-bold text-[7px] tracking-wider uppercase">SAFE</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- MIDDLE ROW (Swing Channels & Decision HUD) -->
-                <div class="grid grid-cols-12 gap-3 h-[100px] flex-shrink-0">
-                    <!-- SWING LEVELS -->
-                    <div class="col-span-5 cyber-panel py-1.5 px-2.5 flex flex-col justify-between overflow-hidden bg-[#040406]">
-                        <div class="flex justify-between items-center">
-                            <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold">SWING_CHANNELS</span>
-                            <span class="text-[6.5px] bg-[#00f0ff]/10 text-[#00f0ff] border border-[#00f0ff]/20 px-1.5 py-0.2 font-bold">H1_TIME</span>
-                        </div>
-                        <div class="flex-grow flex flex-col gap-1 mt-1 text-[8.5px]">
-                            <div class="flex flex-col bg-zinc-950/40 border-l-[3px] border-l-[#ff0055] py-1 pl-2 pr-1.5 relative overflow-hidden rounded-r">
-                                <div class="flex justify-between font-bold text-[#ff0055]">
-                                    <span class="text-zinc-500 font-extrabold tracking-wider">RESISTANCE (SH)</span>
-                                    <span id="level-res-val" class="font-extrabold">--.-----</span>
-                                </div>
-                                <div class="flex justify-between items-center text-[6.5px] text-zinc-500">
-                                    <span id="level-res-time" class="truncate max-w-[140px] uppercase">NO_SH_BAR_DETECTED</span>
-                                    <span id="level-res-dist" class="bg-rose-950/20 border border-[#ff0055]/30 px-1.5 py-0.2 text-[#ff0055] font-bold">-- Pips</span>
-                                </div>
-                                <div class="w-full bg-[#0d0d0f] border border-zinc-900 h-[3px] mt-0.5 relative">
-                                    <div id="level-res-bar" class="h-full bg-gradient-to-r from-[#9d00ff] to-[#ff0055]" style="width: 0%"></div>
-                                </div>
-                            </div>
-                            <div class="flex flex-col bg-zinc-950/40 border-l-[3px] border-l-[#00ff66] py-1 pl-2 pr-1.5 relative overflow-hidden rounded-r">
-                                <div class="flex justify-between font-bold text-[#00ff66]">
-                                    <span class="text-zinc-500 font-extrabold tracking-wider">SUPPORT (SL)</span>
-                                    <span id="level-sup-val" class="font-extrabold">--.-----</span>
-                                </div>
-                                <div class="flex justify-between items-center text-[6.5px] text-zinc-500">
-                                    <span id="level-sup-time" class="truncate max-w-[140px] uppercase">NO_SL_BAR_DETECTED</span>
-                                    <span id="level-sup-dist" class="bg-emerald-950/20 border border-[#00ff66]/30 px-1.5 py-0.2 text-[#00ff66] font-bold">-- Pips</span>
-                                </div>
-                                <div class="w-full bg-[#0d0d0f] border border-zinc-900 h-[3px] mt-0.5 relative">
-                                    <div id="level-sup-bar" class="h-full bg-gradient-to-r from-[#9d00ff] to-[#00ff66]" style="width: 0%"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-
-                    <!-- COGNITIVE HUD -->
-                    <div class="col-span-7 cyber-panel py-1.5 px-2.5 flex flex-col justify-between border-l-[3px] border-l-[#9d00ff] relative overflow-hidden bg-[#040406]" id="decision-panel">
-                        <div class="flex justify-between items-center z-10">
-                            <span class="text-[8.5px] text-zinc-400 uppercase tracking-widest font-bold">DECISION_HUD</span>
-                            <span class="text-[7px] text-zinc-500 uppercase tracking-wider font-mono">DAEMON: ACTIVE</span>
-                        </div>
-                        <div class="flex-grow flex flex-col justify-center items-center py-0.5 z-10">
-                            <span id="decision-status" class="text-[#9d00ff] text-[8px] font-bold uppercase tracking-widest block mb-0.5 animate-pulse">Awaiting Event Trigger...</span>
-                            <div class="text-xl font-black tracking-[0.2em] text-[#00f0ff] uppercase py-0.5 border-y border-[#1f1f2e]/50 px-8 w-full text-center" id="decision-action">
-                                MONITOR
-                            </div>
-                            <span id="decision-time" class="text-[6.5px] text-zinc-500 uppercase tracking-wider mt-0.5">SYS_HELM: HEADLESS_REACTIVE_LOOP</span>
-                        </div>
-                        <div class="border-t border-[#1f1f2e]/50 pt-1 flex justify-between items-center text-[8px] z-10">
-                            <div class="flex items-center gap-2">
-                                <span class="text-zinc-500 font-bold uppercase">PREV_DECISION</span>
-                                <span id="prev-decision-lbl" class="text-[#9d00ff] font-extrabold">HOLD</span>
-                            </div>
-                            <div id="sweep-radar" class="bg-black border border-zinc-800 px-2 py-0.5 flex items-center gap-1.5">
-                                <span id="sweep-icon" class="w-1.5 h-1.5 bg-zinc-700 flex-shrink-0 animate-pulse"></span>
-                                <span id="sweep-msg" class="text-[6.5px] text-zinc-500 font-bold uppercase">LIQ_MONITOR</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- PRICE CHART PANEL -->
-                <div class="cyber-panel p-3 flex flex-col flex-grow min-h-[250px] bg-[#040406]">
-                    <div class="flex justify-between items-center mb-2 flex-shrink-0">
-                        <div class="flex items-center gap-2">
-                            <span class="text-[8.5px] text-[#00f0ff] uppercase tracking-widest font-bold font-mono">MARKET_COCKPIT_CHART</span>
-                            <span id="live-tick-dot" class="w-1.5 h-1.5 rounded-full bg-zinc-700 shadow-sm transition-all duration-100 flex-shrink-0" title="Live Feed Active"></span>
-                        </div>
-                        <div class="flex gap-2">
-                            <button id="tf-m15-btn" class="border border-[#00f0ff] bg-[#00f0ff]/10 text-[#00f0ff] text-[8px] px-2 py-0.5 font-bold font-mono uppercase transition-all">M15</button>
-                            <button id="tf-h1-btn" class="border border-[#1f1f2e] text-zinc-500 text-[8px] px-2 py-0.5 font-bold font-mono uppercase transition-all">H1</button>
-                            <button id="tf-h4-btn" class="border border-[#1f1f2e] text-zinc-500 text-[8px] px-2 py-0.5 font-bold font-mono uppercase transition-all">H4</button>
-                        </div>
-                    </div>
-                    <div id="price-chart" class="w-full flex-grow bg-black min-h-0"></div>
-                </div>
-
-                <!-- ACTIVE POSITIONS & COGNITIVE TRADES -->
-                <div class="cyber-panel p-3 h-[115px] flex-shrink-0 flex flex-col bg-[#040406]">
-                    <div class="flex justify-between items-center border-b border-[#1f1f2e]/60 pb-1.5 flex-shrink-0 mb-1">
-                        <span class="text-[#00f0ff] text-[8.5px] font-black uppercase tracking-widest font-mono flex items-center gap-1.5">
-                            <span class="w-1.5 h-1.5 bg-[#00f0ff] rounded-full animate-pulse"></span> ACTIVE_POSITIONS_DESK
-                        </span>
-                        <span class="text-[7.5px] text-zinc-500 font-bold uppercase tracking-wider font-mono">MT5 REAL-TIME TELEMETRY</span>
-                    </div>
-                    <div class="flex-grow overflow-hidden flex flex-col min-h-0">
-                        <div class="bg-zinc-950/60 border-b border-[#1f1f2e]/60 grid grid-cols-8 gap-1.5 p-1.5 text-center text-zinc-500 font-bold uppercase text-[7.5px] tracking-wider flex-shrink-0 font-mono">
-                            <div>Ticket</div>
-                            <div>Symbol</div>
-                            <div>Type</div>
-                            <div>Volume</div>
-                            <div>Open Price</div>
-                            <div>Current</div>
-                            <div>SL / TP</div>
-                            <div>Profit</div>
-                        </div>
-                        <div id="positions-table-body" class="flex-grow overflow-y-auto p-1 text-[8px] font-mono text-zinc-300 space-y-0.5">
-                            <div class="text-zinc-600 text-center py-4 italic uppercase tracking-widest text-[7.5px]">No active trading positions found.</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <!-- TAB 3: INTELLIGENCE HUB (Agent Thoughts, News, Event Logs side-by-side!) -->
-        <div id="main-tab-panel-intel" class="absolute inset-0 hidden grid grid-cols-3 gap-3 min-h-0 overflow-hidden">
-            <!-- Col 1: Cognitive Reason Stream -->
-            <div class="cyber-panel p-4 flex flex-col gap-3 min-h-0 overflow-hidden bg-[#040406]">
-                <div class="flex justify-between items-center border-b border-[#1f1f2e] pb-2 flex-shrink-0">
-                    <span class="text-[#00f0ff] text-[10px] font-black uppercase tracking-widest font-mono">COGNITIVE_REASON_STREAM</span>
-                    <button id="clear-console-btn-intel" class="hover:text-white hover:border-zinc-700 transition-all uppercase border border-zinc-900 px-2.5 py-0.5 bg-black font-mono text-[7px] text-zinc-500 rounded-sm">CLEAR</button>
-                </div>
-                <div id="console-body" class="flex-grow overflow-y-auto p-1 font-mono text-[9.5px] flex flex-col gap-2.5 text-zinc-300 leading-normal">
-                    <div class="text-[#00f0ff]/60 border-b border-[#1a1a24] pb-1.5 uppercase font-bold flex items-center gap-1.5">
-                        <span>[SYSTEM_INITIALIZED] Connected. Active multi-agent thought streams logging...</span>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- Col 2: News & Sentiment Feed -->
-            <div class="cyber-panel p-4 flex flex-col gap-3 min-h-0 overflow-hidden bg-[#040406]">
-                <div class="flex justify-between items-center border-b border-[#1f1f2e] pb-2 flex-shrink-0">
-                    <span class="text-[#00f0ff] text-[10px] font-black uppercase tracking-widest font-mono">NEWS_SENTIMENT_FEED</span>
-                </div>
-                <div id="news-log-container" class="flex-grow overflow-y-auto p-1 font-mono text-[9.5px] flex flex-col gap-2.5 text-zinc-300">
-                    <div class="text-zinc-600 text-center py-8 italic font-sans uppercase tracking-widest text-[8px]">Awaiting active news ingestion stream...</div>
-                </div>
-            </div>
-            
-            <!-- Col 3: System Events Log -->
-            <div class="cyber-panel p-4 flex flex-col gap-3 min-h-0 overflow-hidden bg-[#020203]">
-                <div class="flex justify-between items-center border-b border-[#1f1f2e] pb-2 flex-shrink-0">
-                    <span class="text-[#00f0ff] text-[10px] font-black uppercase tracking-widest font-mono">SYSTEM_EVENTS_LOG</span>
-                </div>
-                <div id="events-log-container" class="flex-grow overflow-y-auto p-1 text-[9.5px] font-mono text-zinc-400 flex flex-col gap-1.5">
-                    <div class="text-zinc-600 text-center py-8 italic">Awaiting structural triggers...</div>
-                </div>
-            </div>
-        </div>
-
-    </main>
-
-    <script>
         // High-contrast realtime WebSocket UI controller
         class DashboardController {
             constructor() {
@@ -721,9 +74,6 @@
                 this.statsDetected = document.getElementById("stats-detected");
                 this.statsFired = document.getElementById("stats-fired");
                 this.statsSkipped = document.getElementById("stats-skipped");
-                this.tokensIn = document.getElementById("tokens-in");
-                this.tokensOut = document.getElementById("tokens-out");
-                this.tokensTotal = document.getElementById("tokens-total");
                 this.cooldownVal = document.getElementById("ctrl-cooldown");
                 this.cooldownBar = document.getElementById("cooldown-bar");
 
@@ -755,11 +105,10 @@
                 const clearConsoleBtn = document.getElementById("clear-console-btn-intel");
                 if (clearConsoleBtn) {
                     clearConsoleBtn.onclick = () => {
-                        this.consoleBody.innerHTML = '<div class="text-[#00f0ff]/60 border-b border-[#1a1a24] pb-1.5 uppercase font-bold flex items-center gap-2"><span>[STREAM_CLEARED] System dynamic logs stream active.</span><span class="cursor"></span></div>';
+                        this.consoleBody.innerHTML = `<div style='color:var(--cyan);opacity:0.6;font-size:10px;'>[STREAM_CLEARED] Active.</div>`;
                         this.triggerBeep(800, 0.05);
                     };
                 }
-
 
                 // === MULTI-CURRENCY PAIR NAVIGATOR ===
                 const pairBtns = document.querySelectorAll('.pair-btn');
@@ -767,12 +116,16 @@
                     btn.addEventListener('click', () => {
                         pairBtns.forEach(b => b.classList.remove('active'));
                         btn.classList.add('active');
+
                         const pair = btn.dataset.pair;
                         const mt5  = btn.dataset.mt5;
                         const label = btn.textContent.replace('/', '');
+
                         const ticker = document.getElementById('header-ticker');
                         if (ticker) ticker.textContent = label;
+
                         this.pipMult = (pair.includes('JPY') || pair.includes('XAU')) ? 0.01 : 0.0001;
+
                         this.m15Candles = [];
                         this.h1Candles  = [];
                         this.h4Candles  = [];
@@ -780,12 +133,16 @@
                         this.currentBid = 0;
                         this.currentAsk = 0;
                         if (this.chart) this.candleSeries.setData([]);
+
                         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
                             this.ws.send(JSON.stringify({ type: 'switch_pair', pair: pair, mt5: mt5 }));
                         }
+
                         this.triggerBeep(1000, 0.03);
                     });
                 });
+
+
                 // Timeframe toggle buttons
                 const m15Btn = document.getElementById("tf-m15-btn");
                 const h1Btn = document.getElementById("tf-h1-btn");
@@ -946,36 +303,27 @@
                 this.ws = new WebSocket(wsUri);
 
                 this.ws.onopen = () => {
-                    this.socketLight.style.background = 'var(--green)'; this.socketLight.style.borderRadius = '50%';
+                    this.socketLight.style.background = 'var(--green)';
+                    this.socketLight.style.borderRadius = '50%';
                     this.socketStatus.innerText = 'ONLINE';
                     this.socketStatus.style.color = 'var(--green)';
-                    logger("Dashboard WS: connected.");
-                    this.triggerBeep(1100, 0.08); // high frequency startup chirp
-                    
-                    // Periodic active connection heartbeats
+                    logger('Dashboard WS: connected.');
+                    this.triggerBeep(1100, 0.08);
                     if (this.pingInterval) clearInterval(this.pingInterval);
                     this.pingInterval = setInterval(() => {
                         if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-                            this.ws.send(JSON.stringify({
-                                type: "ping",
-                                timestamp: Date.now()
-                            }));
+                            this.ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
                         }
                     }, 2000);
                 };
 
                 this.ws.onclose = () => {
-                    this.socketLight.style.background = 'var(--red)'; this.socketLight.style.borderRadius = '50%';
+                    this.socketLight.style.background = 'var(--red)';
                     this.socketStatus.innerText = 'OFFLINE';
                     this.socketStatus.style.color = 'var(--red)';
                     if (this.latency) this.latency.innerText = '--ms';
-                    
-                    if (this.pingInterval) {
-                        clearInterval(this.pingInterval);
-                        this.pingInterval = null;
-                    }
-                    
-                    logger("Dashboard WS: disconnected. Retrying in " + this.reconnectInterval + "ms");
+                    if (this.pingInterval) { clearInterval(this.pingInterval); this.pingInterval = null; }
+                    logger('Dashboard WS: disconnected. Retrying in ' + this.reconnectInterval + 'ms');
                     setTimeout(() => this.connect(), this.reconnectInterval);
                 };
 
@@ -1909,12 +1257,6 @@
                     this.statsFired.innerText = data.events_fired;
                     this.statsSkipped.innerText = data.events_skipped;
                 }
-                
-                if (data.tokens_total !== undefined) {
-                    if (this.tokensIn) this.tokensIn.innerText = data.tokens_in;
-                    if (this.tokensOut) this.tokensOut.innerText = data.tokens_out;
-                    if (this.tokensTotal) this.tokensTotal.innerText = data.tokens_total;
-                }
 
                 if (data.daemon_start_time) {
                     this.startTime = Number(data.daemon_start_time);
@@ -1937,18 +1279,6 @@
                 if (this.londonLowLine) { this.candleSeries.removePriceLine(this.londonLowLine); this.londonLowLine = null; }
                 if (this.nyHighLine) { this.candleSeries.removePriceLine(this.nyHighLine); this.nyHighLine = null; }
                 if (this.nyLowLine) { this.candleSeries.removePriceLine(this.nyLowLine); this.nyLowLine = null; }
-
-                // --- Token Consumption and Stats Update ---
-                if (data.tokens_total !== undefined) {
-                    const elTotal = document.getElementById('token-total-val');
-                    const elInput = document.getElementById('token-input-val');
-                    const elOutput = document.getElementById('token-output-val');
-                    const elCalls = document.getElementById('token-calls-val');
-                    if (elTotal) elTotal.innerText = data.tokens_total.toLocaleString();
-                    if (elInput) elInput.innerText = data.tokens_in.toLocaleString();
-                    if (elOutput) elOutput.innerText = data.tokens_out.toLocaleString();
-                    if (elCalls) elCalls.innerText = `${data.llm_calls} / ${data.tool_calls}`;
-                }
 
                 this.drawSessions();
 
@@ -2328,12 +1658,9 @@
                     this.eventsLog.removeChild(this.eventsLog.lastChild);
                 }
 
-                // Print on chart when key actionable events are detected
+                // Only print on chart when high-priority tradable structures are detected (Sweep or Structure Break)
                 const isSignificant = data.event_type === "sweep_detected" || 
-                                      data.event_type === "structure_break" ||
-                                      data.event_type === "candle_pattern" ||
-                                      data.event_type === "level_breach" ||
-                                      data.event_type === "momentum_divergence";
+                                      data.event_type === "structure_break";
                 if (isSignificant && data.details && data.details.trigger_candle) {
                     const tc = data.details.trigger_candle;
                     let timeSec = typeof tc.open_time === 'number' ? tc.open_time : Math.floor(Date.parse(tc.open_time) / 1000);
@@ -2431,51 +1758,25 @@
                 const consoleDiv = document.createElement("div");
                 consoleDiv.className = `border-b border-zinc-900 pb-2.5 last:border-0 ${isHistorical ? 'opacity-50' : ''}`;
 
-                let agentColor = "text-cyan-400 bg-cyan-950/20 border border-cyan-800/30";
-                if (isHistorical) {
-                    agentColor = "text-zinc-500 bg-zinc-950 border border-zinc-900";
-                } else {
-                    const name = data.agent_name.toUpperCase();
-                    if (["WYCKOFF", "KEYNES", "REUTERS", "LIVERMORE"].includes(name)) {
-                        agentColor = "text-[#00f0ff] bg-cyan-950/20 border border-[#00f0ff]/30";
-                    } else if (["BUFFETT", "SOROS"].includes(name)) {
-                        agentColor = "text-[#ffaa00] bg-amber-950/20 border border-[#ffaa00]/30";
-                    } else if (name === "MUNGER") {
-                        agentColor = "text-[#9d00ff] bg-purple-950/20 border border-[#9d00ff]/30 font-bold";
-                    } else if (name === "TUDOR") {
-                        agentColor = "text-[#00ff66] bg-emerald-950/20 border border-[#00ff66]/30 font-bold";
-                    } else if (["SIMONS", "DALIO", "MARKS"].includes(name)) {
-                        agentColor = "text-[#ff6600] bg-orange-950/20 border border-[#ff6600]/30";
-                    } else if (name === "DRUCKENMILLER") {
-                        agentColor = "text-[#ff0055] bg-rose-950/20 border border-[#ff0055]/30 font-bold";
-                    }
-                }
-
-                let toolContent = "";
-                if (data.tool_calls && data.tool_calls.length > 0) {
-                    toolContent = data.tool_calls.map(tc => `
-                        <div class="bg-black border border-zinc-900 px-2 py-0.5 text-[8px] text-zinc-500 font-mono mt-1.5 w-fit flex items-center gap-1.5">
-                            <span class="w-1 h-1 bg-[#00f0ff] animate-ping"></span>
-                            <span>[USE_TOOL]</span> <span class="text-[#00f0ff] font-mono">${tc}</span>
-                        </div>
-                    `).join("");
-                }
-
-                consoleDiv.innerHTML = `
-                    <div class="flex items-center gap-2 mb-1">
-                        <span class="text-[8px] text-zinc-500 font-semibold">${data.timestamp}</span>
-                        <span class="text-[7.5px] uppercase tracking-wider px-1.5 py-0.2 font-bold ${agentColor}">${data.agent_name.toUpperCase()}</span>
-                    </div>
-                    <p class="text-zinc-300 font-mono pl-2 text-[9px] leading-relaxed">${data.message || ""}</p>
-                    ${toolContent}
-                `;
-
-                this.consoleBody.appendChild(consoleDiv);
-                this.consoleBody.scrollTop = this.consoleBody.scrollHeight;
-                if (!isHistorical) {
-                    this.triggerBeep(1000, 0.01);
-                }
-            }
+                                  let agentColor = "text-cyan-400 bg-cyan-950/20 border border-cyan-800/30";
+                  if (isHistorical) {
+                      agentColor = "text-zinc-500 bg-zinc-950 border border-zinc-900";
+                  } else {
+                      const name = data.agent_name.toUpperCase();
+                      if (["WYCKOFF", "KEYNES", "REUTERS", "LIVERMORE"].includes(name)) {
+                          agentColor = "text-[#00f0ff] bg-cyan-950/20 border border-[#00f0ff]/30";
+                      } else if (["BUFFETT", "SOROS"].includes(name)) {
+                          agentColor = "text-[#ffaa00] bg-amber-950/20 border border-[#ffaa00]/30";
+                      } else if (name === "MUNGER") {
+                          agentColor = "text-[#9d00ff] bg-purple-950/20 border border-[#9d00ff]/30 font-bold";
+                      } else if (name === "TUDOR") {
+                          agentColor = "text-[#00ff66] bg-emerald-950/20 border border-[#00ff66]/30 font-bold";
+                      } else if (["SIMONS", "DALIO", "MARKS"].includes(name)) {
+                          agentColor = "text-[#ff6600] bg-orange-950/20 border border-[#ff6600]/30";
+                      } else if (name === "DRUCKENMILLER") {
+                          agentColor = "text-[#ff0055] bg-rose-950/20 border border-[#ff0055]/30 font-bold";
+                      }
+                  }
 
             handleDecision(data) {
                 const action = data.signal.toUpperCase();
@@ -2623,7 +1924,7 @@
                 const tab = this.activeTab || "reason";
                 if (tab === "reason") {
                     if (this.consoleBody) {
-                        this.consoleBody.innerHTML = '<div class="text-[#00f0ff]/60 border-b border-[#1a1a24] pb-1.5 uppercase font-bold flex items-center gap-2"><span>[STREAM_CLEARED] System dynamic logs stream active.</span><span class="cursor"></span></div>';
+                        this.consoleBody.innerHTML = `<div style='color:var(--cyan);opacity:0.6;font-size:10px;'>[STREAM_CLEARED] Active.</div>`;
                     }
                 } else if (tab === "broker") {
                     this.mockPositions = [];
@@ -2830,52 +2131,4 @@
         window.onload = () => {
             new DashboardController();
         };
-    </script>
-    <!-- SETTINGS GLASSMORPHIC MODAL -->
-    <div id="settings-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm opacity-0 pointer-events-none transition-all duration-300">
-        <div class="cyber-panel p-6 w-[380px] bg-black/95 border border-[#9d00ff] shadow-lg shadow-[#9d00ff]/20 relative flex flex-col gap-4">
-            <div class="absolute top-0 left-0 right-0 h-[1.5px] bg-[#9d00ff]"></div>
-            
-            <div class="flex justify-between items-center border-b border-[#1f1f2e] pb-2">
-                <span class="text-[9.5px] text-[#9d00ff] font-extrabold tracking-widest uppercase font-mono">DAEMON_CONFIGURATION</span>
-                <button id="close-settings-btn" class="text-zinc-500 hover:text-white font-black text-sm font-mono">&times;</button>
-            </div>
-
-            <form id="settings-form" class="flex flex-col gap-3.5 text-[9px] font-mono text-zinc-300">
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-zinc-500 uppercase font-bold text-[7.5px]">Tick Poll Interval (ms)</label>
-                    <input type="number" name="tick_poll_interval_ms" min="50" max="5000" required class="bg-black border border-[#1f1f2e] px-2 py-1 text-white font-bold focus:border-[#9d00ff] focus:outline-none rounded-sm">
-                </div>
-
-                <div class="flex justify-between items-center bg-zinc-950/40 p-2 border border-[#1f1f2e]">
-                    <span class="text-zinc-400 uppercase font-bold text-[7.5px]">Suppress Asian Session</span>
-                    <input type="checkbox" name="realtime_suppress_asian" class="w-3.5 h-3.5 accent-[#9d00ff]">
-                </div>
-
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-zinc-500 uppercase font-bold text-[7.5px]">S/R Level Reset ATR Multiple</label>
-                    <input type="number" name="realtime_level_reset_atr_multiple" step="0.1" min="0.5" max="5.0" required class="bg-black border border-[#1f1f2e] px-2 py-1 text-white font-bold focus:border-[#9d00ff] focus:outline-none rounded-sm">
-                </div>
-
-                <div class="flex flex-col gap-1.5">
-                    <label class="text-zinc-500 uppercase font-bold text-[7.5px]">RSI Period Length</label>
-                    <input type="number" name="indicator_rsi_length" min="5" max="50" required class="bg-black border border-[#1f1f2e] px-2 py-1 text-white font-bold focus:border-[#9d00ff] focus:outline-none rounded-sm">
-                </div>
-
-                <div class="grid grid-cols-2 gap-3">
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-zinc-500 uppercase font-bold text-[7.5px]">EMA Fast Period</label>
-                        <input type="number" name="indicator_ema_fast" min="5" max="100" required class="bg-black border border-[#1f1f2e] px-2 py-1 text-white font-bold focus:border-[#9d00ff] focus:outline-none rounded-sm">
-                    </div>
-                    <div class="flex flex-col gap-1.5">
-                        <label class="text-zinc-500 uppercase font-bold text-[7.5px]">EMA Slow Period</label>
-                        <input type="number" name="indicator_ema_slow" min="10" max="200" required class="bg-black border border-[#1f1f2e] px-2 py-1 text-white font-bold focus:border-[#9d00ff] focus:outline-none rounded-sm">
-                    </div>
-                </div>
-
-                <button type="submit" class="w-full bg-[#9d00ff]/20 hover:bg-[#9d00ff]/40 text-[#9d00ff] border border-[#9d00ff] font-extrabold uppercase py-2 tracking-widest mt-2 hover:shadow-md hover:shadow-[#9d00ff]/10 active:scale-[0.98] transition-all rounded-sm">APPLY_CHANGES</button>
-            </form>
-        </div>
-    </div>
-</body>
-</html>
+    

@@ -10,20 +10,29 @@ def create_bear_researcher(llm):
         compressed_evidence = state.get("compressed_evidence", "")
         asset_type = state.get("asset_type", "stock")
 
-        prompt = """You are SOROS — AxonAI bear case researcher. Your job is to find the strongest structural weaknesses and failure modes in the proposed trade.
+        direction = trader_hypothesis.get("direction", "?") if isinstance(trader_hypothesis, dict) else "?"
 
-Critical rules:
-- You must argue specifically AGAINST the bull case BUFFETT presented
-- Do not argue against trading in general — argue against THIS specific trade
-- Reference specific weaknesses in BUFFETT's arguments
-- Find hidden risks, conflicting signals, and structural vulnerabilities
-- Even if evidence leans bullish find the strongest possible bear case
-- Be specific — attack BUFFETT's specific claims with counter-evidence
+        # Get BUFFETT's actual arguments to counter
+        bull_history = state.get("investment_debate_state", {}).get("bull_history", "")
 
-Maximum 200 words total.
+        prompt = f"""You are SOROS — AxonAI bear case researcher.
 
-Respond with this exact JSON at the end of your response:
-{"position": "bear", "confidence": 0-100, "arguments": ["counter to buffett arg1", "counter to buffett arg2", "counter to buffett arg3"], "fatal_flaw": "single most likely reason this trade fails"}""" + get_language_instruction()
+TRADER HYPOTHESIS: {direction}
+
+BUFFETT BULL CASE:
+{bull_history}
+
+COMPRESSED EVIDENCE:
+{compressed_evidence}
+
+Rules:
+- Attack BUFFETT's specific arguments above with counter-evidence
+- Do not argue against trading in general — argue against THIS trade
+- Find hidden risks and structural vulnerabilities
+- Max 200 words total
+
+Output ONLY this JSON, nothing else:
+{{"position": "bear", "confidence": 0-100, "arguments": ["counter1", "counter2", "counter3"], "fatal_flaw": "one sentence"}}""" + get_language_instruction()
 
         response = llm.invoke(prompt)
         argument = f"Bear Analyst: {response.content}"

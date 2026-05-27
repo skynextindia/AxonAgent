@@ -111,6 +111,7 @@ class DeepSeekChatOpenAI(NormalizedChatOpenAI):
 _PASSTHROUGH_KWARGS = (
     "timeout", "max_retries", "reasoning_effort",
     "api_key", "callbacks", "http_client", "http_async_client",
+    "max_tokens",
 )
 
 _PROVIDER_BASE_URL = {
@@ -166,6 +167,11 @@ class OpenAIClient(BaseLLMClient):
 
         # DeepSeek-specific quirks live in DeepSeekChatOpenAI
         chat_cls = DeepSeekChatOpenAI
+        # Enforce output token cap — prevents runaway prose from DeepSeek Chat.
+        # Agents use JSON outputs of ~150-300 tokens; 600 is generous headroom.
+        # Override by passing max_tokens= to create_llm_client().
+        if "max_tokens" not in llm_kwargs:
+            llm_kwargs["max_tokens"] = 600
         return chat_cls(**llm_kwargs)
 
     def validate_model(self) -> bool:

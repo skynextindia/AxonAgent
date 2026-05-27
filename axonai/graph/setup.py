@@ -121,15 +121,15 @@ class GraphSetup:
         workflow.add_node("Evidence Compressor", evidence_compressor_node)
 
         # Define edges (Directed Acyclic Graph topology)
-        # Start with the Analysts in parallel
-        for spec in plan.specs:
-            workflow.add_edge(START, spec.agent_node)
-
-        # Analyst loops: Analyst -> tool or clear
+        # Sequence analysts to prevent parallel tool-calling message interleaving
+        # which breaks strict OpenAI API schema validation.
+        prev_node = START
         for spec in plan.specs:
             current_analyst = spec.agent_node
             current_tools = spec.tool_node
             current_clear = spec.clear_node
+
+            workflow.add_edge(prev_node, current_analyst)
 
             # Add conditional edges for current analyst (calls tool_node or clear_node)
             workflow.add_conditional_edges(
@@ -139,8 +139,10 @@ class GraphSetup:
             )
             workflow.add_edge(current_tools, current_analyst)
 
-            # Connect each analyst's clear node to the Evidence Compressor
-            workflow.add_edge(current_clear, "Evidence Compressor")
+            prev_node = current_clear
+
+        # Connect the final analyst's clear node to the Evidence Compressor
+        workflow.add_edge(prev_node, "Evidence Compressor")
 
         # Evidence Compressor -> BUFFETT
         workflow.add_edge("Evidence Compressor", "Bull Researcher")

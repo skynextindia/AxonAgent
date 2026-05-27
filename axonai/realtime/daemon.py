@@ -28,6 +28,7 @@ from axonai.realtime.event_detector import EventDetector
 from axonai.realtime.graph_executor import GraphExecutor
 from axonai.realtime.trade_executor import MT5TradeExecutor
 from axonai.realtime.api_server import get_dashboard
+from cli.stats_handler import StatsCallbackHandler
 
 logger = logging.getLogger(__name__)
 
@@ -66,7 +67,8 @@ class AxonDaemon:
         )
 
         # Layer 3: Graph Executor
-        self.graph_executor = GraphExecutor(symbol, config)
+        self.stats_handler = StatsCallbackHandler()
+        self.graph_executor = GraphExecutor(symbol, config, callbacks=[self.stats_handler])
 
         # Layer 4: Trade Executor
         self.trade_executor = MT5TradeExecutor(config)
@@ -222,7 +224,13 @@ class AxonDaemon:
             "london_range_high": me.london_range_high,
             "london_range_low": me.london_range_low,
             "ny_range_high": me.ny_range_high,
-            "ny_range_low": me.ny_range_low
+            "ny_range_low": me.ny_range_low,
+            # --- Token Consumption and Stats ---
+            "tokens_in": self.stats_handler.tokens_in,
+            "tokens_out": self.stats_handler.tokens_out,
+            "tokens_total": self.stats_handler.tokens_in + self.stats_handler.tokens_out,
+            "llm_calls": self.stats_handler.llm_calls,
+            "tool_calls": self.stats_handler.tool_calls
         }
 
     def _get_levels_payload(self) -> dict:

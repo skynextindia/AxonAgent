@@ -350,17 +350,25 @@ class AxonAIGraph:
         if self.debug:
             trace = []
             for chunk in self.graph.stream(init_agent_state, **args):
-                if len(chunk["messages"]) == 0:
+                messages = []
+                if "messages" in chunk:
+                    messages = chunk["messages"]
+                else:
+                    for node_val in chunk.values():
+                        if isinstance(node_val, dict) and "messages" in node_val:
+                            messages.extend(node_val["messages"])
+                            
+                if len(messages) == 0:
                     pass
                 else:
                     try:
-                        chunk["messages"][-1].pretty_print()
+                        messages[-1].pretty_print()
                     except UnicodeEncodeError:
                         import sys
-                        repr_str = chunk["messages"][-1].pretty_repr()
+                        repr_str = messages[-1].pretty_repr()
                         encoding = sys.stdout.encoding or 'utf-8'
                         sys.stdout.write(repr_str.encode(encoding, errors='replace').decode(encoding) + "\n")
-                    trace.append(chunk)
+                trace.append(chunk)
             # Streamed chunks are per-node deltas. Merge them so the returned
             # state matches what graph.invoke() yields in the non-debug path.
             final_state = {}

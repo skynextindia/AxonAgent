@@ -26,6 +26,10 @@ class SignalProcessor:
         # parseable from the rendered markdown without a second LLM call.
         self.quick_thinking_llm = quick_thinking_llm
 
-    def process_signal(self, full_signal: str) -> str:
+    def process_signal(self, full_signal: Any) -> str:
         """Return one of Buy / Overweight / Hold / Underweight / Sell."""
-        return parse_rating(full_signal)
+        if isinstance(full_signal, dict):
+            direction = full_signal.get("direction", "HOLD")
+            return parse_rating(str(direction))
+            
+        return parse_rating(str(full_signal))

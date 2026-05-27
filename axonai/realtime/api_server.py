@@ -105,6 +105,27 @@ class DashboardServer:
                     return {"status": "success", "config": self.daemon.config}
                 return {"status": "error", "message": "Daemon not registered"}
 
+        @self.app.post("/trigger")
+        def trigger_event():
+            from axonai.realtime.event_types import MarketEvent, EventType, EventPriority
+            from datetime import datetime
+            with self._lock:
+                if self.daemon:
+                    price = self.daemon.live_state.current_price if hasattr(self.daemon.live_state, "current_price") else 1.0
+                    event = MarketEvent(
+                        event_type=EventType.LEVEL_BREACH,
+                        priority=EventPriority.CRITICAL,
+                        timestamp=datetime.now(),
+                        symbol=self.daemon.yf_symbol,
+                        price=price,
+                        details={"news": "USER FORCED TEST EVENT"}
+                    )
+                    # Bypass cooldown so it fires immediately
+                    self.daemon.event_detector._cooldown_until = datetime.min
+                    self.daemon.event_detector.event_queue.put_nowait(event)
+                    return {"status": "triggered", "event": str(event)}
+                return {"status": "error", "message": "Daemon not registered"}
+
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             # Security: only accept WebSocket connections from localhost origins

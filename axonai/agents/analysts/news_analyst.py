@@ -51,6 +51,7 @@ Respond with this exact JSON at the end of your response:
                     "system",
                     "You are a helpful AI assistant, collaborating with other assistants. "
                     "Use the provided tools to search news and evaluate the hypothesis.\n"
+                    "CRITICAL INSTRUCTION: The news tools return static data for the given date range. They do not support custom keyword queries. DO NOT call the tools more than once. Once you receive the news data, generate your final analysis immediately.\n"
                     "{system_message}\n"
                     "For your reference, the current date is {current_date}. {instrument_context}",
                 ),

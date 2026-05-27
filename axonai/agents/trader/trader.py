@@ -95,11 +95,11 @@ def create_trader(llm):
             messages,
             lambda x: x.model_dump_json() if hasattr(x, "model_dump_json") else (json.dumps(x) if isinstance(x, dict) else str(x)),
             "Trader",
-            schema=TraderHypothesisModel,
+            schema=TudorExecution,
         )
 
         # Parse or default the structured hypothesis
-        # Usually it's returned as an instance of TraderHypothesisModel, or a dict, or free text that we parse
+        # Usually it's returned as an instance of TudorExecution, or a dict, or free text that we parse
         direction = "HOLD"
         entry = current_price
         sl = current_price - 2.0 * atr_value
@@ -119,7 +119,7 @@ def create_trader(llm):
             sl = float(parsed_data.get("sl", current_price - 2.0 * atr_value))
             tp = float(parsed_data.get("tp", current_price + 4.0 * atr_value))
             hypothesis_str = str(parsed_data.get("hypothesis", ""))
-        elif isinstance(hypothesis_res, TraderHypothesisModel):
+        elif isinstance(hypothesis_res, TudorExecution):
             direction = hypothesis_res.direction.upper()
             entry = float(hypothesis_res.entry)
             sl = float(hypothesis_res.sl)

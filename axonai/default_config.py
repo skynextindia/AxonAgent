@@ -59,7 +59,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "memory_log_max_entries": None,
     # LLM settings
     "llm_provider": "deepseek",
-    "deep_think_llm": "deepseek-reasoner",
+    "deep_think_llm": "deepseek-chat",
     "quick_think_llm": "deepseek-chat",
     # When None, each provider's client falls back to its own default endpoint.
     "backend_url": None,

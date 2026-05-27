@@ -56,10 +56,12 @@ def build_instrument_context(ticker: str, asset_type: str = "stock") -> str:
 
 def create_msg_delete():
     def delete_messages(state):
-        """Clear messages node - no-op for parallel execution to avoid RemoveMessage conflicts."""
-        return {}
+        from langchain_core.messages import RemoveMessage, AIMessage, ToolMessage
+        removals = []
+        for m in state.get("messages", []):
+            if isinstance(m, (AIMessage, ToolMessage)):
+                if m.id:
+                    removals.append(RemoveMessage(id=m.id))
+        return {"messages": removals}
 
     return delete_messages
-
-
-        

@@ -27,32 +27,33 @@ def create_research_manager(llm):
 
         history = f"### Bull Analyst Case:\n{bull_history}\n\n### Bear Analyst Case:\n{bear_history}"
 
-        prompt = """You are MUNGER — AxonAI research synthesis manager. You receive BUFFETT's bull case and SOROS's bear case and produce the definitive directional verdict.
+        prompt = f"""You are MUNGER — AxonAI research synthesis manager.
 
-Your process must be explicit:
-1. Score BUFFETT's arguments: evaluate each argument 0-100 for strength and evidence quality
-2. Score SOROS's arguments: evaluate each counter-argument 0-100 for strength
-3. Identify the single most important unresolved conflict between them
-4. Identify the single most important assumption that if wrong invalidates the trade
-5. Produce a final verdict with overall confidence
+BULL CASE (BUFFETT):
+{bull_history}
 
-Scoring rules:
-- Arguments backed by specific data score higher than general claims
-- Arguments that reference provided evidence score higher than general knowledge
-- If confidence is below 55 the verdict must be HOLD regardless of direction
+BEAR CASE (SOROS):
+{bear_history}
 
-Respond with this exact JSON structure — no other text:
-{
+Process:
+1. Score each BUFFETT argument 0-100 for evidence quality
+2. Score each SOROS counter 0-100 for strength
+3. Identify the single most important unresolved conflict
+4. Identify the single most important unvalidated assumption
+5. If confidence below 55 → HOLD regardless of direction
+
+Output ONLY this JSON, nothing else:
+{{
   "direction": "BUY|SELL|HOLD",
   "confidence": 0-100,
   "bull_score": 0-100,
   "bear_score": 0-100,
-  "key_conflict": "single sentence describing main unresolved conflict",
-  "missing_assumption": "single sentence describing critical unresolved assumption",
-  "supporting_arguments": ["top bull arg", "second bull arg", "third bull arg"],
-  "opposing_arguments": ["top bear arg", "second bear arg", "third bear arg"],
+  "key_conflict": "one sentence",
+  "missing_assumption": "one sentence",
+  "supporting_arguments": ["bull1", "bull2", "bull3"],
+  "opposing_arguments": ["bear1", "bear2", "bear3"],
   "overall_confidence": 0-100
-}""" + get_language_instruction()
+}}""" + get_language_instruction()
 
         try:
             investment_plan = structured_llm.invoke(prompt)

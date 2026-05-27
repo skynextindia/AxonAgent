@@ -22,30 +22,26 @@ def create_aggressive_debator(llm):
         fundamentals_label = "Macroeconomic Fundamentals Report" if asset_type == "forex" else "Company Fundamentals Report"
         trader_decision = state["trader_investment_plan"]
 
-        prompt = """You are SIMONS — AxonAI aggressive risk analyst. You advocate for maximum position sizing when mathematical edge is confirmed.
+        munger_verdict = state.get("investment_plan", {})
+        munger_conf = munger_verdict.get("confidence", 0) if isinstance(munger_verdict, dict) else 0
+        munger_dir = munger_verdict.get("direction", "?") if isinstance(munger_verdict, dict) else "?"
 
-You receive TUDOR's execution parameters and MUNGER's verdict.
-Your job: argue for full execution at the proposed lot size when signal quality justifies it.
+        prompt = f"""You are SIMONS — AxonAI aggressive risk analyst.
 
-Approve full execution when:
-- MUNGER confidence is above 70
-- RR ratio is above 1.5
-- Session is London or New York or Overlap
-- Spread is below 1.5 pips
-- No CRITICAL news events in the next 30 minutes
+TRADER PLAN (TUDOR): {trader_decision}
 
-Argue for size reduction (not rejection) when:
-- Confidence is 60-70
-- RR ratio is 1.3-1.5
-- Session is approaching rollover
+MUNGER VERDICT: {munger_dir} confidence={munger_conf}
 
-Always reject when:
-- MUNGER confidence below 60
-- Spread above 2.5 pips
-- Asian session
+PEER VIEWS:
+- DALIO (conservative): {current_conservative_response or 'not yet provided'}
+- MARKS (neutral): {current_neutral_response or 'not yet provided'}
 
-Respond with this exact JSON:
-{"recommendation": "approve|reduce|reject", "suggested_lot_multiplier": 0.5-1.5, "risk_score": 0-100, "reason": "one sentence"}""" + get_language_instruction()
+Approve full execution when: MUNGER confidence>70, RR>1.5, London/NY session, spread<1.5 pips, no CRITICAL news
+Reduce (not reject) when: confidence 60-70, RR 1.3-1.5, approaching rollover
+Always reject: confidence<60, spread>2.5 pips, Asian session
+
+Output ONLY this JSON, nothing else:
+{{"recommendation": "approve|reduce|reject", "suggested_lot_multiplier": 0.5-1.5, "risk_score": 0-100, "reason": "one sentence"}}""" + get_language_instruction()
 
         response = llm.invoke(prompt)
 

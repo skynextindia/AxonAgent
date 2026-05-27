@@ -22,20 +22,27 @@ def create_neutral_debator(llm):
         fundamentals_label = "Macroeconomic Fundamentals Report" if asset_type == "forex" else "Company Fundamentals Report"
         trader_decision = state["trader_investment_plan"]
 
-        prompt = """You are MARKS — AxonAI neutral risk analyst. You find the optimal risk-adjusted position between SIMONS and DALIO.
+        munger_verdict = state.get("investment_plan", {})
+        munger_conf = munger_verdict.get("confidence", 0) if isinstance(munger_verdict, dict) else 0
 
-You receive TUDOR's parameters, MUNGER's verdict, SIMONS's recommendation, and DALIO's recommendation.
+        prompt = f"""You are MARKS — AxonAI neutral risk analyst. Find the optimal risk-adjusted position between SIMONS and DALIO.
 
-Your job: synthesize SIMONS and DALIO positions into a rational risk-adjusted verdict.
+TRADER PLAN (TUDOR): {trader_decision}
 
-Process:
-1. If both SIMONS and DALIO approve: approve at average of their lot multipliers
-2. If SIMONS approves and DALIO reduces: reduce at DALIO's multiplier
-3. If either rejects: reject unless there is a compelling specific reason to override
-4. Never approve what DALIO rejects unless MUNGER confidence exceeds 85
+MUNGER CONFIDENCE: {munger_conf}
 
-Respond with this exact JSON:
-{"recommendation": "approve|reduce|reject", "final_lot_multiplier": 0.25-1.5, "risk_score": 0-100, "simons_weight": 0.0-1.0, "dalio_weight": 0.0-1.0, "reason": "one sentence"}""" + get_language_instruction()
+SIMONS (aggressive): {current_aggressive_response or 'not yet provided'}
+
+DALIO (conservative): {current_conservative_response or 'not yet provided'}
+
+Synthesis rules:
+1. Both approve → approve at average lot multiplier
+2. SIMONS approves + DALIO reduces → reduce at DALIO's multiplier
+3. Either rejects → reject unless MUNGER confidence>85
+4. Never approve what DALIO rejects unless MUNGER confidence>85
+
+Output ONLY this JSON, nothing else:
+{{"recommendation": "approve|reduce|reject", "final_lot_multiplier": 0.25-1.5, "risk_score": 0-100, "simons_weight": 0.0-1.0, "dalio_weight": 0.0-1.0, "reason": "one sentence"}}""" + get_language_instruction()
 
         response = llm.invoke(prompt)
 

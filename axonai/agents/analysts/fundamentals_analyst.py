@@ -64,6 +64,7 @@ Respond with this exact JSON at the end of your response:
                     "system",
                     "You are a helpful AI assistant, collaborating with other assistants. "
                     "Use the provided tools to gather fundamental data and evaluate the hypothesis.\n"
+                    "CRITICAL INSTRUCTION: The fundamental data tools return static snapshot data. DO NOT call the tools more than once. Once you receive the data, generate your final analysis immediately.\n"
                     "{system_message}\n"
                     "For your reference, the current date is {current_date}. {instrument_context}",
                 ),

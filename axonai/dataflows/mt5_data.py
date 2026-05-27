@@ -27,6 +27,7 @@ _initialized = False
 # Mapping from human-readable labels to MT5 TIMEFRAME_* constants.
 # Populated on first successful mt5_initialize().
 _TF_MAP: Dict[str, int] = {}
+_cached_tz_offset: Optional[int] = None
 
 
 def _load_mt5():
@@ -330,14 +331,19 @@ def get_mt5_atr(yf_symbol: str, period: int = 14,
 
 
 def get_broker_tz_offset(symbol: str = "EURUSDm") -> int:
-    """Get broker timezone offset from UTC in hours.
+    """Get broker timezone offset from UTC in hours. Cached to prevent repeated MT5 calls.
     
     If the market is open, computes it dynamically by comparing the latest tick time
     to the system UTC clock. If the market is closed (e.g. weekend), falls back
     to the standard EET/EEST (UTC+2/UTC+3) US DST transition rules used by almost
     all MT5 forex brokers.
     """
+    global _cached_tz_offset
+    if _cached_tz_offset is not None:
+        return _cached_tz_offset
+
     import time
+    offset = None
     try:
         import MetaTrader5 as mt5
         # mt5_initialize is cached and safe to call
@@ -348,25 +354,29 @@ def get_broker_tz_offset(symbol: str = "EURUSDm") -> int:
                 current_time = time.time()
                 # If tick is within 2 hours of current time, compute offset directly
                 if abs(tick_time - current_time) < 7200:
-                    return int(round((tick_time - current_time) / 3600))
+                    offset = int(round((tick_time - current_time) / 3600))
     except Exception as e:
         logger.debug("Failed to determine broker offset dynamically: %s", e)
 
-    # Fallback: EET/EEST (UTC+2 / UTC+3) US DST rules
-    from datetime import datetime, timezone, timedelta
-    now_utc = datetime.now(timezone.utc)
-    year = now_utc.year
-    # US DST starts on second Sunday of March
-    dst_start = datetime(year, 3, 8, 7, tzinfo=timezone.utc)
-    while dst_start.weekday() != 6:
-        dst_start += timedelta(days=1)
-    # US DST ends on first Sunday of November
-    dst_end = datetime(year, 11, 1, 6, tzinfo=timezone.utc)
-    while dst_end.weekday() != 6:
-        dst_end += timedelta(days=1)
+    if offset is None:
+        # Fallback: EET/EEST (UTC+2 / UTC+3) US DST rules
+        from datetime import datetime, timezone, timedelta
+        now_utc = datetime.now(timezone.utc)
+        year = now_utc.year
+        # US DST starts on second Sunday of March
+        dst_start = datetime(year, 3, 8, 7, tzinfo=timezone.utc)
+        while dst_start.weekday() != 6:
+            dst_start += timedelta(days=1)
+        # US DST ends on first Sunday of November
+        dst_end = datetime(year, 11, 1, 6, tzinfo=timezone.utc)
+        while dst_end.weekday() != 6:
+            dst_end += timedelta(days=1)
 
-    if dst_start <= now_utc < dst_end:
-        return 3  # EEST
-    else:
-        return 2  # EET
+        if dst_start <= now_utc < dst_end:
+            offset = 3  # EEST
+        else:
+            offset = 2  # EET
+
+    _cached_tz_offset = offset
+    return offset
 

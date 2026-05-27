@@ -10,20 +10,24 @@ def create_bull_researcher(llm):
         compressed_evidence = state.get("compressed_evidence", "")
         asset_type = state.get("asset_type", "stock")
 
-        prompt = """You are BUFFETT — AxonAI bull case researcher. Your job is to find the strongest reasons the proposed trade will succeed.
+        direction = trader_hypothesis.get("direction", "?") if isinstance(trader_hypothesis, dict) else "?"
+        hypothesis_str = trader_hypothesis.get("hypothesis", "") if isinstance(trader_hypothesis, dict) else str(trader_hypothesis)
 
-Critical rules:
-- You must argue FROM the compressed evidence provided — not from general market knowledge
-- Reference specific data points from WYCKOFF, KEYNES, REUTERS, and LIVERMORE reports
-- Find at least 3 distinct reasons supporting the bull case
-- Do not invent data not present in the evidence
-- Be specific — "H4 trend is bullish" is acceptable. "Markets tend to go up" is not.
-- Even if evidence is mixed argue the strongest possible bull case from what exists
+        prompt = f"""You are BUFFETT — AxonAI bull case researcher.
 
-Maximum 200 words total.
+TRADER HYPOTHESIS: {direction} — {hypothesis_str}
 
-Respond with this exact JSON at the end of your response:
-{"position": "bull", "confidence": 0-100, "arguments": ["argument1 with evidence reference", "argument2 with evidence reference", "argument3 with evidence reference"], "key_risk": "single biggest risk to this bull case"}""" + get_language_instruction()
+COMPRESSED EVIDENCE:
+{compressed_evidence}
+
+Rules:
+- Argue FROM the evidence above only — no general market knowledge
+- Find 3 distinct bull reasons with specific data references
+- Do not invent data
+- Max 200 words total
+
+Output ONLY this JSON, nothing else:
+{{"position": "bull", "confidence": 0-100, "arguments": ["arg1", "arg2", "arg3"], "key_risk": "one sentence"}}""" + get_language_instruction()
 
         response = llm.invoke(prompt)
         argument = f"Bull Analyst: {response.content}"
