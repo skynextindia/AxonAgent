@@ -162,28 +162,52 @@ def build_world_state(symbol: str = "EURUSD=X") -> WorldState:
         # 3. Session and Timings (UTC-based)
         now_utc = datetime.now(timezone.utc)
         utc_hour = now_utc.hour + now_utc.minute / 60.0
+        year = now_utc.year
         
-        # Session labels and penalty scoring
-        if 13.0 <= utc_hour < 16.0:
+        # New York DST (EDT: 2nd Sunday in March to 1st Sunday in November)
+        dst_start_us = datetime(year, 3, 8)
+        while dst_start_us.weekday() != 6:
+            dst_start_us += timedelta(days=1)
+        dst_end_us = datetime(year, 11, 1)
+        while dst_end_us.weekday() != 6:
+            dst_end_us += timedelta(days=1)
+        is_us_dst = dst_start_us.date() <= now_utc.date() < dst_end_us.date()
+
+        # London DST (BST: Last Sunday in March to Last Sunday in October)
+        dst_start_eu = datetime(year, 3, 31)
+        while dst_start_eu.weekday() != 6:
+            dst_start_eu -= timedelta(days=1)
+        dst_end_eu = datetime(year, 10, 31)
+        while dst_end_eu.weekday() != 6:
+            dst_end_eu -= timedelta(days=1)
+        is_eu_dst = dst_start_eu.date() <= now_utc.date() < dst_end_eu.date()
+
+        ldn_open = 7.0 if is_eu_dst else 8.0
+        ldn_close = 15.0 if is_eu_dst else 16.0
+        ny_open = 12.0 if is_us_dst else 13.0
+        ny_close = 20.0 if is_us_dst else 21.0
+        
+        # Session classification based on dynamic hours
+        if ny_open <= utc_hour < ldn_close:
             session = "overlap"
             session_penalty = 1.0
-            hours_since_london_open = utc_hour - 8.0
-        elif 8.0 <= utc_hour < 13.0:
+            hours_since_london_open = utc_hour - ldn_open
+        elif ldn_open <= utc_hour < ny_open:
             session = "london"
             session_penalty = 1.0
-            hours_since_london_open = utc_hour - 8.0
-        elif 16.0 <= utc_hour < 21.0:
+            hours_since_london_open = utc_hour - ldn_open
+        elif ldn_close <= utc_hour < ny_close:
             session = "newyork"
             session_penalty = 1.0
-            hours_since_london_open = utc_hour - 8.0
-        elif 21.0 <= utc_hour < 22.0:
+            hours_since_london_open = utc_hour - ldn_open
+        elif ny_close <= utc_hour < (ny_close + 1.0):
             session = "rollover"
             session_penalty = 0.5
-            hours_since_london_open = (utc_hour - 8.0) if utc_hour >= 8.0 else (utc_hour + 16.0)
+            hours_since_london_open = (utc_hour - ldn_open) if utc_hour >= ldn_open else (utc_hour + 24.0 - ldn_open)
         else:
             session = "asian"
             session_penalty = 0.25
-            hours_since_london_open = (utc_hour - 8.0) if utc_hour >= 8.0 else (utc_hour + 16.0)
+            hours_since_london_open = (utc_hour - ldn_open) if utc_hour >= ldn_open else (utc_hour + 24.0 - ldn_open)
 
         # Session Quality (volume vs 20-day H1 volume)
         latest_volume = float(df_h1["Volume"].iloc[-1])

@@ -155,11 +155,34 @@ def create_trader(llm):
         # Force-correct SL/TP using standard formulas to prevent hallucination
         direction = "SELL" if "SELL" in direction else ("BUY" if "BUY" in direction else "HOLD")
         if direction == "SELL":
-            sl = round(entry + 2.0 * atr_value, 5)
-            tp = round(entry - 4.0 * atr_value, 5)
+            sl = entry + 2.0 * atr_value
+            tp = entry - 4.0 * atr_value
         else:
-            sl = round(entry - 2.0 * atr_value, 5)
-            tp = round(entry + 4.0 * atr_value, 5)
+            sl = entry - 2.0 * atr_value
+            tp = entry + 4.0 * atr_value
+
+        # --- Institutional Psychology & Sweep Safety Check ---
+        pip = 0.01 if "JPY" in company_name.upper() else 0.0001
+        pip50 = 50 * pip
+        
+        # Adjust Stop Loss to avoid being swept at key round levels
+        nearest_round_sl = round(sl / pip50) * pip50
+        if abs(sl - nearest_round_sl) <= 3 * pip:
+            if direction == "BUY":
+                sl = nearest_round_sl - 5 * pip
+            else:
+                sl = nearest_round_sl + 5 * pip
+                
+        # Adjust Take Profit to sit conservatively before psychological support/resistance
+        nearest_round_tp = round(tp / pip50) * pip50
+        if abs(tp - nearest_round_tp) <= 3 * pip:
+            if direction == "BUY":
+                tp = nearest_round_tp - 3 * pip
+            else:
+                tp = nearest_round_tp + 3 * pip
+
+        sl = round(sl, 5)
+        tp = round(tp, 5)
 
         hypothesis_dict = {
             "direction": direction,

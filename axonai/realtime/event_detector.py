@@ -160,8 +160,11 @@ class EventDetector:
                 ))
         self._previous_spread_safe = state.spread_safe
 
-        # 3. Level breach check (tick-level, confirmed on candle close)
-        self._check_level_proximity(mid, timestamp)
+        # 3. Live evidence tick update
+        self.live_evidence.on_tick(bid, ask, timestamp)
+
+        # 4. Institutional Level breach check
+        self._check_level_breach(bid, ask, timestamp)
 
     def on_candle_close(self, candle: LiveCandle):
         """Structural checks on candle close."""
@@ -181,7 +184,6 @@ class EventDetector:
 
             if candle.timeframe == "M5":
                 self._check_volatility_spike(candle)
-                self._check_level_breach_confirmed(candle)
 
             if candle.timeframe in ("M15", "H1", "H4"):
                 logger.info("EventDetector: candle close for %s triggering checks...", candle.timeframe)
@@ -198,60 +200,38 @@ class EventDetector:
         finally:
             self._current_trigger_candle = None
 
-    def _check_level_proximity(self, price: float, timestamp: datetime):
-        """Flag potential level breaches at tick level (for logging only)."""
-        key_levels = self.live_evidence.key_levels
-        for level in key_levels:
-            rounded = round(level, 5)
-            if rounded in self._consumed_levels:
-                continue
-            distance_pips = abs(price - level) / self._pip_mult
-            # Just proximity logging, actual breach confirmed on M5 close
-            if distance_pips < 2.0 and self._log_events:
-                logger.debug("Price %.5f within 2 pips of key level %.5f", price, level)
-
-    def _check_level_breach_confirmed(self, candle: LiveCandle):
-        """Confirm level breach on M5 candle close."""
-        key_levels = self.live_evidence.key_levels
-        swing_highs = [sh["price"] for sh in self.live_evidence.swing_highs]
-        swing_lows = [sl["price"] for sl in self.live_evidence.swing_lows]
-        all_levels = set(key_levels + swing_highs + swing_lows)
-
-        for level in all_levels:
-            rounded = round(level, 5)
-            if rounded in self._consumed_levels:
-                continue
-
-            # Bullish breach: close above level and open was below
-            if candle.close > level and candle.open <= level:
-                self._consumed_levels.add(rounded)
+    def _check_level_breach(self, bid: float, ask: float, timestamp: datetime):
+        """Check for breach of active institutional levels on tick."""
+        pip = self._pip_mult
+        active_levels = [l for l in self.live_evidence.price_levels if l.is_active and l.strength >= 0.4]
+        
+        for level in active_levels:
+            distance = abs(bid - level.price)
+            
+            # Price is within 2 pips of level
+            if distance <= 2 * pip:
+                # Only fire if we haven't fired on this level recently
+                level_key = round(level.price, 4)
+                if level_key in self._consumed_levels:
+                    continue
+                
                 self._emit(MarketEvent(
                     event_type=EventType.LEVEL_BREACH,
-                    priority=EventPriority.HIGH,
-                    timestamp=candle.open_time,
+                    priority=EventPriority.HIGH if level.strength >= 0.7 else EventPriority.MEDIUM,
+                    timestamp=timestamp,
                     symbol=self.live_state.symbol,
-                    price=candle.close,
+                    price=bid,
                     details={
-                        "level": level,
-                        "direction": "bullish",
-                        "timeframe": candle.timeframe,
+                        "level_type": level.level_type,
+                        "level_price": level.price,
+                        "strength": level.strength,
+                        "touches": level.touches,
+                        "direction": level.direction,
+                        "distance_pips": distance / pip
                     }
                 ))
-            # Bearish breach: close below level and open was above
-            elif candle.close < level and candle.open >= level:
-                self._consumed_levels.add(rounded)
-                self._emit(MarketEvent(
-                    event_type=EventType.LEVEL_BREACH,
-                    priority=EventPriority.HIGH,
-                    timestamp=candle.open_time,
-                    symbol=self.live_state.symbol,
-                    price=candle.close,
-                    details={
-                        "level": level,
-                        "direction": "bearish",
-                        "timeframe": candle.timeframe,
-                    }
-                ))
+                self._consumed_levels.add(level_key)
+
 
     def _check_structure_break(self, candle: LiveCandle):
         """Detect Break of Structure (BOS)."""

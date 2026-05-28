@@ -873,7 +873,7 @@ def update_research_team_status(status):
 
 
 # Ordered list of analysts for status transitions
-ANALYST_ORDER = ["market", "social", "news", "fundamentals"]
+ANALYST_KEYS_ORDER = ["market", "social", "news", "fundamentals"]
 ANALYST_AGENT_NAMES = {
     "market": "Market Analyst",
     "social": "Sentiment Analyst",
@@ -905,7 +905,7 @@ def update_analyst_statuses(message_buffer, chunk, wall_time_tracker=None):
     if wall_time_tracker is not None:
         sync_analyst_tracker_from_chunk(wall_time_tracker, chunk)
 
-    for analyst_key in ANALYST_ORDER:
+    for analyst_key in ANALYST_KEYS_ORDER:
         if analyst_key not in selected:
             continue
 
@@ -1069,7 +1069,7 @@ def run_analysis(
 
     # Normalize analyst selection to predefined order (selection is a 'set', order is fixed)
     selected_set = {analyst.value for analyst in selections["analysts"]}
-    selected_analyst_keys = [a for a in ANALYST_ORDER if a in selected_set]
+    selected_analyst_keys = [a for a in ANALYST_KEYS_ORDER if a in selected_set]
     analyst_execution_plan = build_analyst_execution_plan(
         selected_analyst_keys,
         concurrency_limit=config["analyst_concurrency_limit"],

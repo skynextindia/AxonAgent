@@ -119,6 +119,30 @@ class MT5TradeExecutor:
             sl = price + (atr * sl_mult)
             tp = price - (atr * tp_mult)
 
+        # --- Institutional Psychology & Sweep Safety Check ---
+        pip = 0.01 if "JPY" in symbol.upper() else 0.0001
+        pip50 = 50 * pip
+        
+        # Adjust Stop Loss to avoid being swept at key round levels
+        nearest_round_sl = round(sl / pip50) * pip50
+        if abs(sl - nearest_round_sl) <= 3 * pip:
+            if order_type == mt5.ORDER_TYPE_BUY:
+                sl = nearest_round_sl - 5 * pip
+                logger.info("TradeExecutor: Adjusted Buy SL below round level %.5f to %.5f", nearest_round_sl, sl)
+            else:
+                sl = nearest_round_sl + 5 * pip
+                logger.info("TradeExecutor: Adjusted Sell SL above round level %.5f to %.5f", nearest_round_sl, sl)
+                
+        # Adjust Take Profit to sit conservatively before psychological support/resistance
+        nearest_round_tp = round(tp / pip50) * pip50
+        if abs(tp - nearest_round_tp) <= 3 * pip:
+            if order_type == mt5.ORDER_TYPE_BUY:
+                tp = nearest_round_tp - 3 * pip
+                logger.info("TradeExecutor: Adjusted Buy TP below round level %.5f to %.5f", nearest_round_tp, tp)
+            else:
+                tp = nearest_round_tp + 3 * pip
+                logger.info("TradeExecutor: Adjusted Sell TP above round level %.5f to %.5f", nearest_round_tp, tp)
+
         # Format price to correct number of digits
         digits = getattr(symbol_info, "digits", 5)
         if not isinstance(digits, int):

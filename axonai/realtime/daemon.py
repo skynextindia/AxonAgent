@@ -80,25 +80,58 @@ class AxonDaemon:
         self._start_time: Optional[datetime] = None
 
     @staticmethod
-    def _get_session_details(utc_hour: float) -> list:
-        """Compute active/inactive state + progress for each forex session.
-        
-        Session hours (UTC):
-          Sydney:  22:00 – 07:00  (9h)
-          Tokyo:   00:00 – 09:00  (9h)
-          London:  08:00 – 16:00  (8h)
-          New York: 13:00 – 22:00 (9h)
+    def _get_session_details(now_utc: datetime) -> list:
+        """Compute active/inactive state + progress for each forex session with dynamic DST.
         """
+        year = now_utc.year
+        utc_hour = now_utc.hour + now_utc.minute / 60.0
+
+        # US DST: 2nd Sunday in March to 1st Sunday in Nov
+        dst_start_us = datetime(year, 3, 8)
+        while dst_start_us.weekday() != 6:
+            dst_start_us += timedelta(days=1)
+        dst_end_us = datetime(year, 11, 1)
+        while dst_end_us.weekday() != 6:
+            dst_end_us += timedelta(days=1)
+        is_us_dst = dst_start_us.date() <= now_utc.date() < dst_end_us.date()
+
+        # EU DST: last Sunday in March to last Sunday in Oct
+        dst_start_eu = datetime(year, 3, 31)
+        while dst_start_eu.weekday() != 6:
+            dst_start_eu -= timedelta(days=1)
+        dst_end_eu = datetime(year, 10, 31)
+        while dst_end_eu.weekday() != 6:
+            dst_end_eu -= timedelta(days=1)
+        is_eu_dst = dst_start_eu.date() <= now_utc.date() < dst_end_eu.date()
+
+        # AEDT active: first Sunday in October to first Sunday in April
+        dst_end_au = datetime(year, 4, 1)
+        while dst_end_au.weekday() != 6:
+            dst_end_au += timedelta(days=1)
+        dst_start_au = datetime(year, 10, 1)
+        while dst_start_au.weekday() != 6:
+            dst_start_au += timedelta(days=1)
+        is_au_dst = now_utc.date() < dst_end_au.date() or now_utc.date() >= dst_start_au.date()
+
+        syd_open = 21.0 if is_au_dst else 22.0
+        syd_close = 6.0 if is_au_dst else 7.0
+        
+        ldn_open = 7.0 if is_eu_dst else 8.0
+        ldn_close = 15.0 if is_eu_dst else 16.0
+        
+        ny_open = 12.0 if is_us_dst else 13.0
+        ny_close = 20.0 if is_us_dst else 21.0
+
         sessions_def = [
-            {"name": "Sydney",   "open": 22.0, "close": 7.0,  "duration": 9.0,  "color": "#00bfff"},
-            {"name": "Tokyo",    "open": 0.0,  "close": 9.0,  "duration": 9.0,  "color": "#ff6b9d"},
-            {"name": "London",   "open": 8.0,  "close": 16.0, "duration": 8.0,  "color": "#9d00ff"},
-            {"name": "New York", "open": 13.0, "close": 22.0, "duration": 9.0,  "color": "#00ff66"},
+            {"name": "Sydney",   "open": syd_open, "close": syd_close, "duration": 9.0,  "color": "#00bfff"},
+            {"name": "Tokyo",    "open": 0.0,      "close": 9.0,       "duration": 9.0,  "color": "#ff6b9d"},
+            {"name": "London",   "open": ldn_open, "close": ldn_close, "duration": 8.0,  "color": "#9d00ff"},
+            {"name": "New York", "open": ny_open,  "close": ny_close,  "duration": 9.0,  "color": "#00ff66"},
         ]
         result = []
         for s in sessions_def:
             o, c, dur = s["open"], s["close"], s["duration"]
-            # Handle wrap-around (Sydney: 22-07)
+            # Handle wrap-around
             if o > c:  # wraps midnight
                 active = utc_hour >= o or utc_hour < c
                 elapsed = (utc_hour - o) if utc_hour >= o else (utc_hour + 24.0 - o)
@@ -132,26 +165,50 @@ class AxonDaemon:
                 ema20 = c * k + ema20 * (1 - k)
             trend_m15 = "up" if m15_closes[-1] > ema20 else "down"
 
-        # Compute detailed session data from real UTC clock
+        # Compute detailed session data from real UTC clock with active DST
         from datetime import timezone
         now_utc = datetime.now(timezone.utc)
-        utc_hour = now_utc.hour + now_utc.minute / 60.0
-        session_details = self._get_session_details(utc_hour)
+        year = now_utc.year
+        session_details = self._get_session_details(now_utc)
+        
+        # NY DST checks for range calculation
+        dst_start_us = datetime(year, 3, 8)
+        while dst_start_us.weekday() != 6:
+            dst_start_us += timedelta(days=1)
+        dst_end_us = datetime(year, 11, 1)
+        while dst_end_us.weekday() != 6:
+            dst_end_us += timedelta(days=1)
+        is_us_dst = dst_start_us.date() <= now_utc.date() < dst_end_us.date()
+
+        # London DST checks for range calculation
+        dst_start_eu = datetime(year, 3, 31)
+        while dst_start_eu.weekday() != 6:
+            dst_start_eu -= timedelta(days=1)
+        dst_end_eu = datetime(year, 10, 31)
+        while dst_end_eu.weekday() != 6:
+            dst_end_eu -= timedelta(days=1)
+        is_eu_dst = dst_start_eu.date() <= now_utc.date() < dst_end_eu.date()
+
+        ldn_open = 7.0 if is_eu_dst else 8.0
+        ldn_close = 15.0 if is_eu_dst else 16.0
+        ny_open = 12.0 if is_us_dst else 13.0
+        ny_close = 20.0 if is_us_dst else 21.0
             
         # Real-time session ranges update using latest tick price
         current_bid = self.tick_engine.latest_bid
         if current_bid > 0.0:
-            if 0 <= now_utc.hour < 8:
+            utc_hour = now_utc.hour + now_utc.minute / 60.0
+            if 0 <= utc_hour < 8.0:
                 if self.live_evidence._evidence.asian_range_high == 0.0 or current_bid > self.live_evidence._evidence.asian_range_high:
                     self.live_evidence._evidence.asian_range_high = current_bid
                 if self.live_evidence._evidence.asian_range_low == 0.0 or current_bid < self.live_evidence._evidence.asian_range_low:
                     self.live_evidence._evidence.asian_range_low = current_bid
-            elif 8 <= now_utc.hour < 16:
+            elif ldn_open <= utc_hour < ldn_close:
                 if self.live_evidence._evidence.london_range_high == 0.0 or current_bid > self.live_evidence._evidence.london_range_high:
                     self.live_evidence._evidence.london_range_high = current_bid
                 if self.live_evidence._evidence.london_range_low == 0.0 or current_bid < self.live_evidence._evidence.london_range_low:
                     self.live_evidence._evidence.london_range_low = current_bid
-            elif 13 <= now_utc.hour < 21:
+            elif ny_open <= utc_hour < ny_close:
                 if self.live_evidence._evidence.ny_range_high == 0.0 or current_bid > self.live_evidence._evidence.ny_range_high:
                     self.live_evidence._evidence.ny_range_high = current_bid
                 if self.live_evidence._evidence.ny_range_low == 0.0 or current_bid < self.live_evidence._evidence.ny_range_low:
@@ -234,28 +291,22 @@ class AxonDaemon:
         }
 
     def _get_levels_payload(self) -> dict:
-        me = self.live_evidence.snapshot()
-        current_bid = self.tick_engine.latest_bid
-        if current_bid == 0.0 and self.live_evidence._h1_candles:
-            current_bid = self.live_evidence._h1_candles[-1].close
-        if current_bid == 0.0:
-            current_bid = 1.16110
-            
-        sr_zones = []
-        for sh in me.swing_highs:
-            z_type = "support" if sh["price"] < current_bid else "resistance"
-            sr_zones.append({"price": sh["price"], "type": z_type, "strength": sh.get("strength", 3)})
-        for sl in me.swing_lows:
-            z_type = "support" if sl["price"] < current_bid else "resistance"
-            sr_zones.append({"price": sl["price"], "type": z_type, "strength": sl.get("strength", 3)})
-            
+        levels = []
+        for lv in self.live_evidence.price_levels:
+            if lv.is_active:
+                levels.append({
+                    "price": lv.price,
+                    "level_type": lv.level_type,
+                    "direction": lv.direction,
+                    "strength": lv.strength,
+                    "touches": lv.touches,
+                    "timeframe": lv.timeframe
+                })
         return {
             "type": "levels",
-            "key_levels": me.key_levels,
-            "swing_highs": me.swing_highs,
-            "swing_lows": me.swing_lows,
-            "sr_zones": sr_zones
+            "price_levels": levels
         }
+
 
     def _get_candles_payload(self, timeframe: str) -> dict:
         if timeframe == "M15":
@@ -445,6 +496,24 @@ class AxonDaemon:
         logger.info("="*60)
 
         # 6. Enter main event loop
+        # TEST TRIGGER: Queue a mock event immediately to show the user how the debate works in real-time
+        from axonai.realtime.event_types import MarketEvent, EventType, EventPriority
+        self.event_queue.put(MarketEvent(
+            event_type=EventType.LEVEL_BREACH,
+            priority=EventPriority.HIGH,
+            timestamp=datetime.now(),
+            symbol=self.yf_symbol,
+            price=1.16282,
+            details={
+                "level_type": "PDH",
+                "level_price": 1.16282,
+                "strength": 0.7,
+                "touches": 2,
+                "direction": "resistance",
+                "distance_pips": 0.0
+            }
+        ))
+
         self._event_loop()
 
     def _on_tick(self, bid: float, ask: float, timestamp: datetime):

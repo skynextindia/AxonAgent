@@ -12,6 +12,7 @@ import math
 from collections import deque
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Tuple
+from dataclasses import dataclass
 
 import numpy as np
 
@@ -21,6 +22,19 @@ from axonai.realtime.event_types import LiveCandle
 from axonai.dataflows.mt5_data import get_broker_tz_offset, _to_mt5_symbol
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class PriceLevel:
+    price: float
+    level_type: str      # "PDH", "PDL", "PWH", "PWL", "ASH", "ASL", "LDH", "LDL", "ROUND", "H4_SWING"
+    timeframe: str       # "D1", "W1", "H4", "SESSION"
+    touches: int         # how many times price has reacted here
+    last_touch: datetime
+    direction: str       # "resistance" or "support"
+    strength: float      # 0.0 to 1.0 composite score
+    is_active: bool      # False if price has closed through this level
+
 
 
 class LiveWorldState:
@@ -508,18 +522,24 @@ class LiveMarketEvidence:
         self._h1_candles: deque[LiveCandle] = deque(maxlen=100)
         self._h4_candles: deque[LiveCandle] = deque(maxlen=100)
 
+        # Institutional Price Levels
+        self.price_levels: List[PriceLevel] = []
+
+        # Rolling London session trackers
+        self._london_high: Optional[float] = None
+        self._london_low: Optional[float] = None
+        self._last_london_reset_day: Optional[int] = None
+        self._pending_touches: Dict[float, bool] = {}
 
     def initialize(self):
         """Cold start from historical bars via extract_market_evidence()."""
-        logger.info("LiveMarketEvidence: cold-starting for %s", self.symbol)
+        logger.info("LiveMarketEvidence: cold-starting for %s with institutional levels", self.symbol)
         self._evidence = extract_market_evidence(self.symbol)
         self._initialized = True
-        logger.info("LiveMarketEvidence: initialized. %d swing highs, %d swing lows, %d key levels",
-                    len(self._evidence.swing_highs), len(self._evidence.swing_lows),
-                    len(self._evidence.key_levels))
         
         # Seed candle history to resolve cold-start lag and populate dashboard feed
         self._seed_candles_from_history()
+        self._calculate_initial_institutional_levels()
         self._update_indicators()
 
     def _seed_candles_from_history(self):
@@ -594,10 +614,281 @@ class LiveMarketEvidence:
         except Exception as e:
             logger.error("LiveMarketEvidence candle seed error: %s", e, exc_info=True)
 
+    def _calculate_initial_institutional_levels(self):
+        """Compute the 6 institutional levels from MT5 history on startup."""
+        try:
+            from axonai.dataflows.mt5_data import (
+                mt5_initialize, _to_mt5_symbol, _ensure_symbol_visible, _fetch_bars
+            )
+            if not mt5_initialize():
+                logger.warning("LiveMarketEvidence: MT5 initialization failed for institutional calculation.")
+                return
+
+            mt5_sym = _to_mt5_symbol(self.symbol)
+            _ensure_symbol_visible(mt5_sym)
+
+            end_dt = datetime.now()
+            
+            # Fetch bars
+            df_d1 = _fetch_bars(mt5_sym, "D1", end_dt - timedelta(days=15), end_dt)
+            df_w1 = _fetch_bars(mt5_sym, "W1", end_dt - timedelta(days=45), end_dt)
+            df_h1 = _fetch_bars(mt5_sym, "H1", end_dt - timedelta(days=5), end_dt)
+            df_h4 = _fetch_bars(mt5_sym, "H4", end_dt - timedelta(days=30), end_dt)
+
+            self.price_levels.clear()
+            now_utc = datetime.now(timezone.utc)
+            offset_hours = get_broker_tz_offset(mt5_sym)
+
+            # Get current bid/close proxy
+            current_bid = float(df_h1["Close"].iloc[-1]) if df_h1 is not None and not df_h1.empty else 1.1600
+
+            # 1. PDH/PDL
+            if df_d1 is not None and len(df_d1) >= 2:
+                yesterday = df_d1.iloc[-2]
+                self.price_levels.append(PriceLevel(
+                    price=float(yesterday["High"]),
+                    level_type="PDH",
+                    timeframe="D1",
+                    touches=0,
+                    last_touch=now_utc,
+                    direction="resistance",
+                    strength=0.2,
+                    is_active=True
+                ))
+                self.price_levels.append(PriceLevel(
+                    price=float(yesterday["Low"]),
+                    level_type="PDL",
+                    timeframe="D1",
+                    touches=0,
+                    last_touch=now_utc,
+                    direction="support",
+                    strength=0.2,
+                    is_active=True
+                ))
+
+            # 2. PWH/PWL
+            if df_w1 is not None and len(df_w1) >= 2:
+                last_week = df_w1.iloc[-2]
+                self.price_levels.append(PriceLevel(
+                    price=float(last_week["High"]),
+                    level_type="PWH",
+                    timeframe="W1",
+                    touches=0,
+                    last_touch=now_utc,
+                    direction="resistance",
+                    strength=0.2,
+                    is_active=True
+                ))
+                self.price_levels.append(PriceLevel(
+                    price=float(last_week["Low"]),
+                    level_type="PWL",
+                    timeframe="W1",
+                    touches=0,
+                    last_touch=now_utc,
+                    direction="support",
+                    strength=0.2,
+                    is_active=True
+                ))
+
+            # 3. ASH/ASL
+            if df_h1 is not None and not df_h1.empty:
+                start_search = end_dt - timedelta(days=2)
+                asian_highs = []
+                asian_lows = []
+                for open_time, row in df_h1.iterrows():
+                    utc_time = open_time - timedelta(hours=offset_hours)
+                    if utc_time >= start_search:
+                        if 22 <= utc_time.hour or utc_time.hour < 8:
+                            asian_highs.append(row["High"])
+                            asian_lows.append(row["Low"])
+                if asian_highs and asian_lows:
+                    self.price_levels.append(PriceLevel(
+                        price=float(max(asian_highs)),
+                        level_type="ASH",
+                        timeframe="SESSION",
+                        touches=0,
+                        last_touch=now_utc,
+                        direction="resistance",
+                        strength=0.2,
+                        is_active=True
+                    ))
+                    self.price_levels.append(PriceLevel(
+                        price=float(min(asian_lows)),
+                        level_type="ASL",
+                        timeframe="SESSION",
+                        touches=0,
+                        last_touch=now_utc,
+                        direction="support",
+                        strength=0.2,
+                        is_active=True
+                    ))
+
+            # 4. ROUND
+            pip50 = 50 * self._pip_mult
+            base = round(current_bid / pip50) * pip50
+            for i in range(-4, 5):
+                r_price = base + (i * pip50)
+                self.price_levels.append(PriceLevel(
+                    price=float(r_price),
+                    level_type="ROUND",
+                    timeframe="SESSION",
+                    touches=0,
+                    last_touch=now_utc,
+                    direction="support" if r_price < current_bid else "resistance",
+                    strength=0.2,
+                    is_active=True
+                ))
+
+            # 5. H4_SWING
+            if df_h4 is not None and len(df_h4) >= 16:
+                # Scan last 10 completed H4 bars (len-13 to len-4)
+                for i in range(len(df_h4) - 13, len(df_h4) - 3):
+                    if i < 3 or i >= len(df_h4) - 3:
+                        continue
+                    row = df_h4.iloc[i]
+                    left = df_h4.iloc[i-3:i]
+                    right = df_h4.iloc[i+1:i+4]
+                    
+                    # Swing High
+                    if row["High"] > max(left["High"]) and row["High"] > max(right["High"]):
+                        window_low = df_h4.iloc[i-3:i+4]["Low"].min()
+                        if row["High"] - window_low >= 15 * self._pip_mult:
+                            self.price_levels.append(PriceLevel(
+                                price=float(row["High"]),
+                                level_type="H4_SWING",
+                                timeframe="H4",
+                                touches=0,
+                                last_touch=now_utc,
+                                direction="resistance",
+                                strength=0.2,
+                                is_active=True
+                            ))
+
+                    # Swing Low
+                    if row["Low"] < min(left["Low"]) and row["Low"] < min(right["Low"]):
+                        window_high = df_h4.iloc[i-3:i+4]["High"].max()
+                        if window_high - row["Low"] >= 15 * self._pip_mult:
+                            self.price_levels.append(PriceLevel(
+                                price=float(row["Low"]),
+                                level_type="H4_SWING",
+                                timeframe="H4",
+                                touches=0,
+                                last_touch=now_utc,
+                                direction="support",
+                                strength=0.2,
+                                is_active=True
+                            ))
+
+            self._reclassify_all_directions(current_bid)
+            logger.info("LiveMarketEvidence: seeded %d institutional levels", len(self.price_levels))
+
+        except Exception as e:
+            logger.error("Error in LiveMarketEvidence institutional levels seed: %s", e, exc_info=True)
+
+    def _reclassify_all_directions(self, current_bid: float):
+        """Update direction for all active levels based on current bid."""
+        for level in self.price_levels:
+            if not level.is_active:
+                continue
+            if level.price < current_bid - (2 * self._pip_mult):
+                level.direction = "support"
+            elif level.price > current_bid + (2 * self._pip_mult):
+                level.direction = "resistance"
+            else:
+                level.direction = "current"
+
+    def on_tick(self, bid: float, ask: float, timestamp: datetime):
+        """Tick-level logic for LDH/LDL tracking, touch counting, and classification."""
+        if not self._initialized:
+            return
+
+        mid = (bid + ask) / 2.0
+        
+        # Calculate UTC hour
+        broker_symbol = _to_mt5_symbol(self.symbol)
+        offset_hours = get_broker_tz_offset(broker_symbol)
+        if timestamp.tzinfo:
+            utc_dt = timestamp.astimezone(timezone.utc)
+        else:
+            utc_dt = timestamp - timedelta(hours=offset_hours)
+            utc_dt = utc_dt.replace(tzinfo=timezone.utc)
+
+        # 1. London rolling high/low (08:00 to 16:00 UTC)
+        if 8 <= utc_dt.hour < 16:
+            # Reset daily
+            if self._last_london_reset_day != utc_dt.day:
+                self._london_high = mid
+                self._london_low = mid
+                self._last_london_reset_day = utc_dt.day
+                # Clean up existing LDH/LDL
+                self.price_levels = [l for l in self.price_levels if l.level_type not in ("LDH", "LDL")]
+            else:
+                if self._london_high is None or mid > self._london_high:
+                    self._london_high = mid
+                if self._london_low is None or mid < self._london_low:
+                    self._london_low = mid
+
+            # Ensure active levels for LDH/LDL are present/updated in the list
+            self.price_levels = [l for l in self.price_levels if l.level_type not in ("LDH", "LDL")]
+            if self._london_high is not None:
+                self.price_levels.append(PriceLevel(
+                    price=float(self._london_high),
+                    level_type="LDH",
+                    timeframe="SESSION",
+                    touches=0,
+                    last_touch=utc_dt,
+                    direction="resistance",
+                    strength=0.2,
+                    is_active=True
+                ))
+            if self._london_low is not None:
+                self.price_levels.append(PriceLevel(
+                    price=float(self._london_low),
+                    level_type="LDL",
+                    timeframe="SESSION",
+                    touches=0,
+                    last_touch=utc_dt,
+                    direction="support",
+                    strength=0.2,
+                    is_active=True
+                ))
+
+        # 2. Touch Counting & Confirmed Reversals
+        for level in self.price_levels:
+            if not level.is_active:
+                continue
+
+            dist = abs(mid - level.price)
+            if dist <= 3 * self._pip_mult:
+                # Price is in proximity zone
+                self._pending_touches[level.price] = True
+            
+            # Check confirmation of reversal
+            if self._pending_touches.get(level.price, False):
+                confirmed = False
+                if level.direction == "support" and mid >= level.price + 5 * self._pip_mult:
+                    confirmed = True
+                elif level.direction == "resistance" and mid <= level.price - 5 * self._pip_mult:
+                    confirmed = True
+                
+                if confirmed:
+                    level.touches += 1
+                    level.last_touch = utc_dt
+                    # Update strength
+                    if level.touches >= 3:
+                        level.strength = 1.0
+                    elif level.touches == 2:
+                        level.strength = 0.7
+                    elif level.touches == 1:
+                        level.strength = 0.4
+                    
+                    self._pending_touches[level.price] = False
+
+        self._reclassify_all_directions(mid)
 
     def on_candle_close(self, candle: LiveCandle):
-        """Update structural data on candle close."""
-        if not self._initialized or self._evidence is None:
+        """Update indicators and handle level invalidation on candle close."""
+        if not self._initialized:
             return
 
         if candle.timeframe == "M15":
@@ -606,19 +897,59 @@ class LiveMarketEvidence:
             self._update_indicators()
         elif candle.timeframe == "H1":
             self._h1_candles.append(candle)
-            self._update_swing_points()
-            self._update_key_levels(candle.close)
             self._detect_patterns(candle)
             self._update_indicators()
+            self._invalidate_price_levels(candle.close, "H1")
         elif candle.timeframe == "H4":
             self._h4_candles.append(candle)
             self._detect_patterns(candle)
             self._update_indicators()
+            self._invalidate_price_levels(candle.close, "H4")
+
+    def _invalidate_price_levels(self, close_price: float, timeframe: str):
+        """Invalidate levels if closed through, too old, etc."""
+        now_utc = datetime.now(timezone.utc)
+        pip_3 = 3 * self._pip_mult
+
+        for level in self.price_levels:
+            if not level.is_active:
+                continue
+
+            # Check age (older than 5 trading days ~ 5 days)
+            if (now_utc - level.last_touch).days > 5:
+                level.is_active = False
+                continue
+
+            # Check close breach on H1
+            if timeframe == "H1" and level.level_type != "H4_SWING":
+                if level.direction == "resistance" and close_price > level.price + pip_3:
+                    level.is_active = False
+                elif level.direction == "support" and close_price < level.price - pip_3:
+                    level.is_active = False
+
+            # Check close breach on H4 for H4_SWING
+            if timeframe == "H4" and level.level_type == "H4_SWING":
+                if level.direction == "resistance" and close_price > level.price:
+                    level.is_active = False
+                elif level.direction == "support" and close_price < level.price:
+                    level.is_active = False
+
+        # Remove inactive levels immediately
+        self.price_levels = [l for l in self.price_levels if l.is_active]
 
     def _update_indicators(self):
         """Update dynamic indicators (RSI, MACD, trends) from H1 history using config-driven parameters."""
         if self._evidence is None:
             return
+
+        # Populate legacy swing points/key levels for downstream compatibility
+        resistances = [l for l in self.price_levels if l.is_active and "resistance" in l.direction]
+        supports = [l for l in self.price_levels if l.is_active and "support" in l.direction]
+        
+        self._evidence.swing_highs = [{"price": r.price, "time": r.last_touch.strftime("%Y-%m-%d %H:%M"), "strength": r.strength * 5, "touches": r.touches} for r in resistances[:5]]
+        self._evidence.swing_lows = [{"price": s.price, "time": s.last_touch.strftime("%Y-%m-%d %H:%M"), "strength": s.strength * 5, "touches": s.touches} for s in supports[:5]]
+        self._evidence.key_levels = sorted([l.price for l in self.price_levels if l.is_active])[:5]
+
         candles = list(self._h1_candles)
         if len(candles) < 26:
             return
@@ -705,7 +1036,6 @@ class LiveMarketEvidence:
             self._evidence.trend_direction_h4 = "sideways"
 
         # 5. Asian range / London open bias
-        # Filter candles within last 24h belonging to Asian session hours (UTC 0-7)
         now_utc = datetime.now(timezone.utc)
         start_search = now_utc - timedelta(hours=24)
         m15_candles = list(self._m15_candles)
@@ -729,7 +1059,6 @@ class LiveMarketEvidence:
             self._evidence.asian_range_high = float(max(asian_highs))
             self._evidence.asian_range_low = float(min(asian_lows))
         else:
-            # Fallback to general range of candles -12 to -4
             self._evidence.asian_range_high = float(max(highs[-12:-4])) if len(highs) >= 12 else float(max(highs))
             self._evidence.asian_range_low = float(min(lows[-12:-4])) if len(lows) >= 12 else float(min(lows))
 
@@ -792,133 +1121,6 @@ class LiveMarketEvidence:
             self._evidence.ny_range_high = 0.0
             self._evidence.ny_range_low = 0.0
 
-    def _update_swing_points(self):
-        """Detect new swing highs/lows from H1 candle history with time-weighted decay and re-validation."""
-        candles = list(self._h1_candles)
-        if len(candles) < 5:
-            return
-
-        # Check the candle at index -3 (need 2 on each side)
-        i = -3
-        c = candles[i]
-        left1, left2 = candles[i-1], candles[i-2]
-        right1, right2 = candles[i+1], candles[i+2]
-        
-        pip_2 = 2.0 * self._pip_mult
-        now_time = datetime.now()
-
-        # Update and decay existing highs
-        updated_highs = []
-        for sh in self._evidence.swing_highs:
-            try:
-                level_dt = datetime.strptime(sh["time"], "%Y-%m-%d %H:%M")
-                hours_elapsed = (now_time - level_dt).total_seconds() / 3600.0
-            except Exception:
-                hours_elapsed = 0
-            
-            # Decay strength by 0.01 per hour elapsed since creation
-            base_strength = sh.get("strength", 3.0)
-            decayed_strength = base_strength - (hours_elapsed * 0.01)
-            
-            # Check if price re-tested this level (within 2 pips of candle close)
-            last_high = candles[-1].high
-            touches = sh.get("touches", 1)
-            if abs(last_high - sh["price"]) <= pip_2:
-                touches += 1
-                decayed_strength = min(decayed_strength + 1.0, 5.0)
-                sh["time"] = now_time.strftime("%Y-%m-%d %H:%M") # Refresh time
-                
-            sh["strength"] = round(float(np.clip(decayed_strength, 0.5, 5.0)), 2)
-            sh["touches"] = touches
-            
-            if sh["strength"] > 1.0:
-                updated_highs.append(sh)
-
-        # Detect new swing high
-        if (c.high > left1.high and c.high > left2.high and
-                c.high > right1.high and c.high > right2.high):
-            duplicate = False
-            for sh in updated_highs:
-                if abs(sh["price"] - c.high) <= pip_2:
-                    duplicate = True
-                    sh["touches"] = sh.get("touches", 1) + 1
-                    sh["strength"] = min(sh.get("strength", 3.0) + 1.0, 5.0)
-                    sh["time"] = c.open_time.strftime("%Y-%m-%d %H:%M")
-                    break
-            if not duplicate:
-                new_sh = {
-                    "price": float(c.high), 
-                    "time": c.open_time.strftime("%Y-%m-%d %H:%M"),
-                    "strength": 3.0,
-                    "touches": 1
-                }
-                updated_highs.insert(0, new_sh)
-
-        updated_highs = sorted(updated_highs, key=lambda x: (-x.get("strength", 3.0), -x.get("touches", 1)))
-        self._evidence.swing_highs = updated_highs[:5]
-
-        # Update and decay existing lows
-        updated_lows = []
-        for sl in self._evidence.swing_lows:
-            try:
-                level_dt = datetime.strptime(sl["time"], "%Y-%m-%d %H:%M")
-                hours_elapsed = (now_time - level_dt).total_seconds() / 3600.0
-            except Exception:
-                hours_elapsed = 0
-                
-            base_strength = sl.get("strength", 3.0)
-            decayed_strength = base_strength - (hours_elapsed * 0.01)
-            
-            last_low = candles[-1].low
-            touches = sl.get("touches", 1)
-            if abs(last_low - sl["price"]) <= pip_2:
-                touches += 1
-                decayed_strength = min(decayed_strength + 1.0, 5.0)
-                sl["time"] = now_time.strftime("%Y-%m-%d %H:%M")
-                
-            sl["strength"] = round(float(np.clip(decayed_strength, 0.5, 5.0)), 2)
-            sl["touches"] = touches
-            
-            if sl["strength"] > 1.0:
-                updated_lows.append(sl)
-
-        # Detect new swing low
-        if (c.low < left1.low and c.low < left2.low and
-                c.low < right1.low and c.low < right2.low):
-            duplicate = False
-            for sl in updated_lows:
-                if abs(sl["price"] - c.low) <= pip_2:
-                    duplicate = True
-                    sl["touches"] = sl.get("touches", 1) + 1
-                    sl["strength"] = min(sl.get("strength", 3.0) + 1.0, 5.0)
-                    sl["time"] = c.open_time.strftime("%Y-%m-%d %H:%M")
-                    break
-            if not duplicate:
-                new_sl = {
-                    "price": float(c.low), 
-                    "time": c.open_time.strftime("%Y-%m-%d %H:%M"),
-                    "strength": 3.0,
-                    "touches": 1
-                }
-                updated_lows.insert(0, new_sl)
-
-        updated_lows = sorted(updated_lows, key=lambda x: (-x.get("strength", 3.0), -x.get("touches", 1)))
-        self._evidence.swing_lows = updated_lows[:5]
-
-    def _update_key_levels(self, current_price: float):
-        """Refresh key levels within 20 pips of current price."""
-        pip_20 = 20 * self._pip_mult
-        all_levels = set()
-        for sh in self._evidence.swing_highs:
-            all_levels.add(round(sh["price"], 5))
-        for sl in self._evidence.swing_lows:
-            all_levels.add(round(sl["price"], 5))
-
-        self._evidence.key_levels = sorted(
-            [l for l in all_levels if abs(l - current_price) <= pip_20],
-            key=lambda x: abs(x - current_price)
-        )[:5]
-
     def _detect_patterns(self, candle: LiveCandle):
         """Detect candle patterns on active timeframe."""
         patterns = []
@@ -966,9 +1168,10 @@ class LiveMarketEvidence:
     @property
     def key_levels(self) -> list:
         """Current key levels for event detection."""
-        if self._evidence is None:
-            return []
-        return list(self._evidence.key_levels)
+        if not self.price_levels and self._evidence is not None:
+            return list(self._evidence.key_levels)
+        active = [l.price for l in self.price_levels if l.is_active]
+        return sorted(active)
 
     @property
     def swing_highs(self) -> list:
@@ -981,3 +1184,4 @@ class LiveMarketEvidence:
         if self._evidence is None:
             return []
         return list(self._evidence.swing_lows)
+
