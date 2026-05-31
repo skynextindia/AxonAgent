@@ -84,7 +84,14 @@ class DashboardServer:
             with self._lock:
                 if self.daemon:
                     return {"status": "success", "config": self.daemon.config}
-                return {"status": "error", "message": "Daemon not registered"}
+                return {"status": "success", "config": {
+                    "tick_poll_interval_ms": 100,
+                    "realtime_suppress_asian": True,
+                    "realtime_level_reset_atr_multiple": 2.0,
+                    "indicator_rsi_length": 14,
+                    "indicator_ema_fast": 12,
+                    "indicator_ema_slow": 26,
+                }}
 
         @self.app.post("/config")
         def update_config(new_config: dict):
@@ -103,7 +110,14 @@ class DashboardServer:
                     if hasattr(self.daemon, "live_evidence") and self.daemon.live_evidence:
                         self.daemon.live_evidence.config.update(new_config)
                     return {"status": "success", "config": self.daemon.config}
-                return {"status": "error", "message": "Daemon not registered"}
+                return {"status": "success", "config": {
+                    "tick_poll_interval_ms": new_config.get("tick_poll_interval_ms", 100),
+                    "realtime_suppress_asian": new_config.get("realtime_suppress_asian", True),
+                    "realtime_level_reset_atr_multiple": new_config.get("realtime_level_reset_atr_multiple", 2.0),
+                    "indicator_rsi_length": new_config.get("indicator_rsi_length", 14),
+                    "indicator_ema_fast": new_config.get("indicator_ema_fast", 12),
+                    "indicator_ema_slow": new_config.get("indicator_ema_slow", 26),
+                }}
 
         @self.app.post("/trigger")
         def trigger_event():
@@ -125,13 +139,38 @@ class DashboardServer:
                     self.daemon.event_detector.event_queue.put_nowait(event)
                     return {"status": "triggered", "event": str(event)}
                 return {"status": "error", "message": "Daemon not registered"}
+        @self.app.post("/api/emergency_stop")
+        def emergency_stop():
+            with self._lock:
+                if self.daemon:
+                    self.daemon.stop()
+                    return {"status": "success", "message": "Daemon halted"}
+                return {"status": "error", "message": "Daemon not registered"}
+
+        @self.app.post("/api/close_all")
+        def close_all_positions():
+            with self._lock:
+                if self.daemon and hasattr(self.daemon, "execution"):
+                    self.daemon.execution.close_all()
+                    return {"status": "success", "message": "Close all signal sent to MT5"}
+                return {"status": "error", "message": "Execution engine not available"}
+
+        @self.app.post("/api/pause_llm")
+        def pause_llm():
+            with self._lock:
+                if self.daemon and hasattr(self.daemon, "llm"):
+                    self.daemon.llm.paused = not getattr(self.daemon.llm, "paused", False)
+                    state = "paused" if self.daemon.llm.paused else "resumed"
+                    return {"status": "success", "message": f"LLM operations {state}"}
+                return {"status": "error", "message": "LLM bridge not available"}
 
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             # Security: only accept WebSocket connections from localhost origins
             origin = websocket.headers.get("origin", "")
             allowed_origins = {"http://127.0.0.1:8000", "http://localhost:8000",
-                               "http://127.0.0.1", "http://localhost"}
+                               "http://127.0.0.1", "http://localhost",
+                               "http://127.0.0.1:3000", "http://localhost:3000"}
             if origin and origin not in allowed_origins:
                 await websocket.close(code=1008, reason="Origin not allowed")
                 logger.warning("Dashboard WS: rejected connection from origin: %s", origin)
@@ -201,6 +240,7 @@ class DashboardServer:
 
     async def _hydrate_client(self, websocket: WebSocket):
         """Send all cached state history to a newly connected client."""
+        # 1. Thread-safely update and copy dynamic state cache
         with self._lock:
             # Update candles dynamically from the active daemon if registered
             if hasattr(self, "daemon") and self.daemon:
@@ -210,33 +250,45 @@ class DashboardServer:
                     except Exception as e:
                         logger.warning("Dashboard WS: failed to update active candle for %s: %s", tf, e)
 
-            # 1. Account details
-            if self.history["account"]:
-                await websocket.send_json(self.history["account"])
-            # 2. Latest tick
-            if self.history["tick"]:
-                await websocket.send_json(self.history["tick"])
-            # 3. Market Regime
-            if self.history["regime"]:
-                await websocket.send_json(self.history["regime"])
-            # 4. Technical Levels
-            if self.history["levels"]:
-                await websocket.send_json(self.history["levels"])
-            # 5. Candles
-            for tf, candle_data in self.history["candles"].items():
-                await websocket.send_json(candle_data)
-            # 6. Event history
-            for event in self.history["events"]:
-                await websocket.send_json({**event, "historical": True})
-            # 7. Agent dynamic log trace
-            for log_entry in self.history["agent_trace"]:
-                await websocket.send_json({**log_entry, "historical": True})
-            # 8. Latest final trade decision
-            if self.history["decision"]:
-                await websocket.send_json(self.history["decision"])
-            # 9. Sentiment News Feed
-            if self.history["news_data"]:
-                await websocket.send_json(self.history["news_data"])
+            # Copy cached states to local variables under lock
+            account_data = self.history["account"]
+            tick_data = self.history["tick"]
+            regime_data = self.history["regime"]
+            levels_data = self.history["levels"]
+            candles_data = list(self.history["candles"].items())
+            events_data = list(self.history["events"])
+            trace_data = list(self.history["agent_trace"])
+            decision_data = self.history["decision"]
+            news_data = self.history["news_data"]
+
+        # 2. Perform all asynchronous sends safely OUTSIDE the lock block!
+        # 1. Account details
+        if account_data:
+            await websocket.send_json(account_data)
+        # 2. Latest tick
+        if tick_data:
+            await websocket.send_json(tick_data)
+        # 3. Market Regime
+        if regime_data:
+            await websocket.send_json(regime_data)
+        # 4. Technical Levels
+        if levels_data:
+            await websocket.send_json(levels_data)
+        # 5. Candles
+        for tf, candle_data in candles_data:
+            await websocket.send_json(candle_data)
+        # 6. Event history
+        for event in events_data:
+            await websocket.send_json({**event, "historical": True})
+        # 7. Agent dynamic log trace
+        for log_entry in trace_data:
+            await websocket.send_json({**log_entry, "historical": True})
+        # 8. Latest final trade decision
+        if decision_data:
+            await websocket.send_json(decision_data)
+        # 9. Sentiment News Feed
+        if news_data:
+            await websocket.send_json(news_data)
 
     def broadcast(self, message: Dict[str, Any]):
         """Thread-safe queueing of message broadcast across all websockets."""
@@ -291,13 +343,26 @@ class DashboardServer:
                     self.active_connections.discard(ws)
 
     def _save_session(self):
-        """Save event history, agent traces, and latest decision to disk."""
+        """Save event history, agent traces, latest decision, and levels state to disk."""
         import json
         try:
+            levels_state = []
+            if self.daemon and hasattr(self.daemon, "live_evidence") and self.daemon.live_evidence:
+                levels_state = [{
+                    "price": float(l.price),
+                    "level_type": l.level_type,
+                    "touches": int(l.touches),
+                    "strength": float(l.strength),
+                    "is_active": bool(l.is_active),
+                    "last_touch": l.last_touch.isoformat() if isinstance(l.last_touch, datetime) else str(l.last_touch)
+                } for l in self.daemon.live_evidence.price_levels]
+
             state = {
                 "events": self.history["events"],
                 "agent_trace": self.history["agent_trace"],
                 "decision": self.history["decision"],
+                "news_data": self.history["news_data"],
+                "levels_state": levels_state
             }
             with open(".axon_session.json", "w") as f:
                 json.dump(state, f, indent=2)
@@ -316,8 +381,10 @@ class DashboardServer:
                     self.history["events"] = state.get("events", [])
                     self.history["agent_trace"] = state.get("agent_trace", [])
                     self.history["decision"] = state.get("decision", None)
-                logger.info("Dashboard API: restored %d events, %d agent traces from local storage",
-                            len(self.history["events"]), len(self.history["agent_trace"]))
+                    self.history["news_data"] = state.get("news_data", None)
+                    self.history["levels_state"] = state.get("levels_state", [])
+                logger.info("Dashboard API: restored %d events, %d agent traces, %d S/R levels from local storage",
+                            len(self.history["events"]), len(self.history["agent_trace"]), len(self.history.get("levels_state", [])))
             except Exception as e:
                 logger.warning("Dashboard API: failed to load session: %s", e)
 
@@ -334,6 +401,59 @@ class DashboardServer:
         server_thread = threading.Thread(target=self._run_server, daemon=True, name="DashboardServer")
         server_thread.start()
         logger.info("Dashboard API Server starting on thread %s", server_thread.name)
+
+        # Start background news poller thread!
+        news_thread = threading.Thread(target=self._news_poller, daemon=True, name="DashboardNewsPoller")
+        news_thread.start()
+
+    def _news_poller(self):
+        """Background thread: periodically polls news sources (non-blocking) and backfills."""
+        import time
+        from datetime import datetime
+        from axonai.dataflows.yfinance_news import get_global_news_yfinance
+        from axonai.dataflows.forex_social import fetch_forex_social_feed
+        from axonai.dataflows.reddit import fetch_reddit_posts
+
+        logger.info("Dashboard API: Background News Sentiment poller started.")
+        while not hasattr(self, "_poller_stop") or not self._poller_stop.is_set():
+            try:
+                # 1. Determine active ticker (default to EURUSD)
+                ticker = "EURUSD=X"
+                if self.daemon and hasattr(self.daemon, "yf_symbol"):
+                    ticker = self.daemon.yf_symbol
+
+                curr_date = datetime.now().strftime("%Y-%m-%d")
+                
+                # 2. Fetch in non-blocking background mode
+                logger.info("Dashboard API: Refreshing News Sentiment Feed (cached continuous mode)...")
+                
+                # Fetch global news
+                news = get_global_news_yfinance(curr_date=curr_date, look_back_days=3, limit=10)
+                
+                # Fetch social feed (MT5 ticker mapping e.g. EURUSDm -> EURUSD)
+                fs_ticker = ticker.replace("=X", "").replace("=x", "")
+                forex_social = fetch_forex_social_feed(fs_ticker, limit=10)
+                
+                # Fetch reddit
+                reddit = fetch_reddit_posts(fs_ticker)
+                
+                # 3. Update cache history and broadcast
+                payload = {
+                    "type": "news_data",
+                    "news": news,
+                    "forex_social": forex_social,
+                    "reddit": reddit,
+                    "timestamp": datetime.now().strftime("%H:%M:%S")
+                }
+                
+                self.broadcast(payload)
+                logger.info("Dashboard API: News Sentiment Feed cache refreshed successfully.")
+                
+            except Exception as e:
+                logger.warning("Dashboard API: Background News Sentiment poll failed (offline or connection issue): %s", e)
+            
+            # Wait for 300 seconds (5 minutes) before next update
+            time.sleep(300.0)
 
     def _run_server(self):
         """Target for Uvicorn runner inside the thread."""

@@ -1,5 +1,45 @@
 # AxonAI Trading Knowledge Base
 
+## SESSION CHECKPOINT — 2026-05-31
+**Status**: MT5 Windows bridge + WSL bridge client + dashboard integration complete.
+**Next step**: Fix any remaining dashboard rendering issues.
+
+---
+
+## Dashboard + MT5 Bridge Architecture
+
+### Components
+| Component | File | Runs On |
+|---|---|---|
+| MT5 Bridge Service | `windows/mt5_bridge.py` | Windows (Python with MT5 terminal) |
+| Bridge Client (WSL side) | `axonai/realtime/mt5_bridge_client.py` | WSL (connects ws://Windows:8765) |
+| Dashboard Server | `axonai/realtime/api_server.py` | WSL (http://localhost:8000) |
+| Entry Point | `_start_dash.py` | WSL (starts both dashboard + bridge client) |
+
+### Data Flow
+```
+MT5 Terminal → mt5_bridge.py (Windows, port 8765)
+  → WebSocket → BridgeClient (WSL, relays to dashboard.broadcast())
+    → DashboardServer (broadcasts to browser WebSocket clients)
+```
+
+### Bridge Data Types
+- **tick**: bid, ask, spread, tick_velocity, tick_imbalance_*, tick_spread_delta, etc.
+- **candles**: M15/H1/H4 with open/high/low/close/time/tick_volume (100 bars, sent every ~10s per timeframe)
+- **account**: balance, equity, profit, margin, positions
+- **regime**: belief, macro_bias, gate_status, volatility, token usage, cooldown
+- **levels**: support/resistance price levels with strength scoring
+- **historical**: one-shot response to get_historical requests
+
+### Key Entry Point
+```python
+_start_dash.py  # no daemon, just dashboard + bridge client
+```
+
+### Fixes Applied
+1. **2026-05-31**: `/config` GET endpoint now returns default config values even when `self.daemon` is None (bridge-only mode). Previously returned `{"status": "error", "message": "Daemon not registered"}` which prevented settings form from populating in the frontend.
+2. **2026-05-31**: `/config` POST endpoint similarly returns success with config defaults when no daemon.
+
 ## SESSION CHECKPOINT — 2026-05-30
 **Status**: Parameter tuning complete. Best config found: **+26.5 pips, PF 1.21, 47.8% WR, 23 trades**.
 **Next step**: Deploy to live or run on more months to validate robustness.
