@@ -44,6 +44,9 @@ class MarketEvidence:
     ny_range_high: float = 0.0
     ny_range_low: float = 0.0
 
+    # Tick-level behavior at price levels (populated live by LevelBehaviorTracker)
+    level_behavior: dict = None  # Dict[str, Dict] keyed by price string
+
 
 def extract_market_evidence(symbol: str = "EURUSD=X") -> MarketEvidence:
     """Extract structured facts from raw MT5 data in pure Python. Fail safe if MT5 is unavailable."""
@@ -240,19 +243,42 @@ def extract_market_evidence(symbol: str = "EURUSD=X") -> MarketEvidence:
         # Shift index to actual UTC by subtracting the broker timezone offset
         df_utc.index = df_utc.index - pd.Timedelta(hours=offset_hours)
         df_utc.index = df_utc.index.tz_localize('UTC') if df_utc.index.tz is None else df_utc.index.tz_convert('UTC')
-        asian_bars = df_utc[(df_utc.index >= start_search) & (df_utc.index.hour < 8)]
+        year = now_utc.year
+        # New York DST (EDT: 2nd Sunday in March to 1st Sunday in November)
+        dst_start_us = datetime(year, 3, 8)
+        while dst_start_us.weekday() != 6:
+            dst_start_us += timedelta(days=1)
+        dst_end_us = datetime(year, 11, 1)
+        while dst_end_us.weekday() != 6:
+            dst_end_us += timedelta(days=1)
+        is_us_dst = dst_start_us.date() <= now_utc.date() < dst_end_us.date()
+
+        # London DST (BST: Last Sunday in March to Last Sunday in October)
+        dst_start_eu = datetime(year, 3, 31)
+        while dst_start_eu.weekday() != 6:
+            dst_start_eu -= timedelta(days=1)
+        dst_end_eu = datetime(year, 10, 31)
+        while dst_end_eu.weekday() != 6:
+            dst_end_eu -= timedelta(days=1)
+        is_eu_dst = dst_start_eu.date() <= now_utc.date() < dst_end_eu.date()
+
+        ldn_open = 7 if is_eu_dst else 8
+        ldn_close = 15 if is_eu_dst else 16
+        ny_open = 12 if is_us_dst else 13
+        ny_close = 18 if is_us_dst else 19
+
+        asian_bars = df_utc[(df_utc.index >= start_search) & (df_utc.index.hour < ldn_open)]
         
         if not asian_bars.empty:
             asian_range_high = float(asian_bars["High"].max())
             asian_range_low = float(asian_bars["Low"].min())
         else:
             # Fallback to general range of the last 8 hours of prior session
-            asian_range_high = float(df_h1["High"].iloc[-12:-4].max())
-            asian_range_low = float(df_h1["Low"].iloc[-12:-4].min())
+            asian_range_high = float(df_h1["High"].iloc[-12:-4].max()) if len(df_h1) >= 12 else float(df_h1["High"].max())
+            asian_range_low = float(df_h1["Low"].iloc[-12:-4].min()) if len(df_h1) >= 12 else float(df_h1["Low"].min())
 
-        # London open bias based on the H1 close at 08:00 UTC (or the latest close) vs the Asian range
-        # Find the close price at UTC hour 8, or if not found, use latest H1 close
-        london_bars = df_utc[df_utc.index.hour == 8]
+        # London open bias based on the H1 close at London open UTC (or the latest close) vs the Asian range
+        london_bars = df_utc[df_utc.index.hour == ldn_open]
         if not london_bars.empty:
             london_close = float(london_bars["Close"].iloc[-1])
         else:
@@ -265,8 +291,8 @@ def extract_market_evidence(symbol: str = "EURUSD=X") -> MarketEvidence:
         else:
             london_open_bias = "neutral"
 
-        # Find London session bars of the last 24 hours (UTC 8-15)
-        london_bars = df_utc[(df_utc.index >= start_search) & (df_utc.index.hour >= 8) & (df_utc.index.hour < 16)]
+        # Find London session bars of the last 24 hours
+        london_bars = df_utc[(df_utc.index >= start_search) & (df_utc.index.hour >= ldn_open) & (df_utc.index.hour < ldn_close)]
         if not london_bars.empty:
             london_range_high = float(london_bars["High"].max())
             london_range_low = float(london_bars["Low"].min())
@@ -274,8 +300,8 @@ def extract_market_evidence(symbol: str = "EURUSD=X") -> MarketEvidence:
             london_range_high = 0.0
             london_range_low = 0.0
 
-        # Find New York session bars of the last 24 hours (UTC 13-20)
-        ny_bars = df_utc[(df_utc.index >= start_search) & (df_utc.index.hour >= 13) & (df_utc.index.hour < 21)]
+        # Find New York session bars of the last 24 hours
+        ny_bars = df_utc[(df_utc.index >= start_search) & (df_utc.index.hour >= ny_open) & (df_utc.index.hour < ny_close)]
         if not ny_bars.empty:
             ny_range_high = float(ny_bars["High"].max())
             ny_range_low = float(ny_bars["Low"].min())

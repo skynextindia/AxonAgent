@@ -23,6 +23,7 @@ _ENV_OVERRIDES = {
     "AXONAI_REALTIME_MAGIC_NUMBER": "realtime_magic_number",
     "AXONAI_REALTIME_DEFAULT_LOT_SIZE": "realtime_default_lot_size",
     "AXONAI_REALTIME_DEVIATION": "realtime_deviation",
+    "AXONAI_REALTIME_MIN_CONFLUENCE_CONDITIONS": "realtime_min_confluence_conditions",
 }
 
 
@@ -59,7 +60,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "memory_log_max_entries": None,
     # LLM settings
     "llm_provider": "deepseek",
-    "deep_think_llm": "deepseek-chat",
+    "deep_think_llm": "deepseek-reasoner",
     "quick_think_llm": "deepseek-chat",
     # When None, each provider's client falls back to its own default endpoint.
     "backend_url": None,
@@ -129,14 +130,18 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # ── Real-time daemon settings ────────────────────────────────────────
     "realtime_enabled": False,
     "tick_poll_interval_ms": 100,
-    "realtime_cooldown_seconds": 300,
+    "realtime_cooldown_seconds": 10,
     "realtime_min_event_priority": "MEDIUM",
     "realtime_tick_buffer_size": 10_000,
     "realtime_candle_history": 500,
-    "realtime_suppress_asian": True,
+    "realtime_suppress_asian": False,
     "realtime_level_reset_atr_multiple": 2.0,
     "realtime_log_events": True,
     "realtime_magic_number": 123456,
     "realtime_default_lot_size": 0.01,
     "realtime_deviation": 20,
+    "realtime_min_confluence_conditions": 1,
+    "realtime_dry_run": True,
+    "peak_detector_rule_c_enabled": False,
+    "trade_risk_pct": 0.01,
 })

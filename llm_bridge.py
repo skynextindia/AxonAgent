@@ -5,7 +5,7 @@ import json
 import logging
 from dataclasses import dataclass
 from typing import Optional
-from anthropic import Anthropic
+from openai import OpenAI
 
 from market_state import StateTransition
 from market_context import MarketContext
@@ -24,41 +24,72 @@ class LLMDecision:
     context_snapshot: MarketContext
 
 class LLMBridge:
-    """Coordinates conditional queries to Anthropic's Claude model based on market context."""
-    def __init__(self, api_key: str, model: str = "claude-3-5-sonnet-20241022", debug: bool = False):
-        self.client = Anthropic(api_key=api_key)
+    """Coordinates conditional queries to DeepSeek model based on market context."""
+    def __init__(self, api_key: str, model: str = "deepseek-chat", debug: bool = False):
+        self.client = OpenAI(api_key=api_key, base_url="https://api.deepseek.com")
         self.model = model
         self.debug = debug
         self.last_query_time = 0.0
+        self._last_context_key: tuple = ()
+        self.paused = False
 
-    def should_query(self, transition: StateTransition, context: MarketContext) -> bool:
+    def should_query(self, transition: StateTransition, context: MarketContext) -> tuple[bool, dict]:
         """Determines if the state transition warrants an LLM decision."""
+        gate_status = {
+            "state_passed": False,
+            "spread_passed": False,
+            "conviction_passed": False,
+            "rate_limit_passed": False,
+            "context_passed": False,
+            "llm_paused": self.paused
+        }
+
+        if self.paused:
+            return False, gate_status
+
         # 1. Transition involves SWEEPING, REVERSING, or EXHAUSTING
         states_of_interest = {"SWEEPING", "REVERSING", "EXHAUSTING"}
         involves_target_state = (transition.from_state in states_of_interest or transition.to_state in states_of_interest)
+        gate_status["state_passed"] = involves_target_state
         if not involves_target_state:
-            return False
+            return False, gate_status
 
         # 2. Spread safe check
+        gate_status["spread_passed"] = context.spread_safe
         if not context.spread_safe:
-            return False
+            return False, gate_status
 
         # 3. Confirmed signal OR state confidence > 0.75
-        if not (context.confirmed_signal or context.state_confidence > 0.75):
-            return False
+        has_conviction = bool(context.confirmed_signal or context.state_confidence > 0.75)
+        gate_status["conviction_passed"] = has_conviction
+        if not has_conviction:
+            return False, gate_status
 
         # 4. Rate limit check (> 60 seconds ago)
         now = time.time()
-        if now - self.last_query_time < 60.0:
-            return False
+        rate_safe = (now - self.last_query_time >= 60.0)
+        gate_status["rate_limit_passed"] = rate_safe
+        if not rate_safe:
+            return False, gate_status
 
-        return True
+        # 5. Context-change guard
+        context_key = (context.symbol, transition.to_state, context.dominant_side)
+        context_changed = (context_key != self._last_context_key)
+        gate_status["context_passed"] = context_changed
+        if not context_changed:
+            return False, gate_status
+
+        return True, gate_status
 
     def query(self, transition: StateTransition, context: MarketContext) -> LLMDecision:
         """Query the LLM to get a structured decision."""
         self.last_query_time = time.time()
 
-        # Handle Mock Mode
+        # Update context-change key
+        context_key = (context.symbol, transition.to_state, context.dominant_side)
+        self._last_context_key = context_key
+
+        # Handle Mock Mode (enforce same rate limit for log integrity)
         if not self.client.api_key or self.client.api_key == "mock_key":
             if self.debug:
                 print("[LLMBridge Mock] Simulating LLM query for transition...")
@@ -109,6 +140,18 @@ Risk environment:
 
 Pre-confirmed signal: {context.confirmed_signal} | Direction: {context.signal_direction} | Confidence: {context.signal_confidence:.2f}
 
+Peak detector:
+- Divergence warning: {context.peak_divergence_warning}
+- Peak confirmed: {context.peak_confirmed}
+- Peak confidence: {context.peak_confidence:.2f}
+- Dominant side at peak: {context.peak_dominant_side}
+
+Macro consensus (System 2):
+- Bias: {context.macro_bias}
+- Confidence: {context.macro_confidence:.2f}
+- Key level: {context.macro_key_level:.5f}
+- Last updated: {context.macro_bias_age_sec:.0f}s ago
+
 Reason about this transition. What is the market doing? Is this a tradeable setup?
 Return JSON only:
 {{
@@ -120,15 +163,15 @@ Return JSON only:
 }}"""
 
         try:
-            message = self.client.messages.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
-                max_tokens=1000,
-                system=system_prompt,
+                response_format={"type": "json_object"},
                 messages=[
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ]
             )
-            response_text = message.content[0].text.strip()
+            response_text = response.choices[0].message.content.strip()
             
             if self.debug:
                 print(f"LLM Raw Response: {response_text}")

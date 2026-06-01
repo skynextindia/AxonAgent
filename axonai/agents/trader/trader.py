@@ -23,6 +23,39 @@ from axonai.agents.utils.structured import (
 logger = logging.getLogger(__name__)
 
 
+def _format_level_behavior(lb: dict) -> str:
+    """Format level_behavior dict into a human-readable string for LLM prompts."""
+    if not lb:
+        return "  (no levels tested yet)"
+    lines = []
+    for price_str, bhv in sorted(lb.items(), key=lambda x: float(x[0])):
+        status = bhv.get("status", "away")
+        attacks = bhv.get("total_attacks", 0)
+        consecutive = bhv.get("consecutive_attacks", 0)
+        rejection = bhv.get("rejection_count", 0)
+        absorbing = bhv.get("is_absorbing", False)
+        absorption = bhv.get("absorption_ratio", 0)
+        imbalance = bhv.get("imbalance", 0)
+        quality = bhv.get("attack_quality", "untested")
+        velocity = bhv.get("last_rejection_velocity", 0)
+
+        parts = [f"  {price_str} ({bhv.get('type', '?')}) [{status}]"]
+        if attacks:
+            parts.append(f"attacks={attacks}")
+        if consecutive >= 2:
+            parts.append(f"consecutive={consecutive}")
+        if rejection:
+            parts.append(f"rejected={rejection}x")
+        if velocity:
+            parts.append(f"rej_vel={velocity:.1f}pips/s")
+        if absorbing:
+            parts.append(f"ABSORBING(ratio={absorption:.0f})")
+        if abs(imbalance) > 0.1:
+            parts.append(f"imbalance={imbalance:+.2f}")
+        parts.append(f"quality={quality}")
+        lines.append(" | ".join(parts))
+    return "\n".join(lines)
+
 
 AGENT_NAME = "TUDOR"
 AGENT_IDENTITY = "AxonAI execution specialist. Translates directional verdicts into precise entry price, stop loss, and take profit levels. Does not form directional opinions — executes decisions made by MUNGER."
@@ -80,6 +113,7 @@ def create_trader(llm):
                     f"Instrument: {company_name} ({asset_type})\n"
                     f"WorldState Info:\n- Regime: {world_state.get('dominant_regime')}\n- Session: {world_state.get('session')}\n- EUR strength: {world_state.get('eur_strength')}\n- USD strength: {world_state.get('usd_strength')}\n"
                     f"MarketEvidence Info:\n- Trend H1: {market_evidence.get('trend_direction_h1')}\n- Key Levels: {market_evidence.get('key_levels')}\n- RSI: {market_evidence.get('rsi_h1')}\n- Patterns: {market_evidence.get('recent_patterns')}\n"
+                    f"Level Behavior (tick-level interactions at key prices):\n{_format_level_behavior(market_evidence.get('level_behavior', {}))}\n"
                     f"REAL-TIME MARKET PRICING CONTEXT:\n"
                     f"- Current Spot Price: {current_price:.5f}\n"
                     f"- 14-Day ATR: {atr_value:.5f}\n\n"

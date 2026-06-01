@@ -292,16 +292,33 @@ class AxonDaemon:
 
     def _get_levels_payload(self) -> dict:
         levels = []
+        bhv_summary = getattr(self.live_evidence, 'level_behavior', None) or {}
         for lv in self.live_evidence.price_levels:
             if lv.is_active:
-                levels.append({
+                entry = {
                     "price": lv.price,
                     "level_type": lv.level_type,
                     "direction": lv.direction,
                     "strength": lv.strength,
                     "touches": lv.touches,
                     "timeframe": lv.timeframe
-                })
+                }
+                # Enrich with LevelBehaviorTracker data if available
+                bhv = bhv_summary.get(str(lv.price))
+                if bhv:
+                    entry.update({
+                        "total_attacks": bhv.get("total_attacks", 0),
+                        "consecutive_attacks": bhv.get("consecutive_attacks", 0),
+                        "rejection_count": bhv.get("rejection_count", 0),
+                        "last_rejection_velocity": bhv.get("last_rejection_velocity", 0.0),
+                        "avg_rejection_velocity": bhv.get("avg_rejection_velocity", 0.0),
+                        "absorption_ratio": bhv.get("absorption_ratio", 0.0),
+                        "imbalance": bhv.get("imbalance", 0.0),
+                        "is_absorbing": bhv.get("is_absorbing", False),
+                        "attack_quality": bhv.get("attack_quality", "none"),
+                        "status": bhv.get("status", "unknown"),
+                    })
+                levels.append(entry)
         return {
             "type": "levels",
             "price_levels": levels
@@ -516,13 +533,39 @@ class AxonDaemon:
 
         self._event_loop()
 
-    def _on_tick(self, bid: float, ask: float, timestamp: datetime):
+    def _on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Called by TickEngine on every new tick."""
         self.event_detector.on_tick(bid, ask, timestamp)
         
         # Broadcast tick to dashboard WebSocket
         dashboard = get_dashboard()
         if dashboard:
+            imb = self.tick_engine.latest_imbalance
+            ticks = self.tick_engine.tick_buffer_list
+            velocity = 0.0
+            spread_delta = 0.0
+            collapse = False
+            agg_shift = False
+            absorption = False
+            
+            if len(ticks) >= 2:
+                # Calculate velocity (last 10 seconds)
+                t_10s = [t for t in ticks if (ticks[-1]['time'] - t['time']).total_seconds() <= 10.0]
+                if len(t_10s) > 1:
+                    price_changes = sum(abs(t_10s[i]['mid'] - t_10s[i-1]['mid']) for i in range(1, len(t_10s)))
+                    time_span = (t_10s[-1]['time'] - t_10s[0]['time']).total_seconds()
+                    raw_velocity = price_changes / time_span if time_span > 0 else 0.0
+                    pip_unit = 0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001
+                    velocity = raw_velocity / pip_unit
+                
+                # Calculate spread delta
+                spread_delta = ticks[-1]['ask'] - ticks[-1]['bid'] - (ticks[-2]['ask'] - ticks[-2]['bid'])
+                
+                # Check for absorption
+                t_30s = [t for t in ticks if (ticks[-1]['time'] - t['time']).total_seconds() <= 30.0]
+                pip_unit = 0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001
+                absorption = len(t_30s) >= 10 and velocity > 0.1 and abs(t_30s[-1]['mid'] - t_30s[0]['mid']) < pip_unit
+
             dashboard.broadcast({
                 "type": "tick",
                 "symbol": self.mt5_symbol,
@@ -530,7 +573,15 @@ class AxonDaemon:
                 "ask": ask,
                 "spread": self.tick_engine.spread / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001),
                 "time": int(timestamp.replace(tzinfo=timezone.utc).timestamp()),
-                "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+                "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "tick_velocity": velocity,
+                "tick_imbalance_10s": imb.get("imbalance_10s", 0.0),
+                "tick_imbalance_60s": imb.get("imbalance_60s", 0.0),
+                "tick_imbalance_300s": imb.get("imbalance_300s", 0.0),
+                "tick_spread_delta": spread_delta,
+                "tick_collapse": collapse,
+                "tick_agg_shift": agg_shift,
+                "tick_absorption": absorption
             })
             
             # Throttle heavier updates to once every 5 ticks
@@ -587,6 +638,8 @@ class AxonDaemon:
             logger.info("\n" + "="*50)
             logger.info("EVENT #%d: %s", self._events_detected, event)
             logger.info("="*50)
+            if hasattr(self, '_log_dry_run_event'):
+                self._log_dry_run_event('event_detected', {'event_type': event.event_type.value, 'price': event.price, 'details': event.details})
 
             dashboard = get_dashboard()
             if dashboard:
@@ -658,6 +711,8 @@ class AxonDaemon:
             self._events_fired += 1
             logger.info("FIRING GRAPH #%d for event: %s",
                         self._events_fired, event.event_type.value)
+            if hasattr(self, '_log_dry_run_event'):
+                self._log_dry_run_event('graph_fire', {'event_type': event.event_type.value})
 
             # Broadcast firing event status
             if dashboard:
@@ -739,6 +794,21 @@ class AxonDaemon:
                 logger.info("\n" + "*"*50)
                 logger.info("DECISION: %s", signal)
                 logger.info("*"*50 + "\n")
+                if hasattr(self, '_log_dry_run_event'):
+                    decision_obj = final_state.get('final_trade_decision', {}) if isinstance(final_state, dict) else getattr(final_state, 'final_trade_decision', {})
+                    if not isinstance(decision_obj, dict) and hasattr(decision_obj, 'dict'):
+                        decision_obj = decision_obj.dict()
+                    elif not isinstance(decision_obj, dict) and hasattr(decision_obj, '__dict__'):
+                        decision_obj = decision_obj.__dict__
+                    elif not isinstance(decision_obj, dict):
+                        decision_obj = {}
+                    self._log_dry_run_event('decision', {
+                        'execute': decision_obj.get('execute', signal in ['Buy', 'Sell', 'Overweight', 'Underweight']),
+                        'direction': decision_obj.get('direction', signal),
+                        'confidence': decision_obj.get('confidence', 0),
+                        'reason': decision_obj.get('reason', ''),
+                        'abort_reason': decision_obj.get('abort_reason', None)
+                    })
 
                 if dashboard:
                     dashboard.broadcast({
@@ -765,6 +835,8 @@ class AxonDaemon:
 
             except Exception as e:
                 logger.error("Graph execution failed: %s", e, exc_info=True)
+                if hasattr(self, '_log_dry_run_event'):
+                    self._log_dry_run_event('error', {'error': str(e)})
 
             # Print stats
             self._log_stats()
@@ -848,3 +920,108 @@ class AxonDaemon:
     @property
     def is_running(self) -> bool:
         return self._running
+
+    def _log_dry_run_event(self, event_type: str, details: dict):
+        """Append an event to the dry run session log."""
+        if not self.config.get('realtime_dry_run'):
+            return
+        import json, os
+        from datetime import datetime
+        os.makedirs('reports', exist_ok=True)
+        log_path = os.path.join('reports', 'dry_run_session.jsonl')
+        
+        class SafeJSONEncoder(json.JSONEncoder):
+            def default(self, obj):
+                try:
+                    return super().default(obj)
+                except TypeError:
+                    return str(obj)
+
+        entry = {
+            'timestamp': datetime.now().isoformat(),
+            'event_type': event_type,
+            'details': details
+        }
+        with open(log_path, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(entry, cls=SafeJSONEncoder) + '\n')
+
+
+def generate_session_summary():
+    """Read reports/dry_run_session.jsonl and print a formatted summary."""
+    import json, os
+    from datetime import datetime
+
+    log_path = os.path.join('reports', 'dry_run_session.jsonl')
+    if not os.path.exists(log_path):
+        print('No dry run session log found.')
+        return
+
+    first_time = last_time = None
+    ticks = 0
+    events_detected = confluence_passes = confluence_fails = graph_fires = 0
+    decisions_approved = decisions_rejected = errors = sr_breaches = 0
+    rejection_reasons = {}
+    level_counts = {}
+
+    with open(log_path, 'r', encoding='utf-8') as f:
+        for line in f:
+            try:
+                entry = json.loads(line)
+                dt = datetime.fromisoformat(entry['timestamp'])
+                if first_time is None: first_time = dt
+                last_time = dt
+
+                etype = entry['event_type']
+                details = entry.get('details', {})
+
+                if etype == 'error':
+                    errors += 1
+                elif etype == 'confluence_pass':
+                    confluence_passes += 1
+                elif etype == 'confluence_fail':
+                    confluence_fails += 1
+                elif etype == 'graph_fire':
+                    graph_fires += 1
+                elif etype == 'decision':
+                    if details.get('execute'):
+                        decisions_approved += 1
+                    else:
+                        decisions_rejected += 1
+                        reason = details.get('abort_reason') or details.get('reason') or 'Unknown'
+                        rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+                elif etype == 'event_detected':
+                    events_detected += 1
+                    if details.get('event_type') == 'LEVEL_BREACH':
+                        sr_breaches += 1
+                        lvl_type = details.get('details', {}).get('level_type', 'UNKNOWN')
+                        price = details.get('price', 0.0)
+                        key = f"{lvl_type} at {price}"
+                        level_counts[key] = level_counts.get(key, 0) + 1
+            except Exception:
+                continue
+
+    duration_str = '0 hours 0 minutes'
+    if first_time and last_time:
+        dur = last_time - first_time
+        hours, rem = divmod(dur.total_seconds(), 3600)
+        minutes, _ = divmod(rem, 60)
+        duration_str = f"{int(hours)} hours {int(minutes)} minutes"
+
+    most_active = max(level_counts.items(), key=lambda x: x[1])[0] if level_counts else 'None'
+
+    print('\nDRY RUN SESSION SUMMARY')
+    print('========================')
+    print(f'Duration: {duration_str}')
+    print(f'Ticks processed: {ticks} (Not tracked in this log)')
+    print(f'Events detected: {events_detected}')
+    print(f'Confluence gate: {confluence_passes} passed / {confluence_fails} failed')
+    print(f'Graph fires: {graph_fires}')
+    print('DRUCKENMILLER decisions:')
+    print(f'  - APPROVED: {decisions_approved}')
+    print(f'  - REJECTED: {decisions_rejected}')
+    print(f'  - Top rejection reasons:')
+    for reason, count in sorted(rejection_reasons.items(), key=lambda x: x[1], reverse=True)[:5]:
+        print(f'      {count}x: {reason}')
+    print(f'Errors: {errors}')
+    print(f'SR level breaches: {sr_breaches}')
+    print(f'Most active level: {most_active}\n')

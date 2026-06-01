@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import queue
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional, Set
 
 import numpy as np
@@ -17,6 +17,7 @@ from axonai.realtime.event_types import (
     EventPriority, EventType, LiveCandle, MarketEvent
 )
 from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
+from axonai.dataflows.mt5_data import _to_mt5_symbol, get_broker_tz_offset
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,8 @@ class EventDetector:
 
         # State tracking
         self._consumed_levels: Set[float] = set()
+        self._consumed_sweeps: Set[float] = set()
+        self._pending_sweeps: list = []  # Sweep confirmation candles
         self._structure_detected_on_candle: bool = True
         self._previous_regime: str = ""
         self._previous_session: str = ""
@@ -73,6 +76,13 @@ class EventDetector:
         self._test_mode = config.get("test_mode", False) or not self._log_events
         self._pip_mult = 0.0001  # Updated on init
 
+        # Microstructure Peak & Climax Exhaustion Detector
+        from axonai.realtime.peak_detector import PeakDetector
+        self.peak_detector = PeakDetector(
+            pip_mult=self._pip_mult,
+            rule_c_enabled=config.get("peak_detector_rule_c_enabled", False),
+        )
+
     @property
     def tz(self):
         from datetime import timezone, timedelta
@@ -89,7 +99,13 @@ class EventDetector:
 
         if tc is not None:
             from datetime import timezone
-            open_time_utc = int(tc.open_time.replace(tzinfo=timezone.utc).timestamp()) if isinstance(tc.open_time, datetime) else tc.open_time
+            broker_symbol = _to_mt5_symbol(self.live_state.symbol, self.config)
+            offset_hours = get_broker_tz_offset(broker_symbol)
+            if isinstance(tc.open_time, datetime):
+                aligned_open = tc.open_time - timedelta(hours=offset_hours)
+                open_time_utc = int(aligned_open.replace(tzinfo=timezone.utc).timestamp())
+            else:
+                open_time_utc = tc.open_time
             event.details["trigger_candle"] = {
                 "timeframe": tc.timeframe,
                 "open": tc.open,
@@ -114,6 +130,7 @@ class EventDetector:
     def set_pip_multiplier(self, is_jpy: bool):
         """Set pip multiplier based on pair type."""
         self._pip_mult = 0.01 if is_jpy else 0.0001
+        self.peak_detector.pip_mult = self._pip_mult
 
     def on_tick(self, bid: float, ask: float, timestamp: datetime):
         """Lightweight per-tick checks."""
@@ -166,6 +183,22 @@ class EventDetector:
         # 4. Institutional Level breach check
         self._check_level_breach(bid, ask, timestamp)
 
+        # 5. Microstructure Peak/Valley & Climax exhaustion detection
+        self._check_peak_detection(mid, timestamp)
+
+    def _check_peak_detection(self, mid: float, timestamp: datetime):
+        """Invoke microstructure peak and climax exhaustion detector."""
+        peak_res = self.peak_detector.update(mid, timestamp)
+        if peak_res:
+            self._emit(MarketEvent(
+                event_type=EventType.PEAK_DETECTION,
+                priority=EventPriority.HIGH if peak_res.intensity == "HIGH" else EventPriority.MEDIUM,
+                timestamp=timestamp,
+                symbol=self.live_state.symbol,
+                price=mid,
+                details=peak_res.to_dict()
+            ))
+
     def on_candle_close(self, candle: LiveCandle):
         """Structural checks on candle close."""
         if not self.live_state.is_initialized:
@@ -201,23 +234,49 @@ class EventDetector:
             self._current_trigger_candle = None
 
     def _check_level_breach(self, bid: float, ask: float, timestamp: datetime):
-        """Check for breach of active institutional levels on tick."""
+        """Check for breach of active institutional levels on tick.
+
+        Uses LevelBehaviorTracker data to filter false breaches:
+        - Levels with sharp rejection velocity → lower breach confidence
+        - Levels with high absorption → higher breach confidence
+        """
         pip = self._pip_mult
-        active_levels = [l for l in self.live_evidence.price_levels if l.is_active and l.strength >= 0.4]
-        
+        active_levels = [l for l in self.live_evidence.price_levels if l.is_active and l.strength >= 0.2]
+        level_tracker = self.live_evidence._level_tracker
+
         for level in active_levels:
             distance = abs(bid - level.price)
-            
+
             # Price is within 2 pips of level
             if distance <= 2 * pip:
                 # Only fire if we haven't fired on this level recently
                 level_key = round(level.price, 4)
                 if level_key in self._consumed_levels:
                     continue
-                
+
+                # Check rejection velocity from level tracker
+                bhv = level_tracker.get_level_behavior(level.price)
+                rejection_vel = bhv.last_rejection_velocity if bhv else 0.0
+                absorbing = level_tracker.is_absorbing(level.price)
+                attack_count = level_tracker.get_attack_count(level.price)
+
+                # If level has sharp rejections and no absorption, it's still strong
+                if rejection_vel > 8.0 and not absorbing and attack_count < 3:
+                    if self._log_events:
+                        logger.debug(
+                            "Level breach suppressed (sharp rejection): %.5f vel=%.1f",
+                            level.price, rejection_vel,
+                        )
+                    continue
+
+                # 3+ attacks with absorption → upgrade priority
+                priority = EventPriority.HIGH if level.strength >= 0.7 else EventPriority.MEDIUM
+                if absorbing and attack_count >= 3:
+                    priority = EventPriority.HIGH
+
                 self._emit(MarketEvent(
                     event_type=EventType.LEVEL_BREACH,
-                    priority=EventPriority.HIGH if level.strength >= 0.7 else EventPriority.MEDIUM,
+                    priority=priority,
                     timestamp=timestamp,
                     symbol=self.live_state.symbol,
                     price=bid,
@@ -227,7 +286,10 @@ class EventDetector:
                         "strength": level.strength,
                         "touches": level.touches,
                         "direction": level.direction,
-                        "distance_pips": distance / pip
+                        "distance_pips": distance / pip,
+                        "attack_count": attack_count,
+                        "rejection_velocity": round(rejection_vel, 2),
+                        "is_absorbing": absorbing,
                     }
                 ))
                 self._consumed_levels.add(level_key)
@@ -271,60 +333,122 @@ class EventDetector:
                 ))
 
     def _check_sweep(self, candle: LiveCandle):
-        """Detect liquidity sweeps: price pierces swing level then closes back inside."""
+        """Detect liquidity sweeps with confirmation candle.
+
+        Phase 1: A candle pierces a swing level and closes back inside →
+        stored as pending (NOT emitted).
+
+        Phase 2: On each subsequent candle close, check if pending sweeps
+        confirm (next candle closes in reversal direction). Emit only on
+        confirmation. Discard after 3 candles without confirmation.
+        """
+        # --- Phase 2: check existing pending sweeps for confirmation ---
+        confirmed = []
+        for pending in list(self._pending_sweeps):
+            pending["candles_since"] += 1
+            if pending["candles_since"] > 3:
+                # Expired — discard
+                if self._log_events:
+                    logger.debug("Sweep pending expired (3 candles): %.5f %s",
+                                 pending["swept_level"], pending["direction"])
+                self._consumed_sweeps.discard(round(pending["swept_level"], 5))
+                self._pending_sweeps.remove(pending)
+                continue
+
+            # Check if this is the first confirming candle
+            if pending["candles_since"] == 1:
+                direction = pending["direction"]
+                if direction == "bearish_sweep":
+                    # Confirmation: candle closes lower (bearish reversal)
+                    if candle.close < candle.open:
+                        confirmed.append(pending)
+                elif direction == "bullish_sweep":
+                    # Confirmation: candle closes higher (bullish reversal)
+                    if candle.close > candle.open:
+                        confirmed.append(pending)
+                # If the candle did NOT confirm, keep waiting (up to 3 total)
+
+        for pend in confirmed:
+            self._pending_sweeps.remove(pend)
+            # Recalculate absorption details for the confirmed event
+            level_tracker = self.live_evidence._level_tracker
+            attack_count = level_tracker.get_attack_count(pend["swept_level"])
+            consecutive = level_tracker.get_consecutive_attacks(pend["swept_level"])
+            absorbing = level_tracker.is_absorbing(pend["swept_level"])
+            from datetime import timedelta
+            candle_end = candle.open_time + timedelta(minutes=15)  # M15 candle close time
+            self._emit(MarketEvent(
+                event_type=EventType.SWEEP_DETECTED,
+                priority=EventPriority.HIGH,
+                timestamp=candle_end,  # actual execution time (candle close)
+                symbol=self.live_state.symbol,
+                price=candle.close,  # entry price = close of confirmation candle
+                details={
+                    "swept_level": pend["swept_level"],
+                    "direction": pend["direction"],
+                    "pierce_pips": pend["pierce_pips"],
+                    "timeframe": "M15",
+                    "attack_count": attack_count,
+                    "consecutive_attacks": consecutive,
+                    "is_absorbing": absorbing,
+                    "sweep_timestamp": pend["timestamp"],  # preserve original sweep time
+                    "sweep_price": pend["price"],  # preserve original sweep price
+                    "confirmed_on": candle_end,
+                }
+            ))
+            if self._log_events:
+                logger.info("Sweep CONFIRMED: %.5f %s candle_n=%d",
+                            pend["swept_level"], pend["direction"], pend["candles_since"])
+
+        # --- Phase 1: detect new sweep candidates (store as pending) ---
         swing_highs = self.live_evidence.swing_highs
         swing_lows = self.live_evidence.swing_lows
         state = self.live_state._state
         atr = state.atr_14_h1 if state else 0.001
+        level_tracker = self.live_evidence._level_tracker
 
         for sh in swing_highs:
             level = sh["price"]
             rounded = round(level, 5)
-            if rounded in self._consumed_levels:
+            if rounded in self._consumed_sweeps:
                 continue
             # Wick above level but close below it
             if candle.high > level and candle.close < level:
                 pierce_distance = candle.high - level
                 if pierce_distance < atr:  # Sweep, not breakout
-                    self._consumed_levels.add(rounded)
-                    self._emit(MarketEvent(
-                        event_type=EventType.SWEEP_DETECTED,
-                        priority=EventPriority.HIGH,
-                        timestamp=candle.open_time,
-                        symbol=self.live_state.symbol,
-                        price=candle.close,
-                        details={
-                            "swept_level": level,
-                            "direction": "bearish_sweep",
-                            "pierce_pips": pierce_distance / self._pip_mult,
-                            "timeframe": candle.timeframe,
-                        }
-                    ))
+                    self._consumed_sweeps.add(rounded)
+                    self._pending_sweeps.append({
+                        "swept_level": level,
+                        "direction": "bearish_sweep",
+                        "pierce_pips": pierce_distance / self._pip_mult,
+                        "timestamp": candle.open_time,
+                        "price": candle.close,
+                        "candles_since": 0,
+                    })
+                    if self._log_events:
+                        logger.debug("Sweep PENDING (bearish): %.5f on %s", level, candle.open_time)
                     break
 
         for sl in swing_lows:
             level = sl["price"]
             rounded = round(level, 5)
-            if rounded in self._consumed_levels:
+            if rounded in self._consumed_sweeps:
                 continue
             # Wick below level but close above it
             if candle.low < level and candle.close > level:
                 pierce_distance = level - candle.low
                 if pierce_distance < atr:
-                    self._consumed_levels.add(rounded)
-                    self._emit(MarketEvent(
-                        event_type=EventType.SWEEP_DETECTED,
-                        priority=EventPriority.HIGH,
-                        timestamp=candle.open_time,
-                        symbol=self.live_state.symbol,
-                        price=candle.close,
-                        details={
-                            "swept_level": level,
-                            "direction": "bullish_sweep",
-                            "pierce_pips": pierce_distance / self._pip_mult,
-                            "timeframe": candle.timeframe,
-                        }
-                    ))
+                    self._consumed_sweeps.add(rounded)
+                    self._pending_sweeps.append({
+                        "swept_level": level,
+                        "direction": "bullish_sweep",
+                        "pierce_pips": pierce_distance / self._pip_mult,
+                        "timestamp": candle.open_time,
+                        "price": candle.close,
+                        "candles_since": 0,
+                    })
+                    if self._log_events:
+                        logger.debug("Sweep PENDING (bullish): %.5f on %s", level, candle.open_time)
                     break
 
     def _check_volatility_spike(self, candle: LiveCandle):
@@ -439,9 +563,7 @@ class EventDetector:
                 else:
                     return  # Skip low-significance pattern noise completely to avoid confusing the user
 
-            # Only emit when tradable structures are detected
-            if not self._test_mode and not getattr(self, "_structure_detected_on_candle", False):
-                return
+
 
             self._emit(MarketEvent(
                 event_type=EventType.CANDLE_PATTERN,
@@ -545,6 +667,15 @@ class EventDetector:
         if to_remove and self._log_events:
             logger.debug("Reset %d consumed levels (price moved away)", len(to_remove))
 
+        to_remove_sweeps = set()
+        for level in self._consumed_sweeps:
+            if abs(current_price - level) > reset_dist:
+                to_remove_sweeps.add(level)
+
+        self._consumed_sweeps -= to_remove_sweeps
+        if to_remove_sweeps and self._log_events:
+            logger.debug("Reset %d consumed sweeps (price moved away)", len(to_remove_sweeps))
+
     def _emit(self, event: MarketEvent):
         """Push event into queue with filtering."""
         self._enrich_event(event)
@@ -557,6 +688,16 @@ class EventDetector:
         if datetime.now() < self._cooldown_until:
             if self._log_events:
                 logger.debug("Event suppressed (cooldown): %s", event)
+            return
+
+        # Hard UTC session block: only allow events between 07:00-20:00 UTC
+        evt = event.timestamp
+        if evt.tzinfo:
+            evt = evt.astimezone(timezone.utc)
+        utc_hour = evt.hour + evt.minute / 60.0
+        if not (7.0 <= utc_hour < 20.0):
+            if self._log_events:
+                logger.debug("Event suppressed (outside 07:00-20:00 UTC): %s", event)
             return
 
         # Asian session filter
@@ -589,6 +730,7 @@ class EventDetector:
     def reset_consumed_level(self, level: float):
         """Manually reset a specific consumed level."""
         self._consumed_levels.discard(round(level, 5))
+        self._consumed_sweeps.discard(round(level, 5))
 
     def backfill_historical_events(self):
         """Run pattern and structural checks on historical candles.

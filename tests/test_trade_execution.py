@@ -23,12 +23,14 @@ class TestMT5TradeExecutor(unittest.TestCase):
     @patch("MetaTrader5.symbol_info")
     @patch("MetaTrader5.symbol_info_tick")
     @patch("MetaTrader5.order_send")
-    def test_execute_signal_buy(self, mock_order_send, mock_tick, mock_sym_info, mock_term_info):
+    @patch("MetaTrader5.account_info")
+    def test_execute_signal_buy(self, mock_acc_info, mock_order_send, mock_tick, mock_sym_info, mock_term_info):
         """Test BUY signal order composition and execution."""
         import MetaTrader5 as mt5
 
         # Mock MT5 return values
         mock_term_info.return_value = True
+        mock_acc_info.return_value = None
 
         mock_symbol_info = MagicMock()
         mock_symbol_info.visible = True
@@ -70,12 +72,14 @@ class TestMT5TradeExecutor(unittest.TestCase):
     @patch("MetaTrader5.symbol_info")
     @patch("MetaTrader5.symbol_info_tick")
     @patch("MetaTrader5.order_send")
-    def test_execute_signal_sell(self, mock_order_send, mock_tick, mock_sym_info, mock_term_info):
+    @patch("MetaTrader5.account_info")
+    def test_execute_signal_sell(self, mock_acc_info, mock_order_send, mock_tick, mock_sym_info, mock_term_info):
         """Test SELL signal order composition and execution."""
         import MetaTrader5 as mt5
 
         # Mock MT5 return values
         mock_term_info.return_value = True
+        mock_acc_info.return_value = None
 
         mock_symbol_info = MagicMock()
         mock_symbol_info.visible = True

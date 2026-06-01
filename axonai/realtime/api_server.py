@@ -209,6 +209,15 @@ class DashboardServer:
                                         yf_clean = self.daemon.yf_symbol.replace("=X", "").replace("=x", "").upper()
                                         if d_clean in p_clean or p_clean in d_clean or yf_clean in p_clean or p_clean in yf_clean:
                                             is_active = True
+                                    elif self.bridge_client and self.bridge_client.is_connected():
+                                        # Bridge mode — forward switch to the MT5 bridge
+                                        is_active = True
+                                        self.bridge_client.send_message({
+                                            "type": "switch_pair",
+                                            "symbol": mt5_symbol or pair,
+                                            "mt5": mt5_symbol or pair,
+                                        })
+                                        logger.info(f"Bridge: forwarded switch_pair to {mt5_symbol or pair}")
                                 
                                 if is_active:
                                     logger.info("Dashboard WS: client switched back to active symbol, re-hydrating")

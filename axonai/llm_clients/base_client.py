@@ -1,6 +1,7 @@
 from abc import ABC, abstractmethod
 from typing import Any, Optional
 import warnings
+import re
 
 
 def normalize_content(response):
@@ -10,6 +11,10 @@ def normalize_content(response):
     as a list of typed blocks, e.g. [{'type': 'reasoning', ...}, {'type': 'text', 'text': '...'}].
     Downstream agents expect response.content to be a string. This extracts
     and joins the text blocks, discarding reasoning/metadata blocks.
+
+    This also detects and strips inline <think>...</think> blocks (typical of DeepSeek R1
+    from third-party providers) from the main content, saving the reasoning in
+    additional_kwargs so it doesn't pollute the final output.
     """
     content = response.content
     if isinstance(content, list):
@@ -18,7 +23,22 @@ def normalize_content(response):
             else item if isinstance(item, str) else ""
             for item in content
         ]
-        response.content = "\n".join(t for t in texts if t)
+        content = "\n".join(t for t in texts if t)
+        response.content = content
+
+    if isinstance(response.content, str) and response.content:
+        # Detect and extract <think>...</think> block
+        think_match = re.search(r"<think>(.*?)</think>", response.content, re.DOTALL | re.IGNORECASE)
+        if think_match:
+            reasoning = think_match.group(1).strip()
+            # Save in additional_kwargs for thinking propagation
+            if not hasattr(response, "additional_kwargs") or response.additional_kwargs is None:
+                response.additional_kwargs = {}
+            if "reasoning_content" not in response.additional_kwargs:
+                response.additional_kwargs["reasoning_content"] = reasoning
+            # Remove <think>...</think> block from the main content
+            response.content = re.sub(r"<think>.*?</think>", "", response.content, flags=re.DOTALL | re.IGNORECASE).strip()
+
     return response
 
 

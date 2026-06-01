@@ -71,6 +71,7 @@ class GraphExecutor:
         event: MarketEvent,
         world_state: WorldState,
         market_evidence: MarketEvidence,
+        macro_signal = None,
     ) -> Tuple[dict, str]:
         """Fire the full LangGraph pipeline.
 
@@ -92,13 +93,25 @@ class GraphExecutor:
             event.event_type.value, event.priority.name,
         )
 
+        world_state_dict = asdict(world_state)
+        if macro_signal:
+            world_state_dict["macro_bias"] = macro_signal.bias
+            world_state_dict["macro_confidence"] = macro_signal.confidence
+            world_state_dict["macro_key_level"] = macro_signal.key_level
+            world_state_dict["macro_bias_age_sec"] = macro_signal.age_sec
+        else:
+            world_state_dict["macro_bias"] = "HOLD"
+            world_state_dict["macro_confidence"] = 0.0
+            world_state_dict["macro_key_level"] = 0.0
+            world_state_dict["macro_bias_age_sec"] = 999.0
+
         # Build initial state with event context injected
         initial_state = self._graph.propagator.create_initial_state(
             company_name=yf_symbol,
             trade_date=trade_date,
             asset_type="forex",
             past_context=self._graph.memory_log.get_past_context(yf_symbol) or "",
-            world_state=asdict(world_state),
+            world_state=world_state_dict,
             market_evidence=asdict(market_evidence),
         )
 

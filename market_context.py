@@ -1,8 +1,7 @@
-"""Market context builder for structuring LLM inputs."""
-
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, Any
+import pytz
 from tick_engine import SignalState
 from market_state import MarketStateMachine
 
@@ -42,27 +41,51 @@ class MarketContext:
     signal_direction: str
     signal_confidence: float
 
+    # Peak Detector integration
+    peak_divergence_warning: bool
+    peak_confirmed: bool  
+    peak_confidence: float
+    peak_dominant_side: str
+
+    # Macro bridge integration (System 2 → System 1)
+    macro_bias: str = "HOLD"
+    macro_confidence: float = 0.0
+    macro_key_level: float = 0.0
+    macro_bias_age_sec: float = 999.0
+
 class MarketContextBuilder:
     """Constructs MarketContext snapshorts from multiple live components."""
+    _tz_london = pytz.timezone("Europe/London")
+    _tz_ny = pytz.timezone("America/New_York")
+
     def __init__(self):
         pass
 
-    def build(self, symbol: str, signal_state: SignalState, state_machine: MarketStateMachine, candle_snapshot: Optional[dict] = None) -> MarketContext:
-        """Assemble the complete context object."""
-        # Session logic
-        dt = datetime.fromtimestamp(signal_state.timestamp_ms / 1000.0, tz=timezone.utc)
-        utc_hour = dt.hour + dt.minute / 60.0
-        
-        if 13.0 <= utc_hour < 16.0:
-            session = "london_new_york_overlap"
-        elif 8.0 <= utc_hour < 13.0:
-            session = "london"
-        elif 16.0 <= utc_hour < 21.0:
-            session = "new_york"
-        elif 0.0 <= utc_hour < 8.0:
-            session = "tokyo"
+    @staticmethod
+    def _classify_session(timestamp_ms: int) -> str:
+        """Classify trading session using DST-aware timezone boundaries."""
+        utc_dt = datetime.fromtimestamp(timestamp_ms / 1000.0, tz=pytz.utc)
+        london_hour = utc_dt.astimezone(MarketContextBuilder._tz_london).hour
+        ny_hour = utc_dt.astimezone(MarketContextBuilder._tz_ny).hour
+
+        london_active = 8 <= london_hour < 16
+        ny_active = 8 <= ny_hour < 17
+
+        if london_active and ny_active:
+            return "london_new_york_overlap"
+        elif london_active:
+            return "london"
+        elif ny_active:
+            return "new_york"
+        elif 0 <= utc_dt.hour < 9:
+            return "tokyo"
         else:
-            session = "sydney"
+            return "sydney"
+
+    def build(self, symbol: str, signal_state: SignalState, state_machine: MarketStateMachine, candle_snapshot: Optional[dict] = None, peak_signal: Optional[Any] = None, macro_bridge=None) -> MarketContext:
+        """Assemble the complete context object."""
+        # DST-aware session classification
+        session = self._classify_session(signal_state.timestamp_ms)
 
         # Pressures mapping (must sum to 1.0)
         imbalance = signal_state.imbalance
@@ -108,6 +131,41 @@ class MarketContextBuilder:
             signal_direction = "short"
             signal_confidence = sell_pressure
 
+        # Extract peak signal details
+        peak_divergence_warning = False
+        peak_confirmed = False
+        peak_confidence = 0.0
+        peak_dominant_side = "none"
+
+        if peak_signal is not None:
+            if hasattr(peak_signal, "divergence_warning"):
+                peak_divergence_warning = bool(peak_signal.divergence_warning)
+                peak_confirmed = bool(peak_signal.peak_confirmed)
+                peak_confidence = float(peak_signal.peak_confidence)
+                peak_dominant_side = str(getattr(peak_signal, "dominant_side", "none"))
+                if peak_dominant_side == "none" and hasattr(peak_signal, "direction"):
+                    peak_dominant_side = "sell" if "bearish" in peak_signal.direction else "buy"
+            elif isinstance(peak_signal, dict):
+                peak_divergence_warning = bool(peak_signal.get("divergence_warning", False))
+                peak_confirmed = bool(peak_signal.get("peak_confirmed", False))
+                peak_confidence = float(peak_signal.get("peak_confidence", 0.0))
+                peak_dominant_side = str(peak_signal.get("dominant_side", "none"))
+                if peak_dominant_side == "none" and "direction" in peak_signal:
+                    peak_dominant_side = "sell" if "bearish" in peak_signal["direction"] else "buy"
+
+        # Extract macro bridge data (System 2 → System 1)
+        macro_bias = "HOLD"
+        macro_confidence = 0.0
+        macro_key_level = 0.0
+        macro_bias_age_sec = 999.0
+        if macro_bridge is not None:
+            macro_snap = macro_bridge.snapshot()
+            if macro_snap is not None:
+                macro_bias = macro_snap.bias
+                macro_confidence = macro_snap.confidence
+                macro_key_level = macro_snap.key_level
+                macro_bias_age_sec = macro_snap.age_sec
+
         return MarketContext(
             symbol=symbol,
             timestamp_ms=signal_state.timestamp_ms,
@@ -134,5 +192,15 @@ class MarketContextBuilder:
             volatility_expanding=not signal_state.velocity_collapse,
             confirmed_signal=confirmed_signal,
             signal_direction=signal_direction,
-            signal_confidence=signal_confidence
+            signal_confidence=signal_confidence,
+            # Peak detector mapping
+            peak_divergence_warning=peak_divergence_warning,
+            peak_confirmed=peak_confirmed,
+            peak_confidence=peak_confidence,
+            peak_dominant_side=peak_dominant_side,
+            # Macro bridge (System 2)
+            macro_bias=macro_bias,
+            macro_confidence=macro_confidence,
+            macro_key_level=macro_key_level,
+            macro_bias_age_sec=macro_bias_age_sec
         )

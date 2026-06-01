@@ -27,10 +27,28 @@ def create_sentiment_analyst(llm):
         market_evidence = state.get("market_evidence", {})
         trader_hypothesis = state.get("trader_hypothesis", {})
 
-        # Pre-fetch three sources
-        news_block = get_news.func(ticker, start_date, end_date)
-        forex_social_block = fetch_forex_social_feed(ticker, limit=30)
-        reddit_block = fetch_reddit_posts(ticker)
+        # Check background cache first to avoid slow blocking queries on start/restart
+        news_block = None
+        forex_social_block = None
+        reddit_block = None
+        try:
+            from axonai.realtime.api_server import get_dashboard
+            dashboard = get_dashboard()
+            if dashboard and dashboard.history.get("news_data"):
+                cache = dashboard.history["news_data"]
+                news_block = cache.get("news")
+                forex_social_block = cache.get("forex_social")
+                reddit_block = cache.get("reddit")
+        except Exception:
+            pass
+
+        # Fallback to online fetch if cache is empty or offline backfill is required
+        if not news_block:
+            news_block = get_news.func(ticker, start_date, end_date)
+        if not forex_social_block:
+            forex_social_block = fetch_forex_social_feed(ticker, limit=30)
+        if not reddit_block:
+            reddit_block = fetch_reddit_posts(ticker)
 
         # Broadcast active sentiment feeds to Dashboard cockpit
         try:
@@ -46,6 +64,25 @@ def create_sentiment_analyst(llm):
                 })
         except Exception:
             pass
+
+        # Construct sentiment context block for LIVERMORE
+        sentiment_context = ""
+        if world_state:
+            sentiment_context += "### WorldState Sentiment Indicators:\n"
+            sentiment_indicators = ["regime", "session", "belief_score", "dxy_momentum", "risk_sentiment", "cot_positioning", "retail_sentiment"]
+            for k in sentiment_indicators:
+                if k in world_state:
+                    sentiment_context += f"- {k}: {world_state[k]}\n"
+
+        if news_block:
+            sentiment_context += f"\n### News Context:\n{str(news_block)[:2000]}\n"
+        if forex_social_block:
+            sentiment_context += f"\n### Forex Social Feed:\n{str(forex_social_block)[:1000]}\n"
+        if reddit_block:
+            sentiment_context += f"\n### Reddit Posts Sentiment:\n{str(reddit_block)[:1000]}\n"
+
+        if not sentiment_context:
+            sentiment_context = "No pre-computed sentiment, news, or positioning data is available."
 
         system_message = """You are LIVERMORE — AxonAI market sentiment analyst. Specialist in reading institutional positioning, COT data, DXY correlation, and crowd psychology.
 
@@ -69,6 +106,9 @@ Respond with this exact JSON at the end of your response:
                     "You are a helpful AI assistant, collaborating with other assistants. "
                     "Analyze the provided sentiment context and evaluate the hypothesis.\n"
                     "{system_message}\n"
+                    "\n=== SENTIMENT CONTEXT PROVIDED ===\n"
+                    "{sentiment_context}\n"
+                    "==================================\n\n"
                     "For your reference, the current date is {current_date}. {instrument_context}",
                 ),
                 MessagesPlaceholder(variable_name="messages"),
@@ -76,6 +116,7 @@ Respond with this exact JSON at the end of your response:
         )
 
         prompt = prompt.partial(system_message=system_message)
+        prompt = prompt.partial(sentiment_context=sentiment_context)
         prompt = prompt.partial(current_date=end_date)
         prompt = prompt.partial(instrument_context=instrument_context)
 

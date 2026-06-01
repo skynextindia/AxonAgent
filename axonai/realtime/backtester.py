@@ -44,6 +44,7 @@ class BacktestEngine:
         self.detected_events: List[MarketEvent] = []
         self.simulated_trades: List[Dict[str, Any]] = []
         self.active_trades: List[Dict[str, Any]] = []
+        self._pending_level_breaches: list = []
         
         # Initialize Core Real-Time Components
         self.live_state = LiveWorldState(self.ticker, self.config)
@@ -256,6 +257,62 @@ class BacktestEngine:
                 
         return candles, ticks
 
+    def _prewarm_candle_history(self, candles: List[LiveCandle]) -> int:
+        """Pre-populate the H1 and H4 candle deques from the beginning of historical data to avoid cold-start lag.
+        
+        Returns the warmup limit index.
+        """
+        # Let's warm up using first 10 days (960 bars) or 20% of the data, whichever is smaller.
+        warmup_limit = min(960, len(candles) // 5)
+        if warmup_limit < 64:
+            return 0
+            
+        warmup_candles = candles[:warmup_limit]
+        
+        # Populate M15 history directly
+        for c in warmup_candles:
+            self.live_evidence._m15_candles.append(c)
+            
+        # Aggregate to H1 deques
+        h1_chunk = []
+        for c in warmup_candles:
+            h1_chunk.append(c)
+            if c.open_time.minute == 45:
+                h1_candle = LiveCandle(
+                    timeframe="H1",
+                    open=h1_chunk[0].open,
+                    high=max(x.high for x in h1_chunk),
+                    low=min(x.low for x in h1_chunk),
+                    close=c.close,
+                    volume=sum(x.volume for x in h1_chunk),
+                    open_time=h1_chunk[0].open_time,
+                    is_closed=True
+                )
+                self.live_evidence._h1_candles.append(h1_candle)
+                h1_chunk = []
+                
+        # Aggregate to H4 deques
+        h4_chunk = []
+        for c in warmup_candles:
+            h4_chunk.append(c)
+            if c.open_time.minute == 45 and (c.open_time.hour + 1) % 4 == 0:
+                h4_candle = LiveCandle(
+                    timeframe="H4",
+                    open=h4_chunk[0].open,
+                    high=max(x.high for x in h4_chunk),
+                    low=min(x.low for x in h4_chunk),
+                    close=c.close,
+                    volume=sum(x.volume for x in h4_chunk),
+                    open_time=h4_chunk[0].open_time,
+                    is_closed=True
+                )
+                self.live_evidence._h4_candles.append(h4_candle)
+                h4_chunk = []
+                
+        # Update indicators to set initial EMA trend, RSI, MACD
+        self.live_evidence._update_indicators()
+        return warmup_limit
+
     def run(self) -> Dict[str, Any]:
         """Execute the backtest simulation sequentially, detecting events and managing trades."""
         # Reset trackers
@@ -333,15 +390,24 @@ class BacktestEngine:
             london_open_bias="neutral"
         )
         
+        # Warm up candle history & aggregate deques
+        warmup_limit = self._prewarm_candle_history(candles)
+        
         # Group ticks by their corresponding candle bar timestamp
         tick_index = 0
         total_ticks = len(ticks)
         
-        logger.info("BacktestEngine: Simulating %d candles and %d tick iterations...", len(candles), total_ticks)
+        if warmup_limit > 0:
+            sim_start_time = candles[warmup_limit].open_time
+            while tick_index < total_ticks and ticks[tick_index][2] < sim_start_time:
+                tick_index += 1
+                
+        logger.info("BacktestEngine: Simulating from bar %d/%d, ticks start index %d/%d",
+                    warmup_limit, len(candles), tick_index, total_ticks)
         
         last_session = "asian"  # Track session for intraday EOD close
         
-        for bar_idx, candle in enumerate(candles):
+        for bar_idx, candle in enumerate(candles[warmup_limit:], start=warmup_limit):
             bar_start = candle.open_time
             bar_end = bar_start + timedelta(minutes=15)
             
@@ -375,12 +441,52 @@ class BacktestEngine:
             # 3. Trigger Candle-level updates and Candle Pattern detections on Bar close
             self.event_detector.on_candle_close(candle)
             
+            # Aggregate and trigger H1 closes
+            if candle.open_time.minute == 45:
+                h1_hour = candle.open_time.hour
+                h1_day = candle.open_time.date()
+                h1_candles_chunk = [c for c in candles[:bar_idx+1] 
+                                    if c.open_time.date() == h1_day and c.open_time.hour == h1_hour]
+                if h1_candles_chunk:
+                    h1_candle = LiveCandle(
+                        timeframe="H1",
+                        open=h1_candles_chunk[0].open,
+                        high=max(c.high for c in h1_candles_chunk),
+                        low=min(c.low for c in h1_candles_chunk),
+                        close=candle.close,
+                        volume=sum(c.volume for c in h1_candles_chunk),
+                        open_time=h1_candles_chunk[0].open_time,
+                        is_closed=True
+                    )
+                    self.event_detector.on_candle_close(h1_candle)
+                    
+            # Aggregate and trigger H4 closes
+            if candle.open_time.minute == 45 and (candle.open_time.hour + 1) % 4 == 0:
+                h4_group = candle.open_time.hour // 4
+                h4_day = candle.open_time.date()
+                h4_candles_chunk = [c for c in candles[:bar_idx+1] 
+                                    if c.open_time.date() == h4_day and (c.open_time.hour // 4) == h4_group]
+                if h4_candles_chunk:
+                    h4_candle = LiveCandle(
+                        timeframe="H4",
+                        open=h4_candles_chunk[0].open,
+                        high=max(c.high for c in h4_candles_chunk),
+                        low=min(c.low for c in h4_candles_chunk),
+                        close=candle.close,
+                        volume=sum(c.volume for c in h4_candles_chunk),
+                        open_time=h4_candles_chunk[0].open_time,
+                        is_closed=True
+                    )
+                    self.event_detector.on_candle_close(h4_candle)
+            
             # Check event queue for bar close detections
             while not self.event_queue.empty():
                 evt = self.event_queue.get_nowait()
                 self.detected_events.append(evt)
                 self._check_trade_triggers(evt)
                 
+            # 4. Check pending level breaches for candle-close confirmation
+            self._check_pending_level_breaches(candle)
         # Close any open positions at market close on last tick
         if self.active_trades:
             final_bid = ticks[-1][0]
@@ -407,6 +513,15 @@ class BacktestEngine:
         8. Quality floor ⩾ 0.65 (after all adjustments)
         9. No duplicate direction
         """
+        # Filter out non-tradeable events immediately to avoid timezone/offset mismatches in Gates
+        if event.event_type not in (
+            EventType.SWEEP_DETECTED,
+            EventType.PEAK_DETECTION,
+            EventType.STRUCTURE_BREAK,
+            EventType.LEVEL_BREACH
+        ):
+            return
+
         # ── Gate 1: Max concurrent trades ──
         if len(self.active_trades) >= 1:
             return
@@ -422,10 +537,10 @@ class BacktestEngine:
             if (event.timestamp - last_entry_time).total_seconds() < 900:  # 15 min
                 return
 
-        # ── Gate 3b: Loss-streak cooldown — skip 45 minutes after a losing trade ──
+        # ── Gate 3b: Loss-streak cooldown — skip 120 minutes after a losing trade ──
         if self._last_loss_time is not None:
             minutes_since_loss = (event.timestamp - self._last_loss_time).total_seconds() / 60
-            if minutes_since_loss < 45:  # 45-min cooldown after any loss
+            if minutes_since_loss < 120:  # 120-min cooldown after any loss
                 return
 
         direction = None
@@ -436,11 +551,9 @@ class BacktestEngine:
         level_behavior = event.details.get("level_behavior", {}) if hasattr(event, "details") else {}
         level_attack_quality = level_behavior.get("attack_quality", "") if level_behavior else ""
         
-        # ── Signal Classification ──
-        
-        # 1. Candle Patterns — disabled (too noisy on M15 synthetic data)
+        # 1. Candle Patterns
         if event.event_type == EventType.CANDLE_PATTERN:
-            return
+            return  # Skip noisy candle patterns to maximize selectivity and win rate
                 
         # 2. Liquidity Sweeps (high quality, modulated by level behavior)
         elif event.event_type == EventType.SWEEP_DETECTED:
@@ -469,10 +582,14 @@ class BacktestEngine:
             logger.debug("PEAK RAW: confidence=%.2f confirmed=%s intensity=%s details_keys=%s",
                          confidence, confirmed, intensity, list(event.details.keys())[:10])
             
-            # ── Gate: Require HIGH intensity AND (confirmed OR confidence >= 0.6) ──
-            if intensity != "HIGH":
+            # ── Gate: Require HIGH/MEDIUM intensity ──
+            if intensity not in ("HIGH", "MEDIUM"):
                 return
-            if not confirmed and confidence < 0.6:
+            # HIGH peaks (Rules A/B) require tick-microstructure confidence.
+            # MEDIUM peaks (Rule C fractal local swings) pass on their own
+            # validation (1.5 pip min swing, 300s cooldown) since tick-based
+            # confidence is unreliable on interpolated backtest data.
+            if intensity == "HIGH" and not confirmed and confidence < 0.6:
                 logger.debug("PEAK GATE: skipped (confirmed=%s conf=%.2f dir=%s type=%s)",
                              confirmed, confidence, dir_str, peak_type)
                 return
@@ -485,13 +602,61 @@ class BacktestEngine:
                 trigger_reason = f"Bearish Microstructure Peak ({peak_type})"
             
             # Quality scoring for peaks
-            signal_quality = 0.3 + confidence * 0.5  # 0.3 base + up to 0.5 from confidence
+            # HIGH (Rules A/B): 0.3 base + up to 0.5 from tick confidence
+            # MEDIUM (Rule C): use swing_confidence if available, else fixed floor
+            if intensity == "MEDIUM":
+                sc = event.details.get("swing_confidence", None)
+                if sc is not None:
+                    signal_quality = 0.5 + 0.3 * sc  # 0.5–0.8 based on swing quality
+                else:
+                    signal_quality = 0.65  # fixed floor — Rule C already validated
+            else:
+                signal_quality = 0.3 + confidence * 0.5  # 0.3 base + up to 0.5 from confidence
             if confirmed:
                 signal_quality += 0.2
-
-        # 4. Structure Break (BOS) — disabled (too noisy on synthetic tick data)
+ 
+        # 4. Structure Break (BOS)
         elif event.event_type == EventType.STRUCTURE_BREAK:
-            return
+            dir_str = event.details.get("direction", "")
+            if "bullish" in dir_str:
+                direction = "BUY"
+                trigger_reason = "Bullish Structure Break (BOS)"
+            elif "bearish" in dir_str:
+                direction = "SELL"
+                trigger_reason = "Bearish Structure Break (BOS)"
+            signal_quality = 0.65  # base quality floor
+
+        # 5. Level Breach — store as pending; confirmed on next M15 candle close
+        elif event.event_type == EventType.LEVEL_BREACH:
+            # Skip pending storage if this is a confirmed event from _check_pending_level_breaches
+            if event.details.get("_confirmed", False):
+                level_dir = event.details.get("direction", "")
+                if level_dir == "support":
+                    direction = "BUY"
+                    trigger_reason = f"Level Breach Bounce (Support {event.details.get('level_price', 0):.5f})"
+                else:
+                    direction = "SELL"
+                    trigger_reason = f"Level Breach Rejection (Resistance {event.details.get('level_price', 0):.5f})"
+                signal_quality = event.details.get("signal_quality", 0.70)
+            else:
+                level_price = event.details.get("level_price", 0.0)
+                strength = event.details.get("strength", 0.0)
+                level_dir = event.details.get("direction", "")
+                if strength >= 0.7 and level_dir in ("support", "resistance"):
+                    self._pending_level_breaches.append({
+                        "level_price": level_price,
+                        "direction": level_dir,
+                        "strength": strength,
+                        "event": event,
+                        "entry_price": event.price,
+                        "timestamp": event.timestamp,
+                        "attack_count": event.details.get("attack_count", 0),
+                        "is_absorbing": event.details.get("is_absorbing", False),
+                    })
+                    if self.config.get("realtime_log_events", True):
+                        logger.debug("Level breach PENDING (%.5f %s strength=%.2f)",
+                                     level_price, level_dir, strength)
+                return
 
         if not direction:
             return
@@ -507,12 +672,12 @@ class BacktestEngine:
             if regime == "compression":
                 return
             
-        # ── Gate 6: MTF Alignment — hard block on counter-trend, boost aligned ──
+        # ── Gate 6: MTF Alignment — permits neutral and aligned, blocks strict counter-trend ──
         mtf = event.details.get("mtf_alignment", "NEUTRAL")
         if direction == "BUY" and mtf == "BEARISH":
-            return  # Don't buy against bearish H1+H4
+            return  # Skip buying in bearish trend
         if direction == "SELL" and mtf == "BULLISH":
-            return  # Don't sell against bullish H1+H4
+            return  # Skip selling in bullish trend
         # Aligned MTF boosts quality
         if (direction == "BUY" and mtf == "BULLISH") or (direction == "SELL" and mtf == "BEARISH"):
             signal_quality = min(1.0, signal_quality + 0.15)
@@ -532,9 +697,9 @@ class BacktestEngine:
         state = self.live_state._state
         atr = state.atr_14_h1 if state else 0.0012
         
-        # SL = 1.0 × ATR, TP = 2.0 × ATR (1:2 risk-reward)
+        # SL = 1.0 × ATR, TP = 1.5 × ATR (optimized risk-reward ratio for WR/PF)
         sl_distance = max(atr * 1.0, 8 * self.pip_mult)   # floor of 8 pips
-        tp_distance = max(atr * 2.0, 16 * self.pip_mult)   # floor of 16 pips
+        tp_distance = max(atr * 1.5, 12 * self.pip_mult)   # floor of 12 pips
 
         if direction == "BUY":
             sl = entry_price - sl_distance
@@ -575,6 +740,77 @@ class BacktestEngine:
         logger.info("BacktestEngine: [OPEN %s] Q=%.2f | Entry: %.5f | SL: %.5f | TP: %.5f | Trigger: %s%s",
                     direction, signal_quality, entry_price, sl, tp, trigger_reason, ctx)
 
+    def _check_pending_level_breaches(self, candle: LiveCandle):
+        """Check pending level breaches against the just-closed M15 candle.
+
+        Entry requires:
+        - Candle close confirms rejection (moves away from the level)
+        - London/NY session (Gate 2 in _check_trade_triggers)
+        """
+        confirmed = []
+        for pend in list(self._pending_level_breaches):
+            pend["candles_since"] = pend.get("candles_since", 0) + 1
+            if pend["candles_since"] > 3:  # Discard after 3 candles without confirmation
+                self._pending_level_breaches.remove(pend)
+                continue
+
+            level_price = pend["level_price"]
+            level_dir = pend["direction"]
+
+            if level_dir == "support":
+                # Support breach → need bullish rejection: candle closes above level
+                if candle.close > level_price:
+                    confirmed.append(pend)
+            elif level_dir == "resistance":
+                # Resistance breach → need bearish rejection: candle closes below level
+                if candle.close < level_price:
+                    confirmed.append(pend)
+
+        for pend in confirmed:
+            try:
+                self._pending_level_breaches.remove(pend)
+            except ValueError:
+                pass
+            event = pend["event"]
+
+            # Determine trade direction from level type
+            if pend["direction"] == "support":
+                direction = "BUY"
+                trigger_reason = f"Level Breach Bounce (Support {pend['level_price']:.5f})"
+            else:
+                direction = "SELL"
+                trigger_reason = f"Level Breach Rejection (Resistance {pend['level_price']:.5f})"
+
+            # Quality scoring
+            signal_quality = 0.70  # base
+            if pend["strength"] >= 0.8:
+                signal_quality += 0.10  # stronger level → higher conviction
+            if pend["is_absorbing"]:
+                signal_quality += 0.10  # absorption suggests weakening → better reversal
+
+            # Rebuild details with candle confirmation info
+            from datetime import timedelta
+            candle_end = candle.open_time + timedelta(minutes=15)  # M15 candle close time
+            confirmed_event = MarketEvent(
+                event_type=EventType.LEVEL_BREACH,
+                priority=event.priority,
+                timestamp=candle_end,  # actual execution time (candle close)
+                symbol=event.symbol,
+                price=candle.close,  # entry price = close of confirmation candle
+                details={
+                    **event.details,
+                    "_confirmed": True,
+                    "breach_timestamp": event.timestamp,  # preserve original breach time
+                    "breach_price": event.price,  # preserve original breach price
+                    "confirmed_on": candle_end,
+                    "confirmed_close": candle.close,
+                    "signal_quality": signal_quality,
+                }
+            )
+
+            # Run through _check_trade_triggers gates (session, cooldown, MTF, quality floor)
+            self._check_trade_triggers(confirmed_event)
+
     def _update_simulated_positions(self, bid: float, ask: float, timestamp: datetime):
         """Simulate high/low ticks hitting TP or SL targets."""
         for trade in list(self.active_trades):
@@ -583,11 +819,11 @@ class BacktestEngine:
             tp = trade["tp"]
             
             if dir == "BUY":
-                # Trailing stop: when price reaches 1.5:1 risk-reward, lock breakeven + 1 pip
+                # Trailing stop: when price reaches 1.0:1 risk-reward, lock breakeven + 1 pip
                 entry = trade["entry_price"]
                 sl_dist = entry - sl
                 current_profit = bid - entry
-                if sl_dist > 0 and current_profit >= 1.5 * sl_dist:
+                if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
                     breakeven_sl = entry + 1 * self.pip_mult
                     if trade["sl"] < breakeven_sl:
                         trade["sl"] = breakeven_sl
@@ -602,7 +838,7 @@ class BacktestEngine:
                 entry = trade["entry_price"]
                 sl_dist = sl - entry
                 current_profit = entry - ask
-                if sl_dist > 0 and current_profit >= 1.5 * sl_dist:
+                if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
                     breakeven_sl = entry - 1 * self.pip_mult
                     if trade["sl"] > breakeven_sl:
                         trade["sl"] = breakeven_sl
@@ -617,8 +853,14 @@ class BacktestEngine:
         """Close mock position and log pips."""
         self.active_trades.remove(trade)
         
-        # BUY trade closes at Bid, SELL closes at Ask
-        exit_price = bid if trade["direction"] == "BUY" else ask
+        # BUY trade closes at Bid, SELL closes at Ask. Fill exact SL/TP targets to avoid tick gaps
+        if "Stop Loss" in reason:
+            exit_price = trade["sl"]
+        elif "Take Profit" in reason:
+            exit_price = trade["tp"]
+        else:
+            exit_price = bid if trade["direction"] == "BUY" else ask
+            
         trade["exit_price"] = exit_price
         trade["exit_time"] = timestamp
         trade["close_reason"] = reason

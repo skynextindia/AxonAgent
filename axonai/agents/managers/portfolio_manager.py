@@ -28,6 +28,11 @@ def create_portfolio_manager(llm):
     structured_llm = llm.with_structured_output(DruckenmillerDecision)
 
     def portfolio_manager_node(state) -> dict:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("DRUCKENMILLER input state keys: %s", list(state.keys()))
+        logger.info("DRUCKENMILLER judge_decision: %s", state.get('judge_decision'))
+        logger.info("DRUCKENMILLER investment_plan: %s", state.get('investment_plan'))
         instrument_context = build_instrument_context(state["company_of_interest"])
 
         history = state["risk_debate_state"]["history"]
@@ -62,6 +67,17 @@ Conditional approval rules:
 When you approve: you are authorizing real money to move. Be certain.
 When you reject: state the exact rule that triggered rejection.
 
+REJECTION RULES — when execute=false you MUST still populate:
+- confidence: copy the confidence value from the investment_plan you received
+- reason: explain in one sentence why you are rejecting despite the upstream confidence
+- abort_reason: state the exact hard rule that triggered rejection
+
+Examples of correct rejection output:
+{"execute": false, "direction": "HOLD", "confidence": 80, "reason": "Strong SELL signal but Asian session active — deferring to London open", "abort_reason": "asian_session_active"}
+{"execute": false, "direction": "HOLD", "confidence": 65, "reason": "Confidence below 70% threshold", "abort_reason": "confidence_below_threshold"}
+
+Never return confidence: 0 or reason: "" — always explain the rejection.
+
 Respond with this exact JSON — no other text:
 {
   "execute": true|false,
@@ -81,15 +97,19 @@ Respond with this exact JSON — no other text:
         prompt += f"Risk Analysis (MARKS):\n{history}\n"
 
         try:
-            final_trade_decision = structured_llm.invoke(prompt)
-            final_trade_decision = final_trade_decision.dict() if hasattr(final_trade_decision, "dict") else final_trade_decision
+            raw_result = structured_llm.invoke(prompt)
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("RAW RESULT FROM LLM: %s", repr(raw_result))
+            
+            final_trade_decision = raw_result.dict() if hasattr(raw_result, "dict") else raw_result
         except Exception as e:
             final_trade_decision = {
                 "execute": False,
                 "direction": "HOLD",
                 "final_lot_size": 0.0,
                 "confidence": 0,
-                "reason": "Structured output failed",
+                "reason": f"DRUCKENMILLER structured output failed: {str(e)[:100]}",
                 "abort_reason": "system_error"
             }
 

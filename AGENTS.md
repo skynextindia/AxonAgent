@@ -109,6 +109,26 @@ EOD force-closed: 8
 - [ ] Consider enabling BUY entries for range-bound markets
 - [ ] The strategy is SELL-only in May 2026 bear trend — test in sideways/uptrend months
 
+## Bridge Backtest Runner
+- **Command**: `python3 run_bridge_backtest.py --months 6 --timeframe M15`
+- **Host auto-detect**: Uses `ip route show default` gateway, falls back to 172.28.176.1
+- **Output**: Markdown + JSON reports in `reports/`
+- **Requires**: MT5 bridge running on Windows (port 8765)
+
+### Critical Bridge Quirks (must-know)
+
+**1. Initial broadcast messages**: The bridge sends accumulated broadcast messages (tick, regime, account, candles, levels) immediately on connection. A WebSocket client **must drain** these before sending `get_historical` requests, then **match responses by `request_id`**. Without this, chunks 1-N pick up broadcast garbage as if they were historical responses.
+
+**2. Engine init bypasses level seeding**: `BacktestEngine.__init__()` sets `_initialized = True` directly, bypassing `LiveMarketEvidence.initialize()`. This means `_calculate_initial_institutional_levels()` is never called and `price_levels` stays empty. When `_update_indicators()` fires on the first H4 candle close, it overwrites `swing_highs`/`swing_lows` from the empty `price_levels`, killing sweep detection.
+
+**Fix**: Call `BridgeDataCollector.seed_engine_levels(engine, bars)` before `engine.run()`. This detects fractal swing highs/lows (±5 bars), computes PDH/PDL from daily groupings, and generates round numbers at 50-pip intervals — injecting them as `PriceLevel` objects into `engine.live_evidence.price_levels`.
+
+### Verified Results (after fixes)
+- **3-month**: 6,152 bars, 37 trades, 56.8% WR, 2.50 PF, +271.3 pips
+- **6-month**: 12,103 bars, 16 trades, 43.8% WR, 1.53 PF, +64.4 pips
+- Both BUY and SELL sweeps detected; events (peak_detection, sweep_detected, candle_pattern, level_breach, session_transition) fire correctly
+
 ## Resume Instructions
-To resume: `cd /mnt/d/work/AxonAI && python run_intraday_backtest.py`
+To resume backtest tuning: `cd /mnt/d/work/AxonAI && python run_intraday_backtest.py`
+To run bridge backtest: `cd /mnt/d/work/AxonAI && python3 run_bridge_backtest.py --months 6 --timeframe M15`
 Config is already set to the winning parameters above.

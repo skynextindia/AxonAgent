@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -163,7 +163,11 @@ class LevelBehaviorTracker:
             if bhv.total_attacks == 0:
                 continue
 
-            status = self._get_status(bhv, now)
+            tz_now = now
+            if bhv.last_attack_time and bhv.last_attack_time.tzinfo is not None:
+                tz_now = datetime.now(bhv.last_attack_time.tzinfo)
+
+            status = self._get_status(bhv, tz_now)
 
             # Absorption ratio (ticks per pip of progress)
             absorption = 0.0
@@ -246,11 +250,12 @@ class LevelBehaviorTracker:
         for price, bhv in self._behaviors.items():
             if price not in active_prices:
                 stale.append(price)
-            elif (
-                bhv.last_attack_time
-                and (now - bhv.last_attack_time).total_seconds() > max_age_seconds
-            ):
-                stale.append(price)
+            elif bhv.last_attack_time:
+                tz_now = now
+                if bhv.last_attack_time.tzinfo is not None:
+                    tz_now = datetime.now(bhv.last_attack_time.tzinfo)
+                if (tz_now - bhv.last_attack_time).total_seconds() > max_age_seconds:
+                    stale.append(price)
         for price in stale:
             del self._behaviors[price]
 

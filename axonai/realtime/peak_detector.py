@@ -18,10 +18,11 @@ class PeakSignal:
     price_per_tick_efficiency: float  
     divergence_warning: bool          # early signal, fires first
     peak_confirmed: bool              # Rule B — both conditions met
-    peak_confidence: float            # weighted score 0.0–1.0
+    peak_confidence: float            # tick-microstructure weighted score 0.0–1.0
+    swing_confidence: Optional[float] = None  # swing-structure confidence (Rule C only)
 
     def to_dict(self) -> dict:
-        return {
+        d = {
             "peak_type": self.peak_type,
             "direction": self.direction,
             "peak_price": self.peak_price,
@@ -30,15 +31,19 @@ class PeakSignal:
             "price_per_tick_efficiency": self.price_per_tick_efficiency,
             "divergence_warning": self.divergence_warning,
             "peak_confirmed": self.peak_confirmed,
-            "peak_confidence": self.peak_confidence
+            "peak_confidence": self.peak_confidence,
         }
+        if self.swing_confidence is not None:
+            d["swing_confidence"] = self.swing_confidence
+        return d
 
 class PeakDetector:
     """Detects price exhaustion peaks, volume climaxes, price-per-tick efficiency collapses, and velocity divergences."""
 
-    def __init__(self, window_size: int = 50, pip_mult: float = 0.0001):
+    def __init__(self, window_size: int = 50, pip_mult: float = 0.0001, rule_c_enabled: bool = True):
         self.window_size = window_size
         self.pip_mult = pip_mult
+        self.rule_c_enabled = rule_c_enabled
         
         # History buffers
         self.tick_prices: deque[float] = deque(maxlen=window_size)
@@ -87,7 +92,7 @@ class PeakDetector:
         self.buy_velocities.append(buy_vel)
         self.sell_velocities.append(sell_vel)
 
-        if len(self.tick_prices) < 25:
+        if len(self.tick_prices) < min(25, self.window_size):
             return None
 
         # 1. Compute price-per-tick efficiency
@@ -206,6 +211,9 @@ class PeakDetector:
                 )
 
         # Rule C: Fractal local swing peak fallback (wider window + longer cooldown to reduce noise)
+        # Disabled by default — generates excessive noise from tick interpolation artifacts
+        if not self.rule_c_enabled:
+            return None
         prices = list(self.tick_prices)
         if len(prices) >= 11:
             mid_idx = -6
@@ -221,6 +229,10 @@ class PeakDetector:
                 if swing_amplitude_high >= 1.5 * self.pip_mult:  # min 1.5 pip swing
                     if self.last_fired_peak_time is None or (timestamp - self.last_fired_peak_time).total_seconds() > 300:
                         self.last_fired_peak_time = timestamp
+                        # Swing-structure confidence (separate from tick-based peak_confidence)
+                        amp_ratio = swing_amplitude_high / (1.5 * self.pip_mult)
+                        retrace_pct = (mid_val - min(right_side)) / swing_amplitude_high
+                        sc = min(0.3 + 0.4 * min(amp_ratio - 1.0, 1.0) + 0.3 * retrace_pct, 1.0)
                         return PeakSignal(
                             peak_type="local_swing_high",
                             direction="bearish_reversal",
@@ -230,13 +242,18 @@ class PeakDetector:
                             price_per_tick_efficiency=price_per_tick_efficiency,
                             divergence_warning=divergence_warning,
                             peak_confirmed=peak_confirmed,
-                            peak_confidence=peak_confidence
+                            peak_confidence=peak_confidence,
+                            swing_confidence=sc
                         )
                     
             if mid_val < min(left_side) and mid_val < min(right_side):
                 if swing_amplitude_low >= 1.5 * self.pip_mult:  # min 1.5 pip swing
                     if self.last_fired_peak_time is None or (timestamp - self.last_fired_peak_time).total_seconds() > 300:
                         self.last_fired_peak_time = timestamp
+                        # Swing-structure confidence (separate from tick-based peak_confidence)
+                        amp_ratio = swing_amplitude_low / (1.5 * self.pip_mult)
+                        retrace_pct = (max(right_side) - mid_val) / swing_amplitude_low
+                        sc = min(0.3 + 0.4 * min(amp_ratio - 1.0, 1.0) + 0.3 * retrace_pct, 1.0)
                         return PeakSignal(
                             peak_type="local_swing_low",
                             direction="bullish_reversal",
@@ -246,7 +263,8 @@ class PeakDetector:
                             price_per_tick_efficiency=price_per_tick_efficiency,
                             divergence_warning=divergence_warning,
                             peak_confirmed=peak_confirmed,
-                            peak_confidence=peak_confidence
+                            peak_confidence=peak_confidence,
+                            swing_confidence=sc
                         )
 
         return None

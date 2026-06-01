@@ -1,19 +1,18 @@
 from axonai.graph.trading_graph import AxonAIGraph
 from axonai.default_config import DEFAULT_CONFIG
 
-# DEFAULT_CONFIG already applies AXONAI_* env-var overrides
-# (llm_provider, deep_think_llm, quick_think_llm, backend_url, etc.),
-# so users can switch models or endpoints purely via .env without
-# editing this script. Override individual keys here only when you
-# want a hard-coded value that should ignore the environment.
+# Configure data vendors to route to mt5 for price and technical indicators
 config = DEFAULT_CONFIG.copy()
+config["data_vendors"] = {
+    "core_stock_apis": "mt5",
+    "technical_indicators": "mt5",
+    "fundamental_data": "yfinance",
+    "news_data": "yfinance",
+}
 
 # Initialize with custom config
 ta = AxonAIGraph(debug=True, config=config)
 
-# forward propagate
-_, decision = ta.propagate("NVDA", "2024-05-10")
+# forward propagate with EURUSD=X as a forex asset
+_, decision = ta.propagate("EURUSD=X", "2024-05-10", asset_type="forex")
 print(decision)
-
-# Memorize mistakes and reflect
-# ta.reflect_and_remember(1000) # parameter is the position returns

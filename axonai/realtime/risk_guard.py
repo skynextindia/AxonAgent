@@ -22,6 +22,7 @@ class RiskGuard:
         self.max_daily_drawdown_pct = config.get("risk_max_daily_drawdown_pct", 5.0)  # default 5%
         self.max_daily_loss_amount = config.get("risk_max_daily_loss_amount", 500.0) # default $500
         self.risk_pnl_log_file = "reports/daily_pnl.json"
+        self.current_equity = 0.0
         
         # Load daily PnL
         self.daily_pnl = self._load_daily_pnl()
@@ -47,6 +48,7 @@ class RiskGuard:
 
     def update_equity(self, current_equity: float, current_balance: float):
         """Seed daily starting equity on first call of the day."""
+        self.current_equity = current_equity
         if self.daily_pnl["date"] != str(date.today()):
             self.daily_pnl = {"date": str(date.today()), "start_equity": current_equity, "realized_pnl": 0.0}
             self._save_daily_pnl()
@@ -92,3 +94,11 @@ class RiskGuard:
             return True, msg
             
         return False, ""
+
+    @property
+    def is_tripped(self) -> bool:
+        """Helper checking if circuit breaker has tripped."""
+        if not hasattr(self, "current_equity") or self.current_equity == 0.0:
+            return False
+        halted, _ = self.is_halted(self.current_equity)
+        return halted

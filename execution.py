@@ -29,10 +29,21 @@ class TradeRecord:
 
 class ExecutionEngine:
     """Validates trade setups, calculates dynamic risk sizes, and manages broker execution."""
-    def __init__(self, dry_run: bool = False, debug: bool = False):
+    def __init__(self, dry_run: bool = True, debug: bool = False, symbols: Optional[List[str]] = None):
         self.dry_run = dry_run
         self.debug = debug
         self.trades: List[TradeRecord] = []
+        self._pip_value_cache: Dict[str, float] = {}
+        
+        # Pre-cache pip values per symbol dynamically on init (not on every trade)
+        target_symbols = symbols or ["EURUSD", "GBPUSD", "EURUSD=X", "GBPUSD=X"]
+        if not self.dry_run:
+            try:
+                mt5.initialize()
+            except Exception:
+                pass
+        for sym in target_symbols:
+            self._get_pip_value(sym)
 
     def evaluate(self, decision: LLMDecision, context: MarketContext) -> Optional[TradeRecord]:
         """Evaluates entry filters and executes the trade if they all pass."""
@@ -55,27 +66,35 @@ class ExecutionEngine:
         if self._has_open_position(symbol):
             return self._reject(decision, context, f"Already have open position in {symbol}")
 
-        # 2. Position Sizing
-        # Fetch account balance
-        balance = 10000.0  # Default fallback balance
-        if not self.dry_run:
-            acc_info = mt5.account_info()
-            if acc_info is not None:
-                balance = acc_info.balance
-            else:
-                logger.warning("Could not fetch MT5 account info. Using default balance $10,000")
-
-        risk_amount = balance * 0.01
-        
         # Stop loss constraints
         stop_pips = max(10, min(30, decision.max_risk_pips))
-        
-        # Lot size formula
-        # pip_value = $10 per pip per standard lot
-        # lot_size = risk_amount / (stop_pips * 10)
-        lot_size = risk_amount / (stop_pips * 10.0)
-        lot_size = float(int(lot_size * 100)) / 100.0  # Round down to 2 decimal places
-        lot_size = min(0.10, max(0.01, lot_size))       # Hard cap at 0.10 lots, min 0.01
+
+        # 2. Position Sizing
+        # Fetch account balance with robust guard
+        balance = 10000.0  # Default fallback balance
+        use_fallback = False
+
+        if not self.dry_run:
+            try:
+                acc_info = mt5.account_info()
+                if acc_info is not None and getattr(acc_info, "balance", None) is not None and acc_info.balance > 0.0:
+                    balance = acc_info.balance
+                else:
+                    use_fallback = True
+                    logger.warning("MT5 account_info is None or balance is invalid/zero. Falling back to minimum safe lot size 0.01.")
+            except Exception as e:
+                use_fallback = True
+                logger.error("Error fetching MT5 account info: %s. Falling back to minimum safe lot size 0.01.", e)
+
+        if use_fallback:
+            lot_size = 0.01
+        else:
+            risk_amount = balance * 0.01
+            # Dynamic pip value from MT5 broker data (cached per symbol)
+            pip_value = self._get_pip_value(symbol)
+            lot_size = risk_amount / (stop_pips * pip_value)
+            lot_size = float(int(lot_size * 100)) / 100.0  # Round down to 2 decimal places
+            lot_size = min(0.10, max(0.01, lot_size))       # Hard cap at 0.10 lots, min 0.01
 
         # 3. Calculate SL/TP prices
         tick_info = mt5.symbol_info_tick(symbol) if not self.dry_run else None
@@ -186,6 +205,22 @@ class ExecutionEngine:
 
         self.trades.append(record)
         return record
+
+    def _get_pip_value(self, symbol: str) -> float:
+        """Fetch pip value from cache or fallback to $10/pip using dynamic MT5 lookup."""
+        if symbol in self._pip_value_cache:
+            return self._pip_value_cache[symbol]
+        
+        pip_val = 10.0
+        try:
+            if not self.dry_run:
+                symbol_info = mt5.symbol_info(symbol)
+                pip_val = symbol_info.trade_tick_value if symbol_info else 10.0
+        except Exception as e:
+            logger.warning("Failed to fetch pip value for %s: %s. Using fallback $10/pip.", symbol, e)
+            
+        self._pip_value_cache[symbol] = pip_val
+        return pip_val
 
     def _reject(self, decision: LLMDecision, context: MarketContext, reason: str) -> TradeRecord:
         """Helper to log trade rejection reasons."""
