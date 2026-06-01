@@ -531,8 +531,21 @@ class DashboardController {
   }
   updatePipDistances() {
     if(this.currentBid===0)return;
-    if(this.currentRes>0&&this.levelResDist){const d=(this.currentRes-this.currentBid)/this.pipMult;this.levelResDist.textContent=this.sf(d,1)+" Pips"}
-    if(this.currentSup>0&&this.levelSupDist){const d=(this.currentBid-this.currentSup)/this.pipMult;this.levelSupDist.textContent=this.sf(d,1)+" Pips"}
+    let nearRes = false, nearSup = false;
+    let distRes = 0, distSup = 0;
+    if(this.currentRes>0&&this.levelResDist){distRes=(this.currentRes-this.currentBid)/this.pipMult;this.levelResDist.textContent=this.sf(distRes,1)+" Pips"; if(distRes <= 3.0) nearRes = true;}
+    if(this.currentSup>0&&this.levelSupDist){distSup=(this.currentBid-this.currentSup)/this.pipMult;this.levelSupDist.textContent=this.sf(distSup,1)+" Pips"; if(distSup <= 3.0) nearSup = true;}
+    
+    const el = document.getElementById("bhv-placeholder");
+    if(el){
+        if(nearRes){
+            el.innerHTML = '<span style="color:var(--red);font-weight:bold;">TESTING RESISTANCE</span>: Attacking key level at ' + this.sf(this.currentRes,5) + ' (' + this.sf(distRes,1) + ' pips away). Checking absorption...';
+        } else if(nearSup){
+            el.innerHTML = '<span style="color:var(--green);font-weight:bold;">TESTING SUPPORT</span>: Attacking key level at ' + this.sf(this.currentSup,5) + ' (' + this.sf(distSup,1) + ' pips away). Checking rejection...';
+        } else {
+            el.innerHTML = '<span style="color:var(--text-secondary)">CONSOLIDATING</span>: Stable in open space. Next resistance: ' + this.sf(this.currentRes,5) + ' (' + this.sf(distRes,1) + ' pips), Next support: ' + this.sf(this.currentSup,5) + ' (' + this.sf(distSup,1) + ' pips)';
+        }
+    }
   }
   handleAccount(d) {
     this.latestAccountData=d;

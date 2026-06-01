@@ -258,6 +258,34 @@ def get_regime_data(sym):
             else:
                 today_bias = "NEUTRAL"
 
+    # Calculate regime scores
+    trending_score = 0.1
+    ranging_score = 0.1
+    volatile_score = 0.1
+    sideways_score = 0.1
+    
+    if regime == "TRENDING":
+        trending_score = round(abs(belief) + 0.5, 2)
+        sideways_score = round(1.0 - trending_score, 2)
+    elif regime == "VOLATILE":
+        volatile_score = 0.8
+        trending_score = 0.4
+        ranging_score = 0.2
+    elif regime == "RANGING":
+        ranging_score = 0.75
+        sideways_score = 0.4
+        trending_score = 0.2
+    else:
+        sideways_score = 0.85
+        ranging_score = 0.3
+        
+    regime_scores = {
+        "trending": trending_score,
+        "ranging": ranging_score,
+        "volatile": volatile_score,
+        "sideways": sideways_score,
+    }
+
     tick = mt5.symbol_info_tick(sym)
     spread_pips = (tick.ask - tick.bid) * 10000 if tick else 0
 
@@ -265,6 +293,7 @@ def get_regime_data(sym):
         "type": "regime",
         "symbol": sym,
         "dominant": regime,
+        "regime_scores": regime_scores,
         "confidence": round(abs(belief) + 0.3, 2),
         "volatility": volatility,
         "atr": round(atr_val, 5),
