@@ -444,6 +444,7 @@ class DashboardController {
     if(!el) return;
     this.chart = LightweightCharts.createChart(el,{layout:{attributionLogo:false,background:{color:"#000"},textColor:"#00f0ff",fontFamily:'"JetBrains Mono",monospace'},grid:{vertLines:{color:"rgba(255,255,255,.03)"},horzLines:{color:"rgba(255,255,255,.03)"}},crosshair:{vertLine:{color:"rgba(255,255,255,.12)",width:1,style:LightweightCharts.LineStyle.Dashed},horzLine:{color:"rgba(255,255,255,.12)",width:1,style:LightweightCharts.LineStyle.Dashed}},rightPriceScale:{borderColor:"#1f1f2e",scaleMargins:{top:.05,bottom:.05}},timeScale:{borderColor:"#1f1f2e",timeVisible:true,secondsVisible:false,barSpacing:8,minBarSpacing:3,rightOffset:5}});
     this.candleSeries = this.chart.addSeries(LightweightCharts.CandlestickSeries, {upColor:"#00ff66",downColor:"#ff0055",borderUpColor:"#00ff66",borderDownColor:"#ff0055",wickUpColor:"#00ff66",wickDownColor:"#ff0055",priceFormat:{type:"custom",minMove:.00001,formatter:p=>{if(typeof p!=="number")return"";if(p>200)return p.toFixed(2);if(p>50)return p.toFixed(3);return p.toFixed(5)}}});
+    this.chart.timeScale().subscribeVisibleLogicalRangeChange(() => this.drawSessions());
     const ro = new ResizeObserver(entries=>{if(entries[0]&&entries[0].contentRect){const {width,height}=entries[0].contentRect;if(width>0&&height>0){this.chart.resize(width,height);setTimeout(()=>this.drawSessions(),50)}}});ro.observe(el);
   }
   handleCandles(d) {
