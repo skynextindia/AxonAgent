@@ -70,6 +70,24 @@ class TestDaemonE2E(unittest.TestCase):
         inner_evidence.key_levels = [1.15000]
         evidence_inst.snapshot.return_value = inner_evidence
 
+        # Mock symbol info
+        sym = MagicMock()
+        sym.visible = True
+        sym.digits = 5
+        sym.trade_tick_size = 0.00001
+        sym.trade_tick_value = 1.0
+        sym.volume_min = 0.01
+        sym.volume_max = 100.0
+        sym.volume_step = 0.01
+        mock_sym_info.side_effect = lambda s: sym if s == "EURUSDm" else None
+
+        # Mock tick info
+        tick = MagicMock()
+        tick.ask = 1.15005
+        tick.bid = 1.14995
+        tick.time = int(datetime.now().timestamp())
+        mock_tick_info.return_value = tick
+
         # Initialize Daemon
         daemon = AxonDaemon("EURUSD", self.config)
         daemon._start_time = datetime.now()
@@ -85,24 +103,6 @@ class TestDaemonE2E(unittest.TestCase):
             return MagicMock(), "Buy"
             
         graph_inst.execute.side_effect = stop_loop_and_return_buy
-
-        # Mock symbol info
-        sym = MagicMock()
-        sym.visible = True
-        sym.digits = 5
-        sym.trade_tick_size = 0.00001
-        sym.trade_tick_value = 1.0
-        sym.volume_min = 0.01
-        sym.volume_max = 100.0
-        sym.volume_step = 0.01
-        mock_sym_info.return_value = sym
-
-        # Mock tick info
-        tick = MagicMock()
-        tick.ask = 1.15005
-        tick.bid = 1.14995
-        tick.time = int(datetime.now().timestamp())
-        mock_tick_info.return_value = tick
 
         # Mock account info
         acc = MagicMock()

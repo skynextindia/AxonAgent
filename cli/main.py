@@ -1129,7 +1129,13 @@ def run_analysis(
                 content = obj.report_sections[section_name]
                 if content:
                     file_name = f"{section_name}.md"
-                    text = "\n".join(str(item) for item in content) if isinstance(content, list) else content
+                    if isinstance(content, dict):
+                        import json
+                        text = json.dumps(content, indent=4)
+                    elif isinstance(content, list):
+                        text = "\n".join(str(item) for item in content)
+                    else:
+                        text = str(content)
                     with open(report_dir / file_name, "w", encoding="utf-8") as f:
                         f.write(text)
         return wrapper
@@ -1291,9 +1297,11 @@ def run_analysis(
 
         # Streamed chunks are per-node deltas, not full state. Merge them
         # so every report field populated across the run is present.
-        final_state = {}
+        final_state = dict(init_agent_state)
         for chunk in trace:
-            final_state.update(chunk)
+            for node_name, node_val in chunk.items():
+                if isinstance(node_val, dict):
+                    final_state.update(node_val)
         decision = graph.process_signal(final_state["final_trade_decision"])
 
         # Update all agent statuses to completed
@@ -1493,6 +1501,58 @@ def live(
     except KeyboardInterrupt:
         console.print("[bold yellow]Shutting down...[/bold yellow]")
         daemon.stop()
+        
+        # Dry Run Summary
+        try:
+            from axonai.realtime.daemon import generate_session_summary
+            generate_session_summary()
+        except ImportError:
+            pass
+
+
+@app.command()
+def backtest(
+    ticker: str = typer.Option("EURUSD=X", "-t", "--ticker", help="Ticker symbol to backtest"),
+    days: int = typer.Option(5, "-d", "--days", help="Number of historical days to backtest"),
+    non_interactive: bool = typer.Option(False, "-y", "--non-interactive", help="Run without prompts")
+):
+    """Run historical data backtest for candle, peak, reversal, and sweep detections and trigger mock trades."""
+    console.print(f"[bold green]Starting Backtest for {ticker} over {days} days...[/bold green]")
+    
+    from axonai.realtime.backtester import BacktestEngine
+    
+    engine = BacktestEngine(ticker=ticker, days=days)
+    report = engine.run()
+    
+    # Print a beautiful Rich summary table
+    console.print()
+    console.print(Panel(f"[bold cyan]Backtest Performance Results for {ticker}[/bold cyan]", border_style="cyan"))
+    
+    table = Table(show_header=True, header_style="bold magenta", box=box.DOUBLE)
+    table.add_column("Metric", style="dim", width=25)
+    table.add_column("Value", style="green", justify="right", width=20)
+    
+    table.add_row("Total Triggered Trades", str(report["total_trades"]))
+    table.add_row("Wins", f"{report['wins']} \u2705")
+    table.add_row("Losses", f"{report['losses']} \u274c")
+    table.add_row("Win Rate", f"{report['win_rate_percent']}%")
+    table.add_row("Net Profit (Pips)", f"{report['net_profit_pips']:+.1f} pips")
+    table.add_row("Profit Factor", f"{report['profit_factor']}")
+    
+    console.print(table)
+    console.print()
+    
+    # Save the markdown report to disk
+    import datetime
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    report_dir = Path.cwd() / "reports"
+    report_dir.mkdir(exist_ok=True)
+    report_file = report_dir / f"backtest_{ticker.replace('=', '_')}_{timestamp}.md"
+    
+    md_content = engine.generate_markdown_report(report)
+    report_file.write_text(md_content, encoding="utf-8")
+    
+    console.print(f"[green]\u2713 Backtest complete! Detailed report saved to:[/green] [bold]{report_file.resolve()}[/bold]")
 
 if __name__ == "__main__":
     app()

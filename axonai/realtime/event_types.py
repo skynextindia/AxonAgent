@@ -24,6 +24,7 @@ class EventType(Enum):
     CANDLE_PATTERN = "candle_pattern"
     REGIME_SHIFT = "regime_shift"
     MOMENTUM_DIVERGENCE = "momentum_divergence"
+    PEAK_DETECTION = "peak_detection"
 
 
 @dataclass

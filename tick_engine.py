@@ -47,7 +47,9 @@ class SignalState:
     interval_ms: int
     spread_pips: float
     velocity: float
-    imbalance: float
+    imbalance_10s: float
+    imbalance_60s: float
+    imbalance_300s: float
     spread_delta: float
     velocity_collapse: bool
     aggression_shift: bool
@@ -55,7 +57,7 @@ class SignalState:
 
 class TickProcessor:
     """Computes classifications, measurements, and detections from raw ticks."""
-    def __init__(self, max_history: int = 3000):
+    def __init__(self, max_history: int = 15000):
         self.history: deque[Tick] = deque(maxlen=max_history)
         self._lock = threading.Lock()
         self.last_signal_state: Optional[SignalState] = None
@@ -69,6 +71,12 @@ class TickProcessor:
             prev_tick = self.history[-1] if self.history else None
             self.history.append(tick)
 
+            # Prune ticks older than 300 seconds (300,000 ms) to keep buffers small and O(1) clean
+            current_time_ms = tick.time_ms
+            cutoff_300s = current_time_ms - 300000
+            while self.history and self.history[0].time_ms < cutoff_300s:
+                self.history.popleft()
+
             # Classify
             direction = "flat"
             interval_ms = 100
@@ -81,11 +89,40 @@ class TickProcessor:
 
             spread_pips = tick.spread / 0.0001
 
-            # Measure (simple rolling calculations)
-            recent = list(self.history)[-50:]
-            if len(recent) > 1:
-                price_changes = sum(abs(recent[i].mid - recent[i-1].mid) for i in range(1, len(recent)))
-                time_span = max(1, recent[-1].time_ms - recent[0].time_ms) / 1000.0
+            # Get windows efficiently from the right (since history is sorted)
+            cutoff_10s = current_time_ms - 10000
+            cutoff_30s = current_time_ms - 30000
+            cutoff_60s = current_time_ms - 60000
+
+            history_list = list(self.history)
+            n_ticks = len(history_list)
+
+            # Scan from the right to find the index boundaries (extremely fast O(K))
+            idx_10s = n_ticks - 1
+            while idx_10s >= 0 and history_list[idx_10s].time_ms >= cutoff_10s:
+                idx_10s -= 1
+            idx_10s += 1
+
+            idx_30s = n_ticks - 1
+            while idx_30s >= 0 and history_list[idx_30s].time_ms >= cutoff_30s:
+                idx_30s -= 1
+            idx_30s += 1
+
+            idx_60s = n_ticks - 1
+            while idx_60s >= 0 and history_list[idx_60s].time_ms >= cutoff_60s:
+                idx_60s -= 1
+            idx_60s += 1
+
+            recent_10s = history_list[idx_10s:]
+            recent_30s = history_list[idx_30s:]
+            recent_60s = history_list[idx_60s:]
+            recent_300s = history_list
+
+            # Measure (rolling time-based calculations)
+            # Use last 10 seconds for velocity and imbalance calculations
+            if len(recent_10s) > 1:
+                price_changes = sum(abs(recent_10s[i].mid - recent_10s[i-1].mid) for i in range(1, len(recent_10s)))
+                time_span = max(1, recent_10s[-1].time_ms - recent_10s[0].time_ms) / 1000.0
                 raw_velocity = price_changes / time_span if time_span > 0 else 0.0
                 velocity = raw_velocity / 0.0001
             else:
@@ -94,10 +131,26 @@ class TickProcessor:
             # Store velocity for rolling average calculations
             self.velocity_history.append(velocity)
 
-            # Imbalance score: simple volume pressure or price-movement based asymmetry
-            buys = sum(1 for i in range(1, len(recent)) if recent[i].mid > recent[i-1].mid)
-            sells = sum(1 for i in range(1, len(recent)) if recent[i].mid < recent[i-1].mid)
-            imbalance = float(buys) / max(1.0, float(sells))
+            # Imbalance score: normalized buy vs sell volume (-1.0 to 1.0)
+            # Weighting volume by absolute price difference to correctly reflect momentum breakouts
+            def calc_imbalance(window):
+                if len(window) < 2:
+                    return 0.0
+                buy_vol = 0.0
+                sell_vol = 0.0
+                for i in range(1, len(window)):
+                    diff = window[i].mid - window[i-1].mid
+                    vol = max(1.0, float(window[i].volume))
+                    if diff > 0:
+                        buy_vol += vol * diff
+                    elif diff < 0:
+                        sell_vol += vol * abs(diff)
+                total = buy_vol + sell_vol
+                return (buy_vol - sell_vol) / total if total > 0 else 0.0
+
+            imbalance_10s = calc_imbalance(recent_10s)
+            imbalance_60s = calc_imbalance(recent_60s)
+            imbalance_300s = calc_imbalance(recent_300s)
 
             spread_delta = tick.spread - (prev_tick.spread if prev_tick else tick.spread)
 
@@ -108,12 +161,26 @@ class TickProcessor:
 
             # Aggression shift: buy/sell pressure flipped rapidly
             aggression_shift = False
-            if len(self.history) > 10:
-                old_imbalance = sum(1 for t in list(self.history)[-20:-10] if t.mid > prev_tick.mid) / max(1, sum(1 for t in list(self.history)[-20:-10] if t.mid < prev_tick.mid))
-                aggression_shift = (imbalance > 2.0 and old_imbalance < 0.5) or (imbalance < 0.5 and old_imbalance > 2.0)
+            if n_ticks > 10:
+                cutoff_old_start = current_time_ms - 20000
+                cutoff_old_end = current_time_ms - 10000
+                
+                idx_old_start = n_ticks - 1
+                while idx_old_start >= 0 and history_list[idx_old_start].time_ms >= cutoff_old_start:
+                    idx_old_start -= 1
+                idx_old_start += 1
 
-            # Absorption: high volume/velocity but low actual price movement
-            absorption = len(recent) >= 20 and velocity > 0.01 and abs(recent[-1].mid - recent[0].mid) < 0.0001
+                idx_old_end = n_ticks - 1
+                while idx_old_end >= 0 and history_list[idx_old_end].time_ms > cutoff_old_end:
+                    idx_old_end -= 1
+                idx_old_end += 1
+
+                old_window = history_list[idx_old_start:idx_old_end]
+                old_imbalance = calc_imbalance(old_window)
+                aggression_shift = (imbalance_10s > 0.5 and old_imbalance < -0.5) or (imbalance_10s < -0.5 and old_imbalance > 0.5)
+
+            # Absorption: high volume/velocity but low actual price movement over the last 30 seconds
+            absorption = len(recent_30s) >= 10 and velocity > 0.01 and abs(recent_30s[-1].mid - recent_30s[0].mid) < 0.0001
 
             state = SignalState(
                 timestamp_ms=tick.time_ms,
@@ -126,7 +193,9 @@ class TickProcessor:
                 interval_ms=interval_ms,
                 spread_pips=spread_pips,
                 velocity=velocity,
-                imbalance=imbalance,
+                imbalance_10s=imbalance_10s,
+                imbalance_60s=imbalance_60s,
+                imbalance_300s=imbalance_300s,
                 spread_delta=spread_delta,
                 velocity_collapse=velocity_collapse,
                 aggression_shift=aggression_shift,
@@ -148,8 +217,8 @@ class DecisionEngine:
 
     def evaluate(self, candle_snapshot, signal: SignalState) -> Optional[ConfirmedSignal]:
         # Basic heuristic for pre-confirmation
-        if signal.imbalance > 3.0:
+        if signal.imbalance_10s > 0.8 and signal.imbalance_60s > 0.5:
             return ConfirmedSignal(direction="long", confidence=0.8)
-        elif signal.imbalance < 0.33:
+        elif signal.imbalance_10s < -0.8 and signal.imbalance_60s < -0.5:
             return ConfirmedSignal(direction="short", confidence=0.8)
         return None

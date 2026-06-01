@@ -23,6 +23,7 @@ class MT5TradeExecutor:
         self.deviation = config.get("realtime_deviation", 20)
         self.default_lot_size = config.get("realtime_default_lot_size", 0.01)
         self.risk_guard = RiskGuard(config)
+        self.circuit_breaker = self.risk_guard
 
     def execute_signal(self, symbol: str, signal: str, live_state: Optional[Any] = None) -> Optional[dict]:
         """Convert a 5-tier signal into an MT5 order action.
@@ -38,11 +39,10 @@ class MT5TradeExecutor:
             acc = mt5.account_info()
             if acc:
                 self.risk_guard.update_equity(acc.equity, acc.balance)
-                halted, reason = self.risk_guard.is_halted(acc.equity)
-                if halted:
-                    logger.error("TradeExecutor: Risk circuit breaker active: %s. Order rejected.", reason)
-                    send_alert(f"Risk Circuit Breaker Active: {reason}. Trade rejected.", self.config)
-                    return {"retcode": -1, "comment": f"RiskGuard halted: {reason}", "order": 0}
+
+        if self.circuit_breaker.is_tripped:
+            logger.warning("CIRCUIT BREAKER ACTIVE — trade rejected")
+            return {"success": False, "reason": "circuit_breaker_tripped"}
 
         if signal in ["Buy", "Overweight"]:
             return self.send_order(symbol, mt5.ORDER_TYPE_BUY, live_state)
@@ -108,40 +108,15 @@ class MT5TradeExecutor:
             atr = price * 0.0015  # default to 0.15% of price
             logger.info("TradeExecutor: ATR unavailable. Using fallback value: %.5f", atr)
 
-        # 2. Calculate ATR-based Stop Loss & Take Profit
-        sl_mult = self.config.get("realtime_sl_atr_multiplier", 1.5)
-        tp_mult = self.config.get("realtime_tp_atr_multiplier", 3.0)
-
-        if order_type == mt5.ORDER_TYPE_BUY:
-            sl = price - (atr * sl_mult)
-            tp = price + (atr * tp_mult)
-        else:
-            sl = price + (atr * sl_mult)
-            tp = price - (atr * tp_mult)
-
-        # --- Institutional Psychology & Sweep Safety Check ---
+        # 2. Calculate ATR-based Stop Loss & Take Profit exactly as requested
+        entry = price
+        direction = "BUY" if order_type == mt5.ORDER_TYPE_BUY else "SELL"
         pip = 0.01 if "JPY" in symbol.upper() else 0.0001
-        pip50 = 50 * pip
+        atr_pips = atr / pip
+        atr_price = atr_pips * 0.0001
         
-        # Adjust Stop Loss to avoid being swept at key round levels
-        nearest_round_sl = round(sl / pip50) * pip50
-        if abs(sl - nearest_round_sl) <= 3 * pip:
-            if order_type == mt5.ORDER_TYPE_BUY:
-                sl = nearest_round_sl - 5 * pip
-                logger.info("TradeExecutor: Adjusted Buy SL below round level %.5f to %.5f", nearest_round_sl, sl)
-            else:
-                sl = nearest_round_sl + 5 * pip
-                logger.info("TradeExecutor: Adjusted Sell SL above round level %.5f to %.5f", nearest_round_sl, sl)
-                
-        # Adjust Take Profit to sit conservatively before psychological support/resistance
-        nearest_round_tp = round(tp / pip50) * pip50
-        if abs(tp - nearest_round_tp) <= 3 * pip:
-            if order_type == mt5.ORDER_TYPE_BUY:
-                tp = nearest_round_tp - 3 * pip
-                logger.info("TradeExecutor: Adjusted Buy TP below round level %.5f to %.5f", nearest_round_tp, tp)
-            else:
-                tp = nearest_round_tp + 3 * pip
-                logger.info("TradeExecutor: Adjusted Sell TP above round level %.5f to %.5f", nearest_round_tp, tp)
+        sl = entry - (2 * atr_price) if direction == "BUY" else entry + (2 * atr_price)
+        tp = entry + (4 * atr_price) if direction == "BUY" else entry - (4 * atr_price)
 
         # Format price to correct number of digits
         digits = getattr(symbol_info, "digits", 5)
@@ -151,50 +126,27 @@ class MT5TradeExecutor:
         tp = round(tp, digits)
         price = round(price, digits)
 
-        # 3. Dynamic Position Sizing based on Account Equity & Risk Percentage
-        lot = self.default_lot_size
+        # 3. Dynamic Position Sizing based on Account Equity & Risk Percentage exactly as requested
         acc = mt5.account_info()
         is_mock_env = self.config.get("realtime_dry_run", False)
+        
         if acc and not is_mock_env:
-            risk_pct = self.config.get("realtime_risk_pct", 1.0)
-            risk_amount = acc.equity * (risk_pct / 100.0)
+            account_equity = acc.equity if acc else 10000.0
+            risk_pct = self.config.get("realtime_risk_pct", 0.01)  # risk_pct from config default 0.01
+            risk_amount = account_equity * risk_pct
+            sl_pips = atr_pips * 2
+            lot_size = round(risk_amount / (sl_pips * 0.10), 2)
+            lot_size = max(0.01, min(lot_size, 0.10))  # hard limits
+            lot = lot_size
             
-            sl_points = abs(price - sl)
-            
-            tick_size = getattr(symbol_info, "trade_tick_size", 0.0)
-            if not isinstance(tick_size, (int, float)) or tick_size <= 0:
-                tick_size = 10 ** (-digits)
-                
-            tick_value = getattr(symbol_info, "trade_tick_value", 0.0)
-            if not isinstance(tick_value, (int, float)) or tick_value <= 0:
-                tick_value = 1.0
-            
-            sl_ticks = sl_points / tick_size
-            if sl_ticks > 0 and tick_value > 0:
-                calculated_lot = risk_amount / (sl_ticks * tick_value)
-                
-                # Respect MT5 symbol lot limits and steps
-                min_volume = getattr(symbol_info, "volume_min", 0.01)
-                if not isinstance(min_volume, (int, float)):
-                    min_volume = 0.01
-                    
-                max_volume = getattr(symbol_info, "volume_max", 100.0)
-                if not isinstance(max_volume, (int, float)):
-                    max_volume = 100.0
-                    
-                volume_step = getattr(symbol_info, "volume_step", 0.01)
-                if not isinstance(volume_step, (int, float)) or volume_step <= 0:
-                    volume_step = 0.01
-                
-                lot = round(calculated_lot / volume_step) * volume_step
-                lot = max(min_volume, min(max_volume, lot))
-                lot = round(lot, 2)
-                
-                logger.info(
-                    "TradeExecutor: Account equity: %.2f | Risk amount: %.2f | "
-                    "SL points: %.5f | Calculated lot: %.4f | Final lot: %.2f",
-                    acc.equity, risk_amount, sl_points, calculated_lot, lot
-                )
+            logger.info(
+                "TradeExecutor: Account equity: %.2f | Risk amount: %.2f | "
+                "SL pips: %.2f | Calculated lot: %.4f | Final lot: %.2f",
+                account_equity, risk_amount, sl_pips, lot_size, lot
+            )
+        else:
+            lot = self.default_lot_size
+            logger.info("TradeExecutor: Using default lot size: %.2f", lot)
 
         # Prepare request
         request = {

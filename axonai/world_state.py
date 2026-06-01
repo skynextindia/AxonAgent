@@ -162,30 +162,26 @@ def build_world_state(symbol: str = "EURUSD=X") -> WorldState:
         # 3. Session and Timings (UTC-based)
         now_utc = datetime.now(timezone.utc)
         utc_hour = now_utc.hour + now_utc.minute / 60.0
-        year = now_utc.year
+        from zoneinfo import ZoneInfo
+        ldn_tz = ZoneInfo("Europe/London")
+        ny_tz = ZoneInfo("America/New_York")
         
-        # New York DST (EDT: 2nd Sunday in March to 1st Sunday in November)
-        dst_start_us = datetime(year, 3, 8)
-        while dst_start_us.weekday() != 6:
-            dst_start_us += timedelta(days=1)
-        dst_end_us = datetime(year, 11, 1)
-        while dst_end_us.weekday() != 6:
-            dst_end_us += timedelta(days=1)
-        is_us_dst = dst_start_us.date() <= now_utc.date() < dst_end_us.date()
-
-        # London DST (BST: Last Sunday in March to Last Sunday in October)
-        dst_start_eu = datetime(year, 3, 31)
-        while dst_start_eu.weekday() != 6:
-            dst_start_eu -= timedelta(days=1)
-        dst_end_eu = datetime(year, 10, 31)
-        while dst_end_eu.weekday() != 6:
-            dst_end_eu -= timedelta(days=1)
-        is_eu_dst = dst_start_eu.date() <= now_utc.date() < dst_end_eu.date()
-
-        ldn_open = 7.0 if is_eu_dst else 8.0
-        ldn_close = 15.0 if is_eu_dst else 16.0
-        ny_open = 12.0 if is_us_dst else 13.0
-        ny_close = 20.0 if is_us_dst else 21.0
+        dt_ldn = now_utc.astimezone(ldn_tz)
+        ldn_open_local = datetime(dt_ldn.year, dt_ldn.month, dt_ldn.day, 8, 0, tzinfo=ldn_tz)
+        ldn_close_local = datetime(dt_ldn.year, dt_ldn.month, dt_ldn.day, 16, 0, tzinfo=ldn_tz)
+        ldn_open_utc = ldn_open_local.astimezone(timezone.utc)
+        ldn_close_utc = ldn_close_local.astimezone(timezone.utc)
+        
+        dt_ny = now_utc.astimezone(ny_tz)
+        ny_open_local = datetime(dt_ny.year, dt_ny.month, dt_ny.day, 8, 0, tzinfo=ny_tz)
+        ny_close_local = datetime(dt_ny.year, dt_ny.month, dt_ny.day, 14, 0, tzinfo=ny_tz)
+        ny_open_utc = ny_open_local.astimezone(timezone.utc)
+        ny_close_utc = ny_close_local.astimezone(timezone.utc)
+        
+        ldn_open = ldn_open_utc.hour + ldn_open_utc.minute / 60.0
+        ldn_close = ldn_close_utc.hour + ldn_close_utc.minute / 60.0
+        ny_open = ny_open_utc.hour + ny_open_utc.minute / 60.0
+        ny_close = ny_close_utc.hour + ny_close_utc.minute / 60.0
         
         # Session classification based on dynamic hours
         if ny_open <= utc_hour < ldn_close:

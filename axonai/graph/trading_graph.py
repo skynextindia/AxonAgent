@@ -371,9 +371,31 @@ class AxonAIGraph:
                 trace.append(chunk)
             # Streamed chunks are per-node deltas. Merge them so the returned
             # state matches what graph.invoke() yields in the non-debug path.
-            final_state = {}
+            from axonai.agents.utils.agent_states import merge_debate_state, merge_risk_state
+            from langchain_core.messages import RemoveMessage
+            final_state = dict(init_agent_state)
             for chunk in trace:
-                final_state.update(chunk)
+                for node_name, node_val in chunk.items():
+                    if isinstance(node_val, dict):
+                        for k, v in node_val.items():
+                            if k == "messages":
+                                current_msgs = list(final_state.get("messages", []))
+                                for msg in v:
+                                    if isinstance(msg, RemoveMessage):
+                                        current_msgs = [m for m in current_msgs if not hasattr(m, "id") or m.id != msg.id]
+                                    else:
+                                        current_msgs.append(msg)
+                                final_state["messages"] = current_msgs
+                            elif k == "investment_debate_state":
+                                final_state["investment_debate_state"] = merge_debate_state(
+                                    final_state.get("investment_debate_state"), v
+                                )
+                            elif k == "risk_debate_state":
+                                final_state["risk_debate_state"] = merge_risk_state(
+                                    final_state.get("risk_debate_state"), v
+                                )
+                            else:
+                                final_state[k] = v
         else:
             final_state = self.graph.invoke(init_agent_state, **args)
 

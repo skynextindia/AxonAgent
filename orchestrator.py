@@ -4,7 +4,9 @@ import os
 import sys
 import time
 import logging
+import threading
 from typing import List, Dict, Optional
+from concurrent.futures import ThreadPoolExecutor
 import MetaTrader5 as mt5
 
 # Ensure local path takes priority for imports
@@ -16,6 +18,7 @@ from market_state import MarketStateMachine, StateTransition
 from market_context import MarketContextBuilder
 from llm_bridge import LLMBridge
 from execution import ExecutionEngine
+from macro_bridge import MacroBridge
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +42,8 @@ class TradingOrchestrator:
         self.state_machines = {s: MarketStateMachine(debug=debug) for s in symbols}
         self.context_builder = MarketContextBuilder()
         self.llm = LLMBridge(api_key=api_key, debug=debug)
-        self.execution = ExecutionEngine(dry_run=dry_run, debug=debug)
+        self.execution = ExecutionEngine(dry_run=dry_run, debug=debug, symbols=symbols)
+        self.macro_bridge = MacroBridge(reports_dir="reports")
         
         # Receiver needs to be initialized with original symbol list
         self.receiver = TickReceiver(symbols, debug=debug)
@@ -48,13 +52,28 @@ class TradingOrchestrator:
         self.receiver.buffers = self.buffers
         self.receiver.processors = self.processors
         
+        # Thread pool executor for non-blocking LLM queries
+        self.executor = ThreadPoolExecutor(max_workers=5)
+        
         # Register callbacks for each symbol
         for symbol in symbols:
             self.receiver.register_callback(symbol, self._make_callback(symbol))
 
+        # Instantiate PeakDetector for each symbol
+        from axonai.realtime.peak_detector import PeakDetector
+        self.peak_detectors = {s: PeakDetector(pip_mult=0.01 if "JPY" in s.upper() else 0.0001) for s in symbols}
+        self.latest_peak_signals = {s: None for s in symbols}
+
         # Capture transitions for status reporting
         self.transition_log: List[StateTransition] = []
         self.dashboard = None
+        self._last_gate_status = {}
+
+        # Background MT5 account poller (avoids blocking tick callback)
+        self._cached_account_info: Optional[mt5.AccountInfo] = None
+        self._cached_positions: List = []
+        self._poller_stop = threading.Event()
+        self._poller_thread = threading.Thread(target=self._account_poller, daemon=True, name="mt5-account-poller")
 
     @property
     def mt5_symbol(self) -> str:
@@ -156,27 +175,41 @@ class TradingOrchestrator:
             "price_levels": levels
         }
 
+    def _account_poller(self):
+        """Background thread: polls MT5 account/positions every 5 seconds."""
+        while not self._poller_stop.is_set():
+            try:
+                acc = mt5.account_info()
+                if acc:
+                    self._cached_account_info = acc
+                
+                positions = mt5.positions_get(symbol=self.mt5_symbol)
+                if positions is not None:
+                    self._cached_positions = list(positions)
+            except Exception as e:
+                logger.warning("Background MT5 account poll failed: %s", e)
+            self._poller_stop.wait(5.0)
+
     def _get_account_payload(self) -> Optional[dict]:
-        acc = mt5.account_info()
+        """Returns cached account payload (built dynamically from cached background properties)."""
+        acc = self._cached_account_info
         if not acc:
             return None
-        
-        positions = mt5.positions_get(symbol=self.mt5_symbol)
+
         pos_list = []
-        if positions:
-            for p in positions:
-                pos_list.append({
-                    "ticket": int(p.ticket),
-                    "symbol": p.symbol,
-                    "type": "BUY" if p.type == mt5.POSITION_TYPE_BUY else "SELL",
-                    "volume": float(p.volume),
-                    "price_open": float(p.price_open),
-                    "price_current": float(p.price_current),
-                    "sl": float(p.sl),
-                    "tp": float(p.tp),
-                    "profit": float(p.profit)
-                })
-        
+        for p in self._cached_positions:
+            pos_list.append({
+                "ticket": int(p.ticket),
+                "symbol": p.symbol,
+                "type": "BUY" if p.type == mt5.POSITION_TYPE_BUY else "SELL",
+                "volume": float(p.volume),
+                "price_open": float(p.price_open),
+                "price_current": float(p.price_current),
+                "sl": float(p.sl),
+                "tp": float(p.tp),
+                "profit": float(p.profit)
+            })
+
         return {
             "type": "account",
             "balance": acc.balance,
@@ -229,6 +262,17 @@ class TradingOrchestrator:
         tick_agg_shift = last_state.aggression_shift if last_state else False
         tick_absorption = last_state.absorption if last_state else False
 
+        # Macro Consensus (System 2)
+        macro_bias = "HOLD"
+        macro_conf = 0.0
+        macro_level = 0.0
+        if hasattr(self, "macro_bridge") and self.macro_bridge:
+            macro_state = self.macro_bridge.get_latest_bias(symbol)
+            if macro_state:
+                macro_bias = macro_state.get("bias", "HOLD")
+                macro_conf = float(macro_state.get("confidence", 0.0))
+                macro_level = float(macro_state.get("key_level", 0.0))
+
         return {
             "type": "regime",
             "symbol": symbol,
@@ -268,8 +312,11 @@ class TradingOrchestrator:
             "tick_imbalance": tick_imbalance,
             "tick_spread_delta": tick_spread_delta,
             "tick_collapse": tick_collapse,
-            "tick_agg_shift": tick_agg_shift,
-            "tick_absorption": tick_absorption
+            # --- Macro Consensus & Gates ---
+            "macro_bias": macro_bias,
+            "macro_confidence": macro_conf,
+            "macro_key_level": macro_level,
+            "gate_status": self._last_gate_status,
         }
 
     def _make_callback(self, symbol: str):
@@ -306,12 +353,21 @@ class TradingOrchestrator:
                 if acc:
                     self.dashboard.broadcast(acc)
 
+        # Update PeakDetector on every tick
+        from datetime import datetime, timezone
+        t = datetime.fromtimestamp(signal.timestamp_ms / 1000.0, tz=timezone.utc).replace(tzinfo=None)
+        peak_res = self.peak_detectors[symbol].update(signal.mid, t)
+        if peak_res is not None:
+            self.latest_peak_signals[symbol] = peak_res
+
         # Update State Machine
         transition = self.state_machines[symbol].update(signal)
         
         if transition:
             self.transition_log.append(transition)
-            context = self.context_builder.build(symbol, signal, self.state_machines[symbol])
+            if len(self.transition_log) > 500:
+                self.transition_log = self.transition_log[-500:]
+            context = self.context_builder.build(symbol, signal, self.state_machines[symbol], peak_signal=self.latest_peak_signals.get(symbol), macro_bridge=self.macro_bridge)
             
             # Broadcast state transition event to WebUI
             if self.dashboard:
@@ -339,7 +395,16 @@ class TradingOrchestrator:
                     "timestamp": time.strftime("%H:%M:%S")
                 })
             
-            if self.llm.should_query(transition, context):
+            should_run, gate_status = self.llm.should_query(transition, context)
+            self._last_gate_status = gate_status
+            
+            if should_run:
+                # Enforce state_confidence > 0.75 rule (Audit Fix 3)
+                if transition.confidence <= 0.75:
+                    logger.info("SKIPPED transition: state_confidence %.2f is <= 0.75 threshold", transition.confidence)
+                    self._log_transition_event(symbol, transition, context)
+                    return
+
                 logger.info("High-value transition detected for %s. Querying LLM...", symbol)
                 
                 if self.dashboard:
@@ -352,34 +417,95 @@ class TradingOrchestrator:
                         "timestamp": time.strftime("%H:%M:%S")
                     })
                 
-                decision = self.llm.query(transition, context)
+                # Submit to thread pool executor to avoid blocking the tick receiver polling loop
+                self.executor.submit(self._execute_llm_decision_flow, symbol, transition, context, signal)
+            else:
+                # Log transition event directly if no LLM query is triggered
+                self._log_transition_event(symbol, transition, context)
+
+    def _log_transition_event(self, symbol: str, transition, context, decision=None, executed=False):
+        """Persistently log every StateTransition and LLMDecision to logs/transitions_{date}.jsonl."""
+        import json
+        from datetime import datetime
+        try:
+            os.makedirs("logs", exist_ok=True)
+            date_str = datetime.now().strftime("%Y%m%d")
+            log_file = os.path.join("logs", f"transitions_{date_str}.jsonl")
+            
+            # Serialize objects safely
+            context_dict = {}
+            if context:
+                from dataclasses import asdict
+                context_dict = asdict(context)
+
+            transition_dict = {
+                "from_state": transition.from_state,
+                "to_state": transition.to_state,
+                "confidence": transition.confidence,
+                "timestamp_ms": transition.timestamp_ms
+            } if transition else {}
+
+            decision_dict = {
+                "action": decision.action,
+                "confidence": decision.confidence,
+                "reasoning": decision.reasoning,
+                "invalidation": decision.invalidation,
+                "max_risk_pips": decision.max_risk_pips
+            } if decision else None
+
+            log_record = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
+                "symbol": symbol,
+                "transition": transition_dict,
+                "context": context_dict,
+                "decision": decision_dict,
+                "executed": executed
+            }
+
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(log_record) + "\n")
+        except Exception as e:
+            logger.error("Failed to write to transition log file: %s", e, exc_info=True)
+
+    def _execute_llm_decision_flow(self, symbol: str, transition, context, signal):
+        """Asynchronously executes the LLM query and the subsequent order evaluation."""
+        try:
+            decision = self.llm.query(transition, context)
+            
+            if self.dashboard:
+                self.dashboard.broadcast({
+                    "type": "agent",
+                    "agent_name": "DRUCKENMILLER",
+                    "status": "completed",
+                    "message": f"Strategic Analysis: {decision.reasoning}\nMax Risk Pips: {decision.max_risk_pips}",
+                    "tool_calls": [],
+                    "timestamp": time.strftime("%H:%M:%S")
+                })
                 
+            # Execute order
+            executed = False
+            record = self.execution.evaluate(decision, context)
+            if record and record.executed:
+                executed = True
                 if self.dashboard:
                     self.dashboard.broadcast({
-                        "type": "agent",
-                        "agent_name": "DRUCKENMILLER",
-                        "status": "completed",
-                        "message": f"Strategic Analysis: {decision.reasoning}\nMax Risk Pips: {decision.max_risk_pips}",
-                        "tool_calls": [],
-                        "timestamp": time.strftime("%H:%M:%S")
+                        "type": "decision",
+                        "signal": "BUY" if decision.action == "long" else "SELL",
+                        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
                     })
-                    
-                # Execute order
-                record = self.execution.evaluate(decision, context)
-                if record and record.executed:
-                    if self.dashboard:
-                        self.dashboard.broadcast({
-                            "type": "decision",
-                            "signal": "BUY" if decision.action == "long" else "SELL",
-                            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-                        })
-                        acc = self._get_account_payload()
-                        if acc:
-                            self.dashboard.broadcast(acc)
+                    acc = self._get_account_payload()
+                    if acc:
+                        self.dashboard.broadcast(acc)
+            
+            # Log transition, context, and decision details
+            self._log_transition_event(symbol, transition, context, decision, executed)
+        except Exception as e:
+            logger.error("Error in async LLM decision flow for %s: %s", symbol, e, exc_info=True)
 
     def start(self):
         """Start the live trading orchestrator and the WebSocket dashboard server."""
         logger.info("Starting TradingOrchestrator...")
+        self._poller_thread.start()
         self.receiver.start()
         
         # Align symbol lists in case receiver resolved suffixes
@@ -418,7 +544,11 @@ class TradingOrchestrator:
     def stop(self):
         """Clean shutdown of all orchestrator systems."""
         logger.info("Stopping TradingOrchestrator...")
+        self._poller_stop.set()
+        if self._poller_thread.is_alive():
+            self._poller_thread.join(timeout=3)
         self.receiver.stop()
+        self.executor.shutdown(wait=False)
 
     def status(self) -> dict:
         """Returns the current runtime status report."""

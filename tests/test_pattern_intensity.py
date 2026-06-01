@@ -356,3 +356,75 @@ def test_backfill_historical_events():
 
     assert has_pin_bar, "Bullish pin bar should be detected and broadcast historically"
 
+
+def test_sweep_detection():
+    # 1. Setup mocks
+    mock_state = MagicMock(spec=LiveWorldState)
+    mock_state.symbol = "EURUSD=X"
+    mock_state.is_initialized = True
+    
+    mock_inner_state = MagicMock()
+    mock_inner_state.session = "LDN"
+    mock_inner_state.session_penalty = 1.0
+    mock_inner_state.atr_14_h1 = 0.00100 # 10 pips ATR
+    mock_state._state = mock_inner_state
+
+    mock_evidence = MagicMock(spec=LiveMarketEvidence)
+    # A swing high is located at 1.15000, swing low at 1.14000
+    mock_evidence.swing_highs = [{"price": 1.15000}]
+    mock_evidence.swing_lows = [{"price": 1.14000}]
+    mock_evidence._m15_candles = []
+    mock_evidence._level_tracker = MagicMock()
+
+    # A candle that wicks above 1.15000 to 1.15005 (pierces by 5 pips, which is < ATR 10 pips)
+    # but closes at 1.14980 (closes back inside)
+    candle = LiveCandle(
+        timeframe="M15",
+        open_time=datetime.now(),
+        open=1.14950,
+        high=1.15005,
+        low=1.14940,
+        close=1.14980,
+        volume=100,
+        is_closed=True
+    )
+
+    event_q = queue.Queue()
+    config = {
+        "realtime_cooldown_seconds": 300,
+        "realtime_suppress_asian": False,
+        "realtime_log_events": False
+    }
+
+    detector = EventDetector(mock_state, mock_evidence, event_q, config)
+    detector.set_pip_multiplier(is_jpy=False)
+
+    # Act - trigger check
+    detector._check_sweep(candle)
+    
+    # Confirm the sweep in Phase 2
+    from datetime import timedelta
+    confirming_candle = LiveCandle(
+        timeframe="M15",
+        open_time=candle.open_time + timedelta(minutes=15),
+        open=1.14980,
+        high=1.15000,
+        low=1.14850,
+        close=1.14900,  # close < open, bearish confirmation
+        volume=100,
+        is_closed=True
+    )
+    detector._check_sweep(confirming_candle)
+
+    # Assertions
+    assert not event_q.empty()
+    event = event_q.get()
+    
+    assert event.event_type == EventType.SWEEP_DETECTED
+    assert event.priority == EventPriority.HIGH
+    assert event.details["swept_level"] == 1.15000
+    assert event.details["direction"] == "bearish_sweep"
+    assert event.details["pierce_pips"] == pytest.approx(0.00005 / 0.0001)
+
+
+

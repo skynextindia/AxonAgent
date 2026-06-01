@@ -109,7 +109,14 @@ def _to_mt5_symbol(yf_symbol: str, config: Optional[dict] = None) -> str:
             from axonai.dataflows.config import get_config
             cfg = config or get_config()
             config_suffix = cfg.get("mt5_symbol_suffix", "m")
+            if config_suffix and config_suffix.lower() == "none":
+                config_suffix = ""
             
+            # Try base as-is first (handles EURUSDm passed directly)
+            info = _mt5.symbol_info(base)
+            if info is not None:
+                return base
+
             suffixes_to_try = [config_suffix, "", "m", "_i", ".pro", "_ecn"]
             # Filter duplicates but keep order
             seen = set()
@@ -117,6 +124,8 @@ def _to_mt5_symbol(yf_symbol: str, config: Optional[dict] = None) -> str:
             
             for suffix in suffixes_to_try:
                 candidate = base + suffix
+                if candidate == base:
+                    continue  # already tried above
                 info = _mt5.symbol_info(candidate)
                 if info is not None:
                     return candidate
@@ -127,6 +136,11 @@ def _to_mt5_symbol(yf_symbol: str, config: Optional[dict] = None) -> str:
     from axonai.dataflows.config import get_config
     cfg = config or get_config()
     suffix = cfg.get("mt5_symbol_suffix", "m")
+    if suffix and suffix.lower() == "none":
+        suffix = ""
+    # Don't double-suffix if base already ends with the suffix
+    if suffix and base.endswith(suffix):
+        return base
     return base + suffix
 
 
