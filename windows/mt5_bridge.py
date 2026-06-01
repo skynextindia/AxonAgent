@@ -348,6 +348,11 @@ def get_candles_data(sym, timeframe="M15", count=100):
 def get_levels_data(sym):
     """Compute support/resistance levels from M15/H1 data."""
     levels = []
+    
+    # Fetch current price for dynamic Role Reversals (S/R flips)
+    tick = mt5.symbol_info_tick(sym)
+    current_price = tick.bid if tick else None
+    
     for tf_name, tf_const, lookback in [
         ("H1", mt5.TIMEFRAME_H1, 24),
         ("M15", mt5.TIMEFRAME_M15, 96),
@@ -362,20 +367,28 @@ def get_levels_data(sym):
         for i in range(2, len(rates) - 2):
             if highs[i] > highs[i - 1] and highs[i] > highs[i - 2] and \
                highs[i] > highs[i + 1] and highs[i] > highs[i + 2]:
+                price = round(highs[i], 5)
+                direction = "resistance"
+                if current_price is not None:
+                    direction = "resistance" if price > current_price else "support"
                 levels.append({
-                    "price": round(highs[i], 5),
+                    "price": price,
                     "level_type": f"{tf_name}_SWING",
-                    "direction": "resistance",
+                    "direction": direction,
                     "strength": 0.7,
                     "touches": 2,
                     "timeframe": tf_name,
                 })
             if lows[i] < lows[i - 1] and lows[i] < lows[i - 2] and \
                lows[i] < lows[i + 1] and lows[i] < lows[i + 2]:
+                price = round(lows[i], 5)
+                direction = "support"
+                if current_price is not None:
+                    direction = "resistance" if price > current_price else "support"
                 levels.append({
-                    "price": round(lows[i], 5),
+                    "price": price,
                     "level_type": f"{tf_name}_SWING",
-                    "direction": "support",
+                    "direction": direction,
                     "strength": 0.7,
                     "touches": 2,
                     "timeframe": tf_name,
