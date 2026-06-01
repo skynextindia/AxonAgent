@@ -232,6 +232,32 @@ def get_regime_data(sym):
         eur_strength = max(-1.0, min(1.0, mom * 100.0))
         usd_strength = -eur_strength
 
+    # ── Today's Session High, Low, and Bias from Asian Open ──
+    today_bias = "NEUTRAL"
+    today_high = 0.0
+    today_low = 0.0
+    rates_today = mt5.copy_rates_from_pos(sym, mt5.TIMEFRAME_M15, 0, 96)
+    if rates_today is not None and len(rates_today) > 0:
+        broker_now_time = time.time() + broker_offset
+        broker_dt = datetime.fromtimestamp(broker_now_time)
+        broker_start_of_day_dt = datetime(broker_dt.year, broker_dt.month, broker_dt.day)
+        start_of_day_ts = broker_start_of_day_dt.timestamp() - broker_offset
+        
+        today_bars = [r for r in rates_today if r[0] >= start_of_day_ts]
+        if today_bars:
+            today_high = max(float(r[2]) for r in today_bars)
+            today_low = min(float(r[3]) for r in today_bars)
+            today_open = float(today_bars[0][1])
+            current_close = float(today_bars[-1][4])
+            
+            pip_diff = (current_close - today_open) / (0.01 if "JPY" in sym or "XAU" in sym else 0.0001)
+            if pip_diff > 5.0:
+                today_bias = "BULLISH"
+            elif pip_diff < -5.0:
+                today_bias = "BEARISH"
+            else:
+                today_bias = "NEUTRAL"
+
     tick = mt5.symbol_info_tick(sym)
     spread_pips = (tick.ask - tick.bid) * 10000 if tick else 0
 
@@ -253,9 +279,9 @@ def get_regime_data(sym):
         "trend_h4": trend_h4,
         "trend_h1": trend_h1,
         "trend_m15": trend_m15,
-        "london_open_bias": "NEUTRAL",
-        "london_range_high": 0,
-        "london_range_low": 0,
+        "today_bias": today_bias,
+        "today_high": today_high,
+        "today_low": today_low,
         "eur_strength": round(eur_strength, 2),
         "usd_strength": round(usd_strength, 2),
         "tokens_in": 0,
@@ -325,7 +351,7 @@ def get_levels_data(sym):
                     "touches": 2,
                     "timeframe": tf_name,
                 })
-    return {"type": "levels", "price_levels": levels[:12]}  # max 12 levels
+    return {"type": "levels", "price_levels": levels[:40]}  # max 40 levels
 
 
 def get_historical_bars(sym, timeframe, start, end):

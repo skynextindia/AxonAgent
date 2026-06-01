@@ -125,7 +125,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
       <div style="display:flex;flex-direction:column;gap:6px;font-size:9px;"><div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--text-secondary);font-weight:700;">EUR</span><div style="display:flex;align-items:center;gap:4px;"><span id="eur-bar" style="font-size:10px;letter-spacing:.02em;"></span><span id="eur-val" style="font-weight:700;color:#fff;font-size:9px;width:28px;text-align:right;">--</span></div></div><div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--text-secondary);font-weight:700;">USD</span><div style="display:flex;align-items:center;gap:4px;"><span id="usd-bar" style="font-size:10px;letter-spacing:.02em;"></span><span id="usd-val" style="font-weight:700;color:#fff;font-size:9px;width:28px;text-align:right;">--</span></div></div></div>
     </div>
     <div style="border-top:1px solid rgba(31,31,46,.5);padding-top:6px;"><span style="font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px;">REGIME_SCORES</span><div id="regime-scores" style="font-size:8.5px;"><div style="color:var(--text-dim);font-style:italic;">Awaiting regime scores...</div></div></div>
-    <div style="border-top:1px solid rgba(31,31,46,.5);padding-top:6px;"><span style="font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px;">LONDON_SESSION</span>
+    <div style="border-top:1px solid rgba(31,31,46,.5);padding-top:6px;"><span style="font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px;">TODAY_SESSION</span>
       <div style="display:flex;flex-direction:column;gap:3px;font-size:8.5px;"><div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;">BIAS <span id="london-bias" style="font-weight:700;">--</span></div><div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;">HIGH <span id="london-high-val" style="font-weight:700;color:#fff;">--</span></div><div style="display:flex;justify-content:space-between;">LOW <span id="london-low-val" style="font-weight:700;color:#fff;">--</span></div></div>
     </div>
   </div>
@@ -511,15 +511,16 @@ class DashboardController {
     const eb=document.getElementById("eur-bar"),ev=document.getElementById("eur-val");if(eb&&d.eur_strength!==undefined)eb.innerHTML=bar(d.eur_strength,-1,1,"text-[#00ff66]");if(ev&&d.eur_strength!==undefined)ev.textContent=this.sf(d.eur_strength,2);
     const ub=document.getElementById("usd-bar"),uv=document.getElementById("usd-val");if(ub&&d.usd_strength!==undefined)ub.innerHTML=bar(d.usd_strength,-1,1,"text-[#00f0ff]");if(uv&&d.usd_strength!==undefined)uv.textContent=this.sf(d.usd_strength,2);
     const rs=document.getElementById("regime-scores");if(rs&&d.regime_scores){rs.innerHTML=Object.entries(d.regime_scores).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<div style="display:flex;justify-content:space-between;padding:1px 0;"><span style="text-transform:uppercase;font-weight:700;color:var(--text-secondary);">'+k+'</span><span style="color:#fff;font-weight:700;">'+this.sf(v,2)+'</span></div>').join("")}
-    const lb=document.getElementById("london-bias");if(lb)lb.innerHTML=cd(d.london_open_bias);
-    ["london-high-val","london-low-val"].forEach(k=>{const el=document.getElementById(k);if(el&&d["london_range_"+k.split("-")[1]]>0)el.textContent=this.sf(d["london_range_"+k.split("-")[1]],5)});
+    const lb=document.getElementById("london-bias");if(lb)lb.innerHTML=cd(d.today_bias);
+    const lh=document.getElementById("london-high-val");if(lh&&d.today_high>0)lh.textContent=this.sf(d.today_high,5);
+    const ll=document.getElementById("london-low-val");if(ll&&d.today_low>0)ll.textContent=this.sf(d.today_low,5);
   }
   handleLevels(d) {
     if(!d.price_levels||d.price_levels.length===0)return;
     if(!this.candleSeries||typeof LightweightCharts==="undefined")return;
     const sorted=[...d.price_levels].sort((a,b)=>(b.strength||0)-(a.strength||0));
-    const filtered=[];const sampleP=sorted[0].price;this.pipMult=sampleP>200?.01:.0001;const minD=this.pipMult*5;
-    for(const z of sorted){const p=Number(z.price);if(!filtered.some(x=>Math.abs(Number(x.price)-p)<minD))filtered.push(z);if(filtered.length>=10)break}
+    const filtered=[];const sampleP=sorted[0].price;this.pipMult=sampleP>200?.01:.0001;const minD=this.pipMult*1.0;
+    for(const z of sorted){const p=Number(z.price);if(!filtered.some(x=>Math.abs(Number(x.price)-p)<minD))filtered.push(z);if(filtered.length>=40)break}
     this.latestZones=filtered;
     if(this.priceLines){this.priceLines.forEach(l=>{try{this.candleSeries.removePriceLine(l)}catch(e){}});this.priceLines=[]}
     filtered.forEach(z=>{const p=Number(z.price);let c=z.direction==="resistance"?"#ff3d3d":"#00c853";let ls=LightweightCharts.LineStyle.Dashed;if(z.level_type==="H4_SWING")ls=LightweightCharts.LineStyle.Solid;else if(z.level_type==="PDH"||z.level_type==="PDL")ls=LightweightCharts.LineStyle.Dotted;try{this.priceLines.push(this.candleSeries.createPriceLine({price:p,color:c,lineWidth:z.level_type==="H4_SWING"?2:1,lineStyle:ls,axisLabelVisible:true,title:z.level_type+" ("+z.direction.substring(0,3).toUpperCase()+")"}))}catch(e){}});
