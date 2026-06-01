@@ -579,7 +579,7 @@ async def main():
                 f"| {sl_str} {tp_str} | {t.get('close_reason', '—')}"
             )
 
-    with open(md_path, "w") as f:
+    with open(md_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
 
     json_report = {
