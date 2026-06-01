@@ -148,13 +148,28 @@ def get_account_data(sym):
     }
 
 
+def get_trend_for_tf(sym, tf_const):
+    rates = mt5.copy_rates_from_pos(sym, tf_const, 0, 50)
+    if rates is None or len(rates) < 21:
+        return "sideways"
+    closes = [r[4] for r in rates]
+    ema9 = sum(closes[-9:]) / 9
+    ema21 = sum(closes[-21:]) / 21
+    ema50 = sum(closes[-50:]) / 50 if len(closes) >= 50 else ema21
+    if ema9 > ema21 > ema50:
+        return "up"
+    elif ema9 < ema21 < ema50:
+        return "down"
+    return "sideways"
+
+
 def get_regime_data(sym):
     """Compute market regime from recent MT5 data."""
     rates = mt5.copy_rates_from_pos(sym, mt5.TIMEFRAME_H1, 0, 48)
     atr_val = 0.0
     volatility = "MODERATE"
     regime = "SIDEWAYS"
-    trend = "sideways"
+    trend_h1 = "sideways"
     belief = 0.0
 
     if rates is not None and len(rates) > 20:
@@ -186,11 +201,11 @@ def get_regime_data(sym):
         ema50 = sum(closes[-50:]) / 50 if len(closes) >= 50 else ema21
 
         if ema9 > ema21 > ema50:
-            trend = "up"
+            trend_h1 = "up"
             regime = "TRENDING"
             belief = min(1.0, (ema9 - ema21) / (atr_val + 0.0001) * 0.5)
         elif ema9 < ema21 < ema50:
-            trend = "down"
+            trend_h1 = "down"
             regime = "TRENDING"
             belief = max(-1.0, (ema9 - ema21) / (atr_val + 0.0001) * 0.5)
         else:
@@ -204,6 +219,18 @@ def get_regime_data(sym):
                 regime = "RANGING"
             belief = (ema9 - ema21) / (atr_val + 0.0001) * 0.3
             belief = max(-0.5, min(0.5, belief))
+
+    trend_h4 = get_trend_for_tf(sym, mt5.TIMEFRAME_H4)
+    trend_m15 = get_trend_for_tf(sym, mt5.TIMEFRAME_M15)
+
+    # Compute currency strength based on H1 rates
+    eur_strength = 0.0
+    usd_strength = 0.0
+    if rates is not None and len(rates) > 20:
+        closes = [r[4] for r in rates]
+        mom = (closes[-1] - closes[-20]) / closes[-20]
+        eur_strength = max(-1.0, min(1.0, mom * 100.0))
+        usd_strength = -eur_strength
 
     tick = mt5.symbol_info_tick(sym)
     spread_pips = (tick.ask - tick.bid) * 10000 if tick else 0
@@ -223,14 +250,14 @@ def get_regime_data(sym):
         "events_detected": 0,
         "events_fired": 0,
         "events_skipped": 0,
-        "trend_h4": trend,
-        "trend_h1": trend,
-        "trend_m15": trend,
+        "trend_h4": trend_h4,
+        "trend_h1": trend_h1,
+        "trend_m15": trend_m15,
         "london_open_bias": "NEUTRAL",
         "london_range_high": 0,
         "london_range_low": 0,
-        "eur_strength": 0,
-        "usd_strength": 0,
+        "eur_strength": round(eur_strength, 2),
+        "usd_strength": round(usd_strength, 2),
         "tokens_in": 0,
         "tokens_out": 0,
         "tokens_total": 0,
