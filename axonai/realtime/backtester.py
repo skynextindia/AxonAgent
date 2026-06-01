@@ -697,9 +697,9 @@ class BacktestEngine:
         state = self.live_state._state
         atr = state.atr_14_h1 if state else 0.0012
         
-        # SL = 1.0 × ATR, TP = 1.5 × ATR (optimized risk-reward ratio for WR/PF)
+        # SL = 1.0 × ATR, TP = 2.0 × ATR (optimized risk-reward ratio for WR/PF)
         sl_distance = max(atr * 1.0, 8 * self.pip_mult)   # floor of 8 pips
-        tp_distance = max(atr * 1.5, 12 * self.pip_mult)   # floor of 12 pips
+        tp_distance = max(atr * 2.0, 16 * self.pip_mult)   # floor of 16 pips
 
         if direction == "BUY":
             sl = entry_price - sl_distance
