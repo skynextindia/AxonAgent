@@ -492,8 +492,15 @@ class DashboardController {
   }
   handleRegime(d) {
     if(d.symbol&&this.ticker)this.ticker.textContent=d.symbol;
-    if(this.beliefVal)this.beliefVal.textContent=this.sf(d.belief,2);
-    if(this.beliefBar)this.beliefBar.style.width=Math.min(100,(Number(d.belief)||0)*100)+"%";
+    if(this.beliefVal){
+        this.beliefVal.textContent=this.sf(d.belief,2);
+        this.beliefVal.style.color=d.belief>=0?"var(--green)":"var(--red)";
+    }
+    if(this.beliefBar){
+        const val=Number(d.belief)||0;
+        this.beliefBar.style.width=Math.min(100,Math.abs(val)*100)+"%";
+        this.beliefBar.style.background=val>=0?"var(--green)":"var(--red)";
+    }
     if(d.macro_bias){const mb=document.getElementById("macro-bias");if(mb){mb.textContent=d.macro_bias;mb.style.color=d.macro_bias==="BUY"?"var(--green)":d.macro_bias==="SELL"?"var(--red)":"var(--text-dim)";const ml=document.getElementById("macro-lvl");if(ml)ml.textContent="LVL: "+this.sf(d.macro_key_level,5);const mc=document.getElementById("macro-conf");if(mc)mc.textContent=this.sf((Number(d.macro_confidence)||0)*100,0)+"%"}}
     if(d.gate_status){const ug=(id,p)=>{const el=document.getElementById(id);if(el)el.style.background=p?"#00ff66":"#ff0055"};ug("gate-state",d.gate_status.state_passed);ug("gate-spread",d.gate_status.spread_passed);ug("gate-convict",d.gate_status.conviction_passed);ug("gate-rate",d.gate_status.rate_limit_passed);ug("gate-context",d.gate_status.context_passed);ug("gate-paused",d.gate_status.llm_paused)}
     if(this.regimeType)this.regimeType.textContent=d.dominant||"UNKNOWN";
