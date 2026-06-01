@@ -543,9 +543,9 @@ async def main():
         lines.append(
             f"| {t.get('id', '?')} "
             f"| {t.get('direction', '?')} "
-            f"| {t['entry_time'].strftime('%m-%d %H:%M') if t.get('entry_time') else '—'} "
+            f"| {t['entry_time'].strftime('%d-%m-%y %H:%M') if t.get('entry_time') else '—'} "
             f"| {t.get('entry_price', 0):.5f} "
-            f"| {t['exit_time'].strftime('%m-%d %H:%M') if t.get('exit_time') else '—'} "
+            f"| {t['exit_time'].strftime('%d-%m-%y %H:%M') if t.get('exit_time') else '—'} "
             f"| {t.get('exit_price', 0):.5f} "
             f"| {sl_str} "
             f"| {tp_str} "
