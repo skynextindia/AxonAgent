@@ -153,6 +153,9 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
         <div style="background:rgba(0,0,0,.4);border-left:3px solid var(--green);padding:3px 6px;display:flex;flex-direction:column;justify-content:space-between;"><div style="display:flex;justify-content:space-between;font-weight:700;color:var(--green);font-size:8px;"><span style="color:var(--text-secondary);letter-spacing:.04em;">SUPPORT</span><span id="level-sup-val">--.-----</span></div><div style="display:flex;justify-content:space-between;font-size:6.5px;color:var(--text-dim);"><span id="level-sup-time" style="max-width:65px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">NO SL BAR</span><span id="level-sup-dist" style="color:var(--green);font-weight:700;">-- Pips</span></div></div>
         <div style="background:rgba(0,0,0,.4);border-right:3px solid var(--red);padding:3px 6px;display:flex;flex-direction:column;justify-content:space-between;"><div style="display:flex;justify-content:space-between;font-weight:700;color:var(--red);font-size:8px;"><span style="color:var(--text-secondary);letter-spacing:.04em;">RESISTANCE</span><span id="level-res-val">--.-----</span></div><div style="display:flex;justify-content:space-between;font-size:6.5px;color:var(--text-dim);"><span id="level-res-time" style="max-width:65px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">NO SH BAR</span><span id="level-res-dist" style="color:var(--red);font-weight:700;">-- Pips</span></div></div>
       </div>
+      <div style="margin-top:4px;height:4px;background:linear-gradient(90deg,var(--green) 0%,#222 50%,var(--red) 100%);border:1px solid #1a1a24;border-radius:2px;position:relative;overflow:visible;">
+        <div id="swing-push-indicator" style="position:absolute;top:-2px;left:50%;width:2px;height:6px;background:#fff;box-shadow:0 0 4px #fff;transition:left 0.1s ease-out;"></div>
+      </div>
     </div>
     <div class="cyber-panel" id="decision-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-left:3px solid var(--purple);background:#040406;overflow:hidden;">
       <span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">DECISION_HUD</span>
@@ -542,6 +545,13 @@ class DashboardController {
     let distRes = 0, distSup = 0;
     if(this.currentRes>0&&this.levelResDist){distRes=(this.currentRes-this.currentBid)/this.pipMult;this.levelResDist.textContent=this.sf(distRes,1)+" Pips"; if(distRes <= 3.0) nearRes = true;}
     if(this.currentSup>0&&this.levelSupDist){distSup=(this.currentBid-this.currentSup)/this.pipMult;this.levelSupDist.textContent=this.sf(distSup,1)+" Pips"; if(distSup <= 3.0) nearSup = true;}
+    
+    if(this.currentRes>0&&this.currentSup>0&&this.currentRes>this.currentSup){
+      const range = this.currentRes - this.currentSup;
+      const pct = Math.max(0, Math.min(1, (this.currentBid - this.currentSup) / range));
+      const ind = document.getElementById("swing-push-indicator");
+      if(ind) ind.style.left = (pct * 100) + "%";
+    }
     
     const el = document.getElementById("bhv-placeholder");
     if(el){
