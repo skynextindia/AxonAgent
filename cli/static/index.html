@@ -605,7 +605,9 @@ class DashboardController {
   drawSessions() {
     if(!this.chart||!this.candleSeries)return;
     let svg=document.getElementById("chart-overlay-svg");const ce=document.getElementById("price-chart");if(!ce)return;
-    if(!svg){svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.id="chart-overlay-svg";svg.style.cssText="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;";ce.style.position="relative";ce.appendChild(svg)}svg.innerHTML="";
+    const pane = ce.querySelector("table tr td:nth-child(2)");
+    if(!pane) return;
+    if(!svg){svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.id="chart-overlay-svg";svg.style.cssText="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;";pane.appendChild(svg)}svg.innerHTML="";
     const gw=this.chart.timeScale().width();if(gw===null||isNaN(gw))return;
     const sessions=this.sessionsCache[this.currentTimeframe];if(!sessions||sessions.length===0)return;
     const vr=this.chart.timeScale().getVisibleRange(),from=vr?vr.from:null,to=vr?vr.to:null;
