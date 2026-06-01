@@ -120,7 +120,8 @@ class BridgeClient:
 
                 # Relay to dashboard broadcast
                 if self.dashboard and hasattr(self.dashboard, "broadcast"):
-                    self.dashboard.broadcast(data)
+                    if msg_type != "tick":
+                        self.dashboard.broadcast(data)
 
                 # Handle "historical" responses: convert to "candles" format
                 # so the dashboard can serve them via hydration

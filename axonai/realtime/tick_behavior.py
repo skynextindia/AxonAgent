@@ -128,6 +128,7 @@ class TickBehaviorAnalyzer:
             volume=max(1, int(volume)), mid=mid, spread=spread,
         )
         state: SignalState = self.processor.process(tick)
+        self.last_state = state
 
         # Run through PeakDetector
         dt = datetime.fromtimestamp(now_s, tz=timezone.utc)

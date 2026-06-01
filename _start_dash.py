@@ -48,19 +48,27 @@ logger.info("TickBehaviorAnalyzer started (snapshot every 5 ticks → reports/ti
 
 
 def on_tick_from_bridge(data: dict):
-    """Bridge tick callback → feed into analyzer."""
+    """Bridge tick callback → feed into analyzer and broadcast enriched data."""
     bid = data.get("bid")
     ask = data.get("ask")
     time_s = data.get("time")
     if bid is not None and ask is not None:
-        snapshot = analyzer.feed_tick(bid=bid, ask=ask, time_s=time_s)
-        if snapshot:
-            logger.debug(
-                "Tick snapshot | spread=%.1f vel=%.2f imb10=%.2f peak=%s",
-                snapshot.spread_pips, snapshot.velocity,
-                snapshot.imbalance_10s,
-                snapshot.peak["peak_type"] if snapshot.peak else "—",
-            )
+        analyzer.feed_tick(bid=bid, ask=ask, time_s=time_s)
+        
+        # Enrich raw tick with calculated high-fidelity stats
+        if hasattr(analyzer, "last_state") and analyzer.last_state:
+            state = analyzer.last_state
+            data["tick_velocity"] = round(state.velocity, 2)
+            data["tick_imbalance_10s"] = round(state.imbalance_10s, 2)
+            data["tick_imbalance_60s"] = round(state.imbalance_60s, 2)
+            data["tick_imbalance_300s"] = round(state.imbalance_300s, 2)
+            data["tick_spread_delta"] = round(state.spread_delta, 5)
+            data["tick_collapse"] = bool(state.velocity_collapse)
+            data["tick_agg_shift"] = bool(state.aggression_shift)
+            data["tick_absorption"] = bool(state.absorption)
+
+        # Broadcast the enriched tick data to all connected clients!
+        server.broadcast(data)
 
 
 def request_historical_candles(client):
