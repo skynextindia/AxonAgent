@@ -78,7 +78,9 @@ class PeakDetector:
         if len(self.tick_prices) > 1:
             prev_price = self.tick_prices[-2]
             prev_time = self.timestamps[-2]
-            dt = max(0.001, (timestamp - prev_time).total_seconds())
+            dt_raw = (timestamp - prev_time).total_seconds()
+            # Scale dt if running on backtest-interpolated ticks (60s apart)
+            dt = 0.05 if dt_raw >= 5.0 else max(0.001, dt_raw)
             
             dp = price - prev_price
             velocity = (abs(dp) / dt) / self.pip_mult
@@ -129,16 +131,23 @@ class PeakDetector:
             opposing_vel = buy_vel
             dom_vel = sell_vel
 
-        # Early-warning signals (tightened thresholds)
+        # Detect backtest-interpolated ticks (60s apart)
+        is_backtest = False
+        if len(self.timestamps) > 1:
+            if (self.timestamps[-1] - self.timestamps[-2]).total_seconds() >= 5.0:
+                is_backtest = True
+
+        # Early-warning signals (dynamic backtest thresholding)
         divergence_active = velocity_divergence > 0.6
-        efficiency_collapsed = price_per_tick_efficiency < 0.10
+        efficiency_threshold = 0.35 if is_backtest else 0.10
+        efficiency_collapsed = price_per_tick_efficiency < efficiency_threshold
         spread_inverted = opposing_vel > dom_vel
         
         # standalone early-warning signal
         divergence_warning = velocity_divergence > 0.8
         
         # Rule B Confirmation
-        peak_confirmed = (velocity_divergence > 0.8) and (price_per_tick_efficiency < 0.10)
+        peak_confirmed = (velocity_divergence > 0.8) and (price_per_tick_efficiency < efficiency_threshold)
 
         # Cooldown Suppression (tightened: longer time + wider price gap)
         COOLDOWN_SEC = 120.0

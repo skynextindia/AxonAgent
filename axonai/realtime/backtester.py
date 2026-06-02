@@ -513,13 +513,11 @@ class BacktestEngine:
         8. Quality floor ⩾ 0.65 (after all adjustments)
         9. No duplicate direction
         """
-        # Filter out non-tradeable events immediately to avoid timezone/offset mismatches in Gates
-        if event.event_type not in (
-            EventType.SWEEP_DETECTED,
-            EventType.PEAK_DETECTION,
-            EventType.STRUCTURE_BREAK,
-            EventType.LEVEL_BREACH
-        ):
+        # Filter to only allow Advanced Microstructure Peak Reversals (Rule A & Rule B)
+        if event.event_type != EventType.PEAK_DETECTION:
+            return
+        peak_type = event.details.get("peak_type", "")
+        if peak_type not in ("velocity_exhaustion", "microstructure_exhaustion"):
             return
 
         # ── Gate 1: Max concurrent trades ──
@@ -537,10 +535,10 @@ class BacktestEngine:
             if (event.timestamp - last_entry_time).total_seconds() < 900:  # 15 min
                 return
 
-        # ── Gate 3b: Loss-streak cooldown — skip 120 minutes after a losing trade ──
+        # ── Gate 3b: Loss-streak cooldown — skip 45 minutes after a losing trade ──
         if self._last_loss_time is not None:
             minutes_since_loss = (event.timestamp - self._last_loss_time).total_seconds() / 60
-            if minutes_since_loss < 120:  # 120-min cooldown after any loss
+            if minutes_since_loss < 45:  # 45-min cooldown after any loss
                 return
 
         direction = None
@@ -672,18 +670,14 @@ class BacktestEngine:
             if regime == "compression":
                 return
             
-        # ── Gate 6: MTF Alignment — permits neutral and aligned, blocks strict counter-trend ──
+        # ── Gate 6: MTF Alignment (Bypassed trend blocks to allow two-way reversals) ──
         mtf = event.details.get("mtf_alignment", "NEUTRAL")
-        if direction == "BUY" and mtf == "BEARISH":
-            return  # Skip buying in bearish trend
-        if direction == "SELL" and mtf == "BULLISH":
-            return  # Skip selling in bullish trend
         # Aligned MTF boosts quality
         if (direction == "BUY" and mtf == "BULLISH") or (direction == "SELL" and mtf == "BEARISH"):
             signal_quality = min(1.0, signal_quality + 0.15)
 
         # ── Gate 7: Minimum signal quality threshold (after all adjustments) ──
-        min_quality = 0.65
+        min_quality = 0.85
         if signal_quality < min_quality:
             return
 

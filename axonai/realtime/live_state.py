@@ -1144,17 +1144,21 @@ class LiveMarketEvidence:
             return
 
         # Populate legacy swing points/key levels for downstream compatibility
-        resistances = [l for l in self.price_levels if l.is_active and "resistance" in l.direction]
-        supports = [l for l in self.price_levels if l.is_active and "support" in l.direction]
-        
-        self._evidence.swing_highs = [{"price": r.price, "time": r.last_touch.strftime("%Y-%m-%d %H:%M"), "strength": r.strength * 5, "touches": r.touches} for r in resistances[:5]]
-        self._evidence.swing_lows = [{"price": s.price, "time": s.last_touch.strftime("%Y-%m-%d %H:%M"), "strength": s.strength * 5, "touches": s.touches} for s in supports[:5]]
         current_price = 1.15000
         if self._h1_candles:
             current_price = self._h1_candles[-1].close
         elif self._m15_candles:
             current_price = self._m15_candles[-1].close
 
+        resistances = [l for l in self.price_levels if l.is_active and "resistance" in l.direction]
+        supports = [l for l in self.price_levels if l.is_active and "support" in l.direction]
+        
+        # Sort by proximity to current price so we track the nearest levels for sweeps
+        resistances.sort(key=lambda r: abs(r.price - current_price))
+        supports.sort(key=lambda s: abs(s.price - current_price))
+
+        self._evidence.swing_highs = [{"price": r.price, "time": r.last_touch.strftime("%Y-%m-%d %H:%M"), "strength": r.strength * 5, "touches": r.touches} for r in resistances[:5]]
+        self._evidence.swing_lows = [{"price": s.price, "time": s.last_touch.strftime("%Y-%m-%d %H:%M"), "strength": s.strength * 5, "touches": s.touches} for s in supports[:5]]
         closest_levels = sorted([l.price for l in self.price_levels if l.is_active], key=lambda x: abs(x - current_price))[:5]
         self._evidence.key_levels = sorted(closest_levels)
 

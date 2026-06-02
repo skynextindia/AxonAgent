@@ -23,6 +23,11 @@ from pathlib import Path
 from typing import Optional
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+if sys.stdout.encoding.lower() != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except Exception:
+        pass
 
 logging.basicConfig(
     level=logging.INFO,
@@ -40,6 +45,7 @@ class BridgeDataCollector:
     def __init__(self, host: str, port: int, symbol: str = "EURUSD"):
         self.url = f"ws://{host}:{port}"
         self.symbol = symbol
+        self.broker_offset = 0
 
     async def fetch_candles_paginated(
         self, timeframe: str, months: int,
@@ -143,8 +149,8 @@ class BridgeDataCollector:
                         continue
 
                     # Historical response matching our request_id
-                    rid = data.get("request_id")
-                    if data.get("type") == "historical" and rid == req_id:
+                    if data.get("type") == "historical" and data.get("request_id") == req_id:
+                        self.broker_offset = data.get("broker_offset", 0)
                         bars = data.get("bars", [])
                         if not bars:
                             logger.warning("  ↳ empty chunk")
@@ -476,6 +482,21 @@ async def main():
     report = engine.run()
 
     trades: list[dict] = getattr(engine, "simulated_trades", [])
+
+    # Shift all trade timestamps to Broker Server Time for exact chart matching
+    offset_seconds = getattr(collector, "broker_offset", 0)
+    broker_tz = timezone(timedelta(seconds=offset_seconds))
+    for t in trades:
+        if t.get("entry_time"):
+            et = t["entry_time"]
+            if et.tzinfo is None:
+                et = et.replace(tzinfo=timezone.utc)
+            t["entry_time"] = et.astimezone(broker_tz)
+        if t.get("exit_time"):
+            ext = t["exit_time"]
+            if ext.tzinfo is None:
+                ext = ext.replace(tzinfo=timezone.utc)
+            t["exit_time"] = ext.astimezone(broker_tz)
 
     # ── Step 4: Per-month breakdown ───────────────────────────────
     monthly = build_monthly_breakdown(trades)

@@ -335,7 +335,7 @@ def get_candles_data(sym, timeframe="M15", count=100):
     candles = []
     for r in rates:
         candles.append({
-            "time": int(r[0]),
+            "time": int(r[0]) - broker_offset,
             "open": round(r[1], 5),
             "high": round(r[2], 5),
             "low": round(r[3], 5),
@@ -430,7 +430,7 @@ def get_historical_bars(sym, timeframe, start, end):
     result = []
     for r in rates:
         result.append({
-            "time": int(r[0]),
+            "time": int(r[0]) - broker_offset,
             "open": round(r[1], 5),
             "high": round(r[2], 5),
             "low": round(r[3], 5),
@@ -483,11 +483,12 @@ async def handle_client(websocket):
                 req = json.loads(message)
                 req_type = req.get("type", "")
                 if req_type == "get_historical":
+                    from datetime import timezone
                     bars = get_historical_bars(
                         req.get("symbol", symbol),
                         req.get("timeframe", "H1"),
-                        datetime.fromtimestamp(req["from"]),
-                        datetime.fromtimestamp(req["to"]),
+                        datetime.fromtimestamp(req["from"] + broker_offset, tz=timezone.utc),
+                        datetime.fromtimestamp(req["to"] + broker_offset, tz=timezone.utc),
                     )
                     await websocket.send(json.dumps({
                         "type": "historical",
@@ -495,6 +496,7 @@ async def handle_client(websocket):
                         "symbol": req.get("symbol", symbol),
                         "timeframe": req.get("timeframe", "H1"),
                         "bars": bars,
+                        "broker_offset": broker_offset,
                     }))
                 elif req_type == "switch_pair":
                     new_symbol = req.get("symbol", req.get("mt5", ""))
