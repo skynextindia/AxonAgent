@@ -552,8 +552,8 @@ async def main():
     lines += [
         "",
         "## Trade Log",
-        "| ID | Dir | Entry Time | Entry Price | Exit Time | Exit Price | SL | TP | Pips | Signal | Status |",
-        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :---: | :--- | :--- |",
+        "| ID | Dir | Entry Time | Entry Price | Exit Time | Exit Price | SL | TP | Pips | Signal | Exit Reason | Status |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :---: | :--- | :--- | :--- |",
     ]
     for t in trades:
         status = "✅ WIN" if t.get("status") == "WIN" else "❌ LOSS"
@@ -561,6 +561,16 @@ async def main():
         tp = t.get("tp")
         sl_str = f"{sl:.5f}" if sl else "—"
         tp_str = f"{tp:.5f}" if tp else "—"
+        reason = t.get("close_reason", "—")
+        if "Stop Loss" in reason:
+            reason_str = "🛑 SL Hit"
+        elif "Take Profit" in reason:
+            reason_str = "🎯 TP Hit"
+        elif "End of Day" in reason or "Session Close" in reason:
+            reason_str = "⏰ EOD Close"
+        else:
+            reason_str = reason
+
         lines.append(
             f"| {t.get('id', '?')} "
             f"| {t.get('direction', '?')} "
@@ -572,6 +582,7 @@ async def main():
             f"| {tp_str} "
             f"| {t.get('pips', 0):+.1f} "
             f"| {t.get('trigger', '—')} "
+            f"| {reason_str} "
             f"| {status} |"
         )
 
