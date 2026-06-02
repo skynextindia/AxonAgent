@@ -21,7 +21,7 @@ except ImportError:
     mt5 = None
 
 from axonai.dataflows.mt5_data import mt5_initialize, mt5_shutdown, _to_mt5_symbol, get_broker_tz_offset
-from axonai.realtime.event_types import EventPriority, LiveCandle, MarketEvent
+from axonai.realtime.event_types import EventPriority, LiveCandle, MarketEvent, EventType
 from axonai.realtime.tick_engine import TickEngine
 from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
 from axonai.realtime.event_detector import EventDetector
@@ -72,6 +72,10 @@ class AxonDaemon:
 
         # Layer 4: Trade Executor
         self.trade_executor = MT5TradeExecutor(config)
+
+        # Trailing stop and trade outcome tracking
+        self._tracked_positions: set[int] = set()
+        self._active_trade_initial_sl: dict[int, float] = {}
 
         # Stats
         self._events_detected: int = 0
@@ -430,6 +434,17 @@ class AxonDaemon:
             return
         logger.info("Step 1/4: MT5 connected")
 
+        # Pre-populate active positions for trailing SL tracking
+        try:
+            positions = mt5.positions_get(symbol=self.mt5_symbol) if mt5 else None
+            if positions:
+                for pos in positions:
+                    self._tracked_positions.add(pos.ticket)
+                    self._active_trade_initial_sl[pos.ticket] = pos.sl
+                logger.info("AxonDaemon: Pre-populated %d active positions for trailing stop tracking.", len(positions))
+        except Exception as pe:
+            logger.warning("AxonDaemon: Failed to pre-populate active positions: %s", pe)
+
         # Now that MT5 is connected, dynamically detect active broker offset!
         from axonai.dataflows.mt5_data import _ensure_symbol_visible
         _ensure_symbol_visible(self.mt5_symbol)
@@ -536,6 +551,14 @@ class AxonDaemon:
     def _on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Called by TickEngine on every new tick."""
         self.event_detector.on_tick(bid, ask, timestamp)
+
+        # Handle trailing stops and closed position logging for dryrun
+        if self.config.get("realtime_dry_run", False):
+            try:
+                self._manage_trailing_stops(bid, ask)
+                self._check_for_closed_positions(bid, ask)
+            except Exception as e:
+                logger.error("Error managing trailing stops / closed positions: %s", e, exc_info=True)
         
         # Broadcast tick to dashboard WebSocket
         dashboard = get_dashboard()
@@ -635,6 +658,31 @@ class AxonDaemon:
 
             self._events_detected += 1
 
+            # Filter: Only allow Advanced Microstructure Peak Reversals (Rule A & Rule B)
+            is_peak = event.event_type == EventType.PEAK_DETECTION
+            peak_type = event.details.get("peak_type", "") if is_peak else ""
+            is_exhaustion = peak_type in ("velocity_exhaustion", "microstructure_exhaustion")
+            
+            dashboard = get_dashboard()
+            if not self.config.get("test_mode", False) and not (is_peak and is_exhaustion):
+                self._events_skipped += 1
+                if dashboard:
+                    dashboard.broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": "Strategy restricted to Microstructure Peaks",
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
+
             logger.info("\n" + "="*50)
             logger.info("EVENT #%d: %s", self._events_detected, event)
             logger.info("="*50)
@@ -707,7 +755,50 @@ class AxonDaemon:
                     })
                 continue
 
-            # Fire graph
+            # Fire graph or execute directly for dryrun
+            is_dry_run = self.config.get("realtime_dry_run", False)
+            if is_dry_run and not self.config.get("test_mode", False):
+                self._events_fired += 1
+                dir_str = event.details.get("direction", "")
+                if "bullish" in dir_str or "low" in peak_type:
+                    signal = "Buy"
+                else:
+                    signal = "Sell"
+                
+                logger.info("DRYRUN: Bypassing LLM Graph debate. Pure Rule A+B trigger direct signal: %s", signal)
+                
+                # Broadcast decision status
+                if dashboard:
+                    dashboard.broadcast({
+                        "type": "decision",
+                        "signal": signal,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    })
+                
+                # Execute order on MT5 terminal
+                trade_result = None
+                try:
+                    trade_result = self.trade_executor.execute_signal(self.mt5_symbol, signal, self.live_state)
+                    if trade_result:
+                        logger.info("AxonDaemon: Order execution complete: %s", trade_result)
+                        ticket = trade_result.get("order")
+                        if ticket:
+                            self._tracked_positions.add(ticket)
+                            self._active_trade_initial_sl[ticket] = trade_result.get("sl")
+                except Exception as ex_err:
+                    logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
+                
+                # Persistently log signal to file
+                self._log_signal(event, ws, signal, trade_result)
+                
+                # Set cooldown on event detector
+                cooldown = self.config.get("realtime_cooldown_seconds", 300)
+                self.event_detector.set_cooldown(cooldown)
+                
+                # Print stats
+                self._log_stats()
+                continue
+
             self._events_fired += 1
             logger.info("FIRING GRAPH #%d for event: %s",
                         self._events_fired, event.event_type.value)
@@ -944,6 +1035,211 @@ class AxonDaemon:
         }
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(json.dumps(entry, cls=SafeJSONEncoder) + '\n')
+
+    def _manage_trailing_stops(self, bid: float, ask: float):
+        """Manage trailing stop modifications on active MT5 positions."""
+        if not mt5 or not mt5.terminal_info():
+            return
+            
+        positions = mt5.positions_get(symbol=self.mt5_symbol)
+        if not positions:
+            return
+            
+        pip = 0.01 if "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() else 0.0001
+        digits = 3 if "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() else 5
+        
+        for pos in positions:
+            ticket = pos.ticket
+            # If we don't have the initial SL recorded, initialize it from pos.sl
+            if ticket not in self._active_trade_initial_sl:
+                self._active_trade_initial_sl[ticket] = pos.sl
+                self._tracked_positions.add(ticket)
+                
+            initial_sl = self._active_trade_initial_sl[ticket]
+            if initial_sl <= 0.0:
+                continue
+                
+            if pos.type == mt5.POSITION_TYPE_BUY:
+                # BUY: profit is (bid - price_open). SL distance is (price_open - initial_sl)
+                sl_dist = pos.price_open - initial_sl
+                current_profit = bid - pos.price_open
+                if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
+                    breakeven_sl = round(pos.price_open + 1 * pip, digits)
+                    if pos.sl < breakeven_sl:
+                        logger.info("AxonDaemon: Trailing SL triggered for BUY ticket %d. Modifying SL: %.5f -> %.5f",
+                                    ticket, pos.sl, breakeven_sl)
+                        request = {
+                            "action": mt5.TRADE_ACTION_SLTP,
+                            "position": ticket,
+                            "symbol": self.mt5_symbol,
+                            "sl": breakeven_sl,
+                            "tp": pos.tp,
+                        }
+                        res = mt5.order_send(request)
+                        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                            logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
+                            
+            elif pos.type == mt5.POSITION_TYPE_SELL:
+                # SELL: profit is (price_open - ask). SL distance is (initial_sl - price_open)
+                sl_dist = initial_sl - pos.price_open
+                current_profit = pos.price_open - ask
+                if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
+                    breakeven_sl = round(pos.price_open - 1 * pip, digits)
+                    if pos.sl > breakeven_sl or pos.sl == 0.0:
+                        logger.info("AxonDaemon: Trailing SL triggered for SELL ticket %d. Modifying SL: %.5f -> %.5f",
+                                    ticket, pos.sl, breakeven_sl)
+                        request = {
+                            "action": mt5.TRADE_ACTION_SLTP,
+                            "position": ticket,
+                            "symbol": self.mt5_symbol,
+                            "sl": breakeven_sl,
+                            "tp": pos.tp,
+                        }
+                        res = mt5.order_send(request)
+                        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                            logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
+
+    def _check_for_closed_positions(self, bid: float, ask: float):
+        """Detect closed positions and log outcomes."""
+        if not mt5 or not mt5.terminal_info():
+            return
+            
+        positions = mt5.positions_get(symbol=self.mt5_symbol)
+        active_tickets = {p.ticket for p in positions} if positions else set()
+        
+        # Detect closed tickets
+        closed_tickets = self._tracked_positions - active_tickets
+        if not closed_tickets:
+            # Still update tracked positions to capture any manually opened trades
+            for t in active_tickets:
+                self._tracked_positions.add(t)
+            return
+            
+        pip = 0.01 if "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() else 0.0001
+        
+        for ticket in closed_tickets:
+            logger.info("AxonDaemon: Detected closed position for ticket %d", ticket)
+            
+            # Fetch deal history for this ticket
+            deals = mt5.history_deals_get(position=ticket)
+            
+            exit_price = 0.0
+            exit_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            profit = 0.0
+            pips = 0.0
+            reason = "Manual Close / Unknown"
+            direction = "UNKNOWN"
+            volume = 0.0
+            entry_price = 0.0
+            
+            initial_sl = self._active_trade_initial_sl.get(ticket, 0.0)
+            
+            if deals:
+                # Find exit deal (DEAL_ENTRY_OUT)
+                exit_deal = None
+                entry_deal = None
+                for deal in deals:
+                    if deal.entry == mt5.DEAL_ENTRY_OUT:
+                        exit_deal = deal
+                    elif deal.entry == mt5.DEAL_ENTRY_IN:
+                        entry_deal = deal
+                        
+                if entry_deal:
+                    entry_price = entry_deal.price
+                    volume = entry_deal.volume
+                    direction = "BUY" if entry_deal.type == mt5.DEAL_TYPE_BUY or entry_deal.type == 0 else "SELL"
+                    
+                if exit_deal:
+                    exit_price = exit_deal.price
+                    exit_time_str = datetime.fromtimestamp(exit_deal.time).strftime("%Y-%m-%d %H:%M:%S")
+                    profit = exit_deal.profit
+                    comment = getattr(exit_deal, "comment", "").lower()
+                    
+                    # Calculate pips
+                    if direction == "BUY":
+                        pips = (exit_price - entry_price) / pip
+                    elif direction == "SELL":
+                        pips = (entry_price - exit_price) / pip
+                        
+                    # Determine reason
+                    if "sl" in comment:
+                        breakeven_approx = entry_price + (1 * pip if direction == "BUY" else -1 * pip)
+                        if abs(exit_price - breakeven_approx) < 2 * pip:
+                            reason = "Trailing SL Hit"
+                        else:
+                            reason = "Stop Loss (SL) Hit"
+                    elif "tp" in comment:
+                        reason = "Take Profit (TP) Hit"
+                    elif "so" in comment:
+                        reason = "Stop Out (SO)"
+                    else:
+                        reason = f"Closed ({exit_deal.comment or 'Manual'})"
+                        
+            # If history failed, fallback to basic estimates
+            if entry_price == 0.0:
+                entry_price = bid  # fallback
+                
+            outcome = "WIN" if pips > 0 else "LOSS" if pips < 0 else "BREAKEVEN"
+            
+            # Log outcome to file
+            log_msg = f"TRADE CLOSED: Ticket {ticket} | {direction} | Entry: {entry_price:.5f} | Exit: {exit_price:.5f} | Profit: {profit:+.2f} | Pips: {pips:+.1f} | Reason: {reason} | Outcome: {outcome}"
+            logger.info("=" * 60)
+            logger.info(log_msg)
+            logger.info("=" * 60)
+            
+            # Append outcome to reports/signals.log and jsonl
+            try:
+                import os, json
+                os.makedirs("reports", exist_ok=True)
+                payload = {
+                    "timestamp": exit_time_str,
+                    "type": "trade_closed",
+                    "ticket": ticket,
+                    "symbol": self.mt5_symbol,
+                    "direction": direction,
+                    "volume": volume,
+                    "entry_price": entry_price,
+                    "exit_price": exit_price,
+                    "profit": profit,
+                    "pips": round(pips, 1),
+                    "reason": reason,
+                    "outcome": outcome
+                }
+                with open(os.path.join("reports", "signals.jsonl"), "a", encoding="utf-8") as f:
+                    f.write(json.dumps(payload) + "\n")
+                    
+                with open(os.path.join("reports", "signals.log"), "a", encoding="utf-8") as f:
+                    f.write(f"[{exit_time_str}] {log_msg}\n")
+            except Exception as le:
+                logger.error("Failed to write closed position log: %s", le)
+                
+            # Broadcast to dashboard
+            dashboard = get_dashboard()
+            if dashboard:
+                dashboard.broadcast({
+                    "type": "event",
+                    "id": f"close-{ticket}",
+                    "event_type": "TRADE_CLOSED",
+                    "priority": "HIGH",
+                    "price": exit_price,
+                    "details": {
+                        "ticket": ticket,
+                        "direction": direction,
+                        "pips": round(pips, 1),
+                        "profit": profit,
+                        "reason": reason,
+                        "outcome": outcome
+                    },
+                    "timestamp": exit_time_str,
+                    "status": "closed"
+                })
+                
+            # Remove from tracking cache
+            self._tracked_positions.discard(ticket)
+            self._active_trade_initial_sl.pop(ticket, None)
+            
+        # Update tracked positions with active ones
+        self._tracked_positions = active_tickets.copy()
 
 
 def generate_session_summary():

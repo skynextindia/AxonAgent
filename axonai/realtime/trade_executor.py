@@ -130,7 +130,10 @@ class MT5TradeExecutor:
         acc = mt5.account_info()
         is_mock_env = self.config.get("realtime_dry_run", False)
         
-        if acc and not is_mock_env:
+        if is_mock_env:
+            lot = 1.00
+            logger.info("TradeExecutor: Dryrun active. Using fixed lot size: 1.00")
+        elif acc:
             account_equity = acc.equity if acc else 10000.0
             risk_pct = self.config.get("realtime_risk_pct", 0.01)  # risk_pct from config default 0.01
             risk_amount = account_equity * risk_pct
@@ -195,8 +198,8 @@ class MT5TradeExecutor:
                         f"| Volume: {lot:.2f} | Price: {price:.5f} | SL: {sl:.5f} | TP: {tp:.5f} | Ticket: {result.order}",
                         self.config
                     )
-                    return self._result_to_dict(result)
-            return self._result_to_dict(result)
+                    return self._result_to_dict(result, sl)
+            return self._result_to_dict(result, sl)
 
         logger.info("TradeExecutor: Order executed successfully! Ticket: %d", result.order)
         send_alert(
@@ -204,9 +207,9 @@ class MT5TradeExecutor:
             f"| Volume: {lot:.2f} | Price: {price:.5f} | SL: {sl:.5f} | TP: {tp:.5f} | Ticket: {result.order}",
             self.config
         )
-        return self._result_to_dict(result)
+        return self._result_to_dict(result, sl)
 
-    def _result_to_dict(self, result) -> dict:
+    def _result_to_dict(self, result, sl: float = 0.0) -> dict:
         """Helper to convert OrderSendResult to a dictionary."""
         return {
             "retcode": result.retcode,
@@ -217,4 +220,5 @@ class MT5TradeExecutor:
             "ask": result.ask,
             "order": result.order,
             "request_id": result.request_id,
+            "sl": sl,
         }
