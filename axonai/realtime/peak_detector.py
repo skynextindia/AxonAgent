@@ -212,7 +212,17 @@ class PeakDetector:
             max_vel = max(spike_vels)
             avg_vel = sum(baseline_vels) / len(baseline_vels) if len(baseline_vels) > 0 else 1.0
             
-            if max_vel > 5.0 * avg_vel and max_vel > 25.0:
+            # Calculate dynamic velocity floor using rolling mean and standard deviation (Z-score = 3.0)
+            all_vels = list(self.tick_velocities)
+            if len(all_vels) >= 30:
+                mean_vel = sum(all_vels) / len(all_vels)
+                variance = sum((x - mean_vel) ** 2 for x in all_vels) / len(all_vels)
+                std_vel = variance ** 0.5
+                dynamic_floor = max(5.0, mean_vel + 3.0 * std_vel)
+            else:
+                dynamic_floor = 25.0  # Warm-up fallback
+                
+            if max_vel > 5.0 * avg_vel and max_vel > dynamic_floor:
                 current_vel = recent_velocities[-1]
                 if current_vel < 0.25 * max_vel and (divergence_active or efficiency_collapsed):
                     if self.last_fired_peak_time is None or (timestamp - self.last_fired_peak_time).total_seconds() > 180:
