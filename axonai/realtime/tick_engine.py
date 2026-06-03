@@ -156,6 +156,7 @@ class TickEngine(threading.Thread):
             "imbalance_300s": 0.0,
             "confluence": "neutral"
         }
+        self.offset_hours = 0
 
     @property
     def tick_buffer_list(self) -> list:
@@ -220,6 +221,9 @@ class TickEngine(threading.Thread):
                 mt5.symbol_select(self.symbol, True)
             logger.info("TickEngine: MT5 connected, symbol %s ready", self.symbol)
 
+            from axonai.dataflows.mt5_data import get_broker_tz_offset
+            self.offset_hours = get_broker_tz_offset(self.symbol)
+
             # Pre-seed active candles from MT5
             self._preseed_active_candles()
 
@@ -230,7 +234,7 @@ class TickEngine(threading.Thread):
                 logger.info("TickEngine: Set last tick time msc to %d", self._last_tick_time_msc)
                 self.latest_bid = float(tick.bid)
                 self.latest_ask = float(tick.ask)
-                self.latest_timestamp = datetime.fromtimestamp(tick.time)
+                self.latest_timestamp = datetime.fromtimestamp(tick.time, tz=timezone.utc).replace(tzinfo=None) + timedelta(hours=self.offset_hours)
             else:
                 self._last_tick_time_msc = int(time.time() * 1000)
                 # Seed from last closed M1 rate if tick is None (e.g. weekend)
@@ -238,7 +242,7 @@ class TickEngine(threading.Thread):
                 if rates is not None and len(rates) > 0:
                     self.latest_bid = float(rates[0]['close'])
                     self.latest_ask = self.latest_bid + (0.012 if "JPY" in self.symbol.upper() else 0.00012)
-                    self.latest_timestamp = datetime.fromtimestamp(rates[0]['time'])
+                    self.latest_timestamp = datetime.fromtimestamp(rates[0]['time'], tz=timezone.utc).replace(tzinfo=None) + timedelta(hours=self.offset_hours)
                     logger.info("TickEngine: Seeded initial bid=%.5f, ask=%.5f from M1 rate", self.latest_bid, self.latest_ask)
 
             return True
@@ -293,7 +297,7 @@ class TickEngine(threading.Thread):
         try:
             if self._last_tick_time_msc is None:
                 # First poll — get last 100 ticks
-                from_time = datetime.utcnow() - timedelta(seconds=10)
+                from_time = datetime.now(timezone.utc) - timedelta(seconds=10)
                 ticks = self._mt5.copy_ticks_from(
                     self.symbol, from_time, 100, self._mt5.COPY_TICKS_ALL
                 )
@@ -334,13 +338,16 @@ class TickEngine(threading.Thread):
             volume = int(tick['volume']) if 'volume' in tick.dtype.names else 1
             time_msc = tick['time_msc']
             
+        if volume <= 0:
+            volume = 1
+            
         # Use time_msc to preserve millisecond precision in the timestamp!
         timestamp = datetime.fromtimestamp(time_msc / 1000.0, tz=timezone.utc).replace(tzinfo=None)
         mid_price = (bid + ask) / 2.0
 
         self.latest_bid = bid
         self.latest_ask = ask
-        self.latest_timestamp = timestamp
+        self.latest_timestamp = timestamp + timedelta(hours=self.offset_hours)
         self._tick_count += 1
 
         # Store in buffer
@@ -382,12 +389,16 @@ class TickEngine(threading.Thread):
         from axonai.dataflows.mt5_data import get_broker_tz_offset
 
         while self.running:
-            # Check if market is closed (weekend in broker local time)
-            offset_hours = get_broker_tz_offset(self.symbol)
-            broker_now = datetime.utcnow() + timedelta(hours=offset_hours)
+            # Check if market is closed (weekend in broker local time) or if the feed is stale
+            broker_now = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=self.offset_hours)
             
-            # If weekend, simulate live price action so the dashboard chart remains active and updated!
-            if broker_now.weekday() in (5, 6):
+            is_stale = False
+            if self.latest_timestamp is not None:
+                if (broker_now - self.latest_timestamp).total_seconds() > 10.0:
+                    is_stale = True
+            
+            # If weekend or stale feed (offline/no connection), simulate live price action to keep dashboard alive
+            if broker_now.weekday() in (5, 6) or is_stale:
                 last_price = self.mid_price if self.latest_bid > 0.0 else 1.16110
                 import random
                 pip_unit = 0.01 if "JPY" in self.symbol.upper() else 0.0001
@@ -397,6 +408,9 @@ class TickEngine(threading.Thread):
                 mock_bid = new_mid - spread_val / 2.0
                 mock_ask = new_mid + spread_val / 2.0
                 
+                # Update latest timestamp to current time to avoid locking loop
+                self.latest_timestamp = broker_now
+                
                 mock_tick = {
                     'bid': mock_bid,
                     'ask': mock_ask,
@@ -404,7 +418,7 @@ class TickEngine(threading.Thread):
                     'time_msc': int(time.time() * 1000)
                 }
                 self._process_tick(mock_tick)
-                # Sleep a dynamic tick rate (e.g. between 500ms and 1.5s) on weekends to keep it natural
+                # Sleep a dynamic tick rate (e.g. between 0.5s and 1.5s)
                 time.sleep(random.uniform(0.5, 1.5))
                 continue
 

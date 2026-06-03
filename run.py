@@ -53,6 +53,12 @@ def get_windows_host_ip():
 # ── Main ───────────────────────────────────────────────────────────
 
 def main():
+    import logging
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+        handlers=[logging.StreamHandler()]
+    )
     parser = argparse.ArgumentParser(description="AxonAI Dashboard")
     parser.add_argument("--bridge", action="store_true", help="Force bridge mode (WSL)")
     parser.add_argument("--direct", action="store_true", help="Force direct MT5 mode (Windows)")
@@ -121,11 +127,11 @@ def main():
 
         # Import and start daemon
         from axonai.realtime.daemon import AxonDaemon
-        config = {
-            "symbol": args.symbol,
-            "realtime_dry_run": True,
-        }
-        daemon = AxonDaemon(config=config)
+        from axonai.default_config import DEFAULT_CONFIG
+        config = DEFAULT_CONFIG.copy()
+        config["symbol"] = args.symbol
+        config["realtime_dry_run"] = True
+        daemon = AxonDaemon(symbol=args.symbol, config=config)
         daemon.start()
 
         print("  Dashboard + Daemon running. Press Ctrl+C to stop.")

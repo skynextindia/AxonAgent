@@ -79,18 +79,11 @@ class MT5TradeExecutor:
 
         price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
 
-        # Position conflict guard: skip if same-direction position already open
-        if not self.config.get("realtime_allow_multiple_positions", False):
-            existing = mt5.positions_get(symbol=symbol)
-            if existing:
-                for pos in existing:
-                    same_dir = (
-                        (order_type == mt5.ORDER_TYPE_BUY and pos.type == mt5.POSITION_TYPE_BUY) or
-                        (order_type == mt5.ORDER_TYPE_SELL and pos.type == mt5.POSITION_TYPE_SELL)
-                    )
-                    if same_dir:
-                        logger.info("TradeExecutor: Position already open (%s). Skipping duplicate.", symbol)
-                        return None
+        # Position conflict guard: enforce hard cap of maximum 1 open position globally (blocking opposite hedges)
+        existing = mt5.positions_get()
+        if existing and len(existing) >= 1:
+            logger.info("TradeExecutor: Position already open globally. Skipping new order.")
+            return None
 
         # 1. Fetch H1 ATR for SL/TP calculations
         atr = 0.0
@@ -112,11 +105,12 @@ class MT5TradeExecutor:
         entry = price
         direction = "BUY" if order_type == mt5.ORDER_TYPE_BUY else "SELL"
         pip = 0.01 if "JPY" in symbol.upper() else 0.0001
-        atr_pips = atr / pip
-        atr_price = atr_pips * 0.0001
         
-        sl = entry - (2 * atr_price) if direction == "BUY" else entry + (2 * atr_price)
-        tp = entry + (4 * atr_price) if direction == "BUY" else entry - (4 * atr_price)
+        sl_distance = max(atr * 1.0, 8 * pip)
+        tp_distance = max(atr * 2.0, 16 * pip)
+        
+        sl = entry - sl_distance if direction == "BUY" else entry + sl_distance
+        tp = entry + tp_distance if direction == "BUY" else entry - tp_distance
 
         # Format price to correct number of digits
         digits = getattr(symbol_info, "digits", 5)

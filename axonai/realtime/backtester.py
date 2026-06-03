@@ -366,6 +366,16 @@ class BacktestEngine:
         logger.info("BacktestEngine: Key levels: S=%s M=%s R=%s", 
                     support_level, mid_level, resistance_level)
         
+        # If price_levels are not seeded, initialize them from derived key levels
+        if not getattr(self.live_evidence, "price_levels", None):
+            from axonai.realtime.live_state import PriceLevel
+            now_utc = datetime.now(timezone.utc)
+            self.live_evidence.price_levels = [
+                PriceLevel(support_level, "SUPPORT_ZONE", "D1", 0, now_utc, "support", 0.7, True),
+                PriceLevel(resistance_level, "RESISTANCE_ZONE", "D1", 0, now_utc, "resistance", 0.7, True)
+            ]
+            logger.info("BacktestEngine: Seeding initial price_levels (S=%.5f, R=%.5f)", support_level, resistance_level)
+        
         sh_price = key_lvls[-1] if key_lvls else 1.1550
         sl_price = key_lvls[0] if key_lvls else 1.1480
         
@@ -598,6 +608,35 @@ class BacktestEngine:
             elif "bearish" in dir_str or "high" in peak_type:
                 direction = "SELL"
                 trigger_reason = f"Bearish Microstructure Peak ({peak_type})"
+            
+            # S/R Proximity (ANY direction) & Daily Trend Gate
+            if direction is not None:
+                # 1. Proximity Check to ANY S/R Zone (5.0 pips)
+                active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
+                closest_dist = float("inf")
+                closest_lvl = None
+                for lvl in active_levels:
+                    dist_pips = abs(event.price - lvl.price) / self.pip_mult
+                    if dist_pips < closest_dist:
+                        closest_dist = dist_pips
+                        closest_lvl = lvl
+                
+                if closest_lvl is None or closest_dist > 5.0:
+                    logger.debug("PEAK GATE: skipped (not near any S/R zone; price=%.5f, closest_dist=%.2f pips)",
+                                 event.price, closest_dist if closest_lvl else -1.0)
+                    return
+                
+                # 2. Daily Trend Alignment Check (using H4 trend direction as daily trend proxy)
+                daily_trend = getattr(self.live_evidence, "trend_direction_h4", "sideways")
+                if daily_trend == "up" and direction != "BUY":
+                    logger.debug("PEAK GATE: skipped (daily trend is UP, but trade is %s)", direction)
+                    return
+                elif daily_trend == "down" and direction != "SELL":
+                    logger.debug("PEAK GATE: skipped (daily trend is DOWN, but trade is %s)", direction)
+                    return
+                
+                logger.info("PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f (%.2f pips from %s level %.5f), Trend=%s, Trade=%s",
+                            event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
             
             # Quality scoring for peaks
             # HIGH (Rules A/B): 0.3 base + up to 0.5 from tick confidence

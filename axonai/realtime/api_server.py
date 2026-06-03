@@ -35,6 +35,8 @@ def convert_numpy(obj: Any) -> Any:
         return bool(obj)
     elif isinstance(obj, np.ndarray):
         return convert_numpy(obj.tolist())
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
     return obj
 
 
@@ -120,19 +122,38 @@ class DashboardServer:
                 }}
 
         @self.app.post("/trigger")
-        def trigger_event():
+        def trigger_event(event_type: str = "level_breach", peak_type: str = "microstructure_exhaustion"):
             from axonai.realtime.event_types import MarketEvent, EventType, EventPriority
             from datetime import datetime
             with self._lock:
                 if self.daemon:
                     price = self.daemon.live_state.current_price if hasattr(self.daemon.live_state, "current_price") else 1.0
+                    try:
+                        ev_type = EventType(event_type.lower())
+                    except ValueError:
+                        ev_type = EventType.LEVEL_BREACH
+                    
+                    details = {"news": "USER FORCED TEST EVENT"}
+                    if ev_type == EventType.PEAK_DETECTION:
+                        details = {
+                            "peak_type": peak_type,
+                            "direction": "bearish_reversal",
+                            "peak_price": price,
+                            "intensity": "HIGH",
+                            "velocity_divergence": 10.0,
+                            "price_per_tick_efficiency": 0.05,
+                            "divergence_warning": True,
+                            "peak_confirmed": True,
+                            "peak_confidence": 0.85
+                        }
+                    
                     event = MarketEvent(
-                        event_type=EventType.LEVEL_BREACH,
+                        event_type=ev_type,
                         priority=EventPriority.CRITICAL,
                         timestamp=datetime.now(),
                         symbol=self.daemon.yf_symbol,
                         price=price,
-                        details={"news": "USER FORCED TEST EVENT"}
+                        details=details
                     )
                     # Bypass cooldown so it fires immediately
                     self.daemon.event_detector._cooldown_until = datetime.min

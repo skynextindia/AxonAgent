@@ -533,7 +533,35 @@ class DashboardController {
     for(const z of sorted){const p=Number(z.price);if(!filtered.some(x=>Math.abs(Number(x.price)-p)<minD))filtered.push(z);if(filtered.length>=40)break}
     this.latestZones=filtered;
     if(this.priceLines){this.priceLines.forEach(l=>{try{this.candleSeries.removePriceLine(l)}catch(e){}});this.priceLines=[]}
-    filtered.forEach(z=>{const p=Number(z.price);let c=z.direction==="resistance"?"#ff3d3d":"#00c853";let ls=LightweightCharts.LineStyle.Dashed;if(z.level_type==="H4_SWING")ls=LightweightCharts.LineStyle.Solid;else if(z.level_type==="PDH"||z.level_type==="PDL")ls=LightweightCharts.LineStyle.Dotted;try{this.priceLines.push(this.candleSeries.createPriceLine({price:p,color:c,lineWidth:z.level_type==="H4_SWING"?2:1,lineStyle:ls,axisLabelVisible:true,title:z.level_type+" ("+z.direction.substring(0,3).toUpperCase()+")"}))}catch(e){}});
+    filtered.forEach(z=>{
+      const p=Number(z.price);
+      let c=z.direction==="resistance"?"#ff3d3d":"#00c853";
+      let ls=LightweightCharts.LineStyle.Dashed;
+      let lw=1;
+      const type=z.level_type;
+      if(type==="H4_SWING"){
+        ls=LightweightCharts.LineStyle.Solid;
+        lw=2;
+      }else if(type==="PDH"||type==="PDL"){
+        ls=LightweightCharts.LineStyle.Solid;
+        c=type==="PDH"?"#ff7f00":"#ffab00";
+      }else if(type==="PWH"||type==="PWL"){
+        ls=LightweightCharts.LineStyle.Solid;
+        lw=2;
+        c="#9c27b0";
+      }else if(type==="LNDH"||type==="LNDL"){
+        ls=LightweightCharts.LineStyle.Dashed;
+        c="#00b8d4";
+      }else if(type==="NYH"||type==="NYL"){
+        ls=LightweightCharts.LineStyle.Dashed;
+        c="#e040fb";
+      }else if(type==="TODAY_H"||type==="TODAY_L"){
+        ls=LightweightCharts.LineStyle.Dotted;
+        lw=2;
+        c="#00f0ff";
+      }
+      try{this.priceLines.push(this.candleSeries.createPriceLine({price:p,color:c,lineWidth:lw,lineStyle:ls,axisLabelVisible:true,title:z.level_type+" ("+z.direction.substring(0,3).toUpperCase()+")"}))}catch(e){}
+    });
     const res=filtered.filter(z=>z.direction==="resistance");const sup=filtered.filter(z=>z.direction==="support");
     if(res.length>0){const r=res[0];this.currentRes=r.price;if(this.levelResVal)this.levelResVal.textContent=this.sf(r.price,5);if(this.levelResTime)this.levelResTime.textContent=r.level_type+" AT "+this.sf(r.price,5)}
     if(sup.length>0){const s=sup[0];this.currentSup=s.price;if(this.levelSupVal)this.levelSupVal.textContent=this.sf(s.price,5);if(this.levelSupTime)this.levelSupTime.textContent=s.level_type+" AT "+this.sf(s.price,5)}

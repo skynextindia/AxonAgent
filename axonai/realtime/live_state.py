@@ -600,10 +600,19 @@ class LiveMarketEvidence:
         # Institutional Price Levels
         self.price_levels: List[PriceLevel] = []
 
-        # Rolling London session trackers
+        # Rolling London/NY/Today session trackers
         self._london_high: Optional[float] = None
         self._london_low: Optional[float] = None
         self._last_london_reset_day: Optional[int] = None
+        
+        self._ny_high: Optional[float] = None
+        self._ny_low: Optional[float] = None
+        self._last_ny_reset_day: Optional[int] = None
+        
+        self._today_high: Optional[float] = None
+        self._today_low: Optional[float] = None
+        self._last_today_reset_day: Optional[int] = None
+        
         self._pending_touches: Dict[float, bool] = {}
 
         # Tick-level behavior tracker
@@ -912,45 +921,131 @@ class LiveMarketEvidence:
             utc_dt = utc_dt.replace(tzinfo=timezone.utc)
 
         # 1. London rolling high/low
-        ldn_open, ldn_close, _, _ = get_dst_session_hours(utc_dt)
+        ldn_open, ldn_close, ny_open, ny_close = get_dst_session_hours(utc_dt)
         if ldn_open <= utc_dt.hour < ldn_close:
             # Reset daily
             if self._last_london_reset_day != utc_dt.day:
                 self._london_high = mid
                 self._london_low = mid
                 self._last_london_reset_day = utc_dt.day
-                # Clean up existing LDH/LDL
-                self.price_levels = [l for l in self.price_levels if l.level_type not in ("LDH", "LDL")]
             else:
                 if self._london_high is None or mid > self._london_high:
                     self._london_high = mid
                 if self._london_low is None or mid < self._london_low:
                     self._london_low = mid
 
-            # Ensure active levels for LDH/LDL are present/updated in the list
-            self.price_levels = [l for l in self.price_levels if l.level_type not in ("LDH", "LDL")]
-            if self._london_high is not None:
-                self.price_levels.append(PriceLevel(
-                    price=float(self._london_high),
-                    level_type="LDH",
-                    timeframe="SESSION",
-                    touches=0,
-                    last_touch=utc_dt,
-                    direction="resistance",
-                    strength=0.2,
-                    is_active=True
-                ))
-            if self._london_low is not None:
-                self.price_levels.append(PriceLevel(
-                    price=float(self._london_low),
-                    level_type="LDL",
-                    timeframe="SESSION",
-                    touches=0,
-                    last_touch=utc_dt,
-                    direction="support",
-                    strength=0.2,
-                    is_active=True
-                ))
+        # 1b. New York rolling high/low
+        if ny_open <= utc_dt.hour < ny_close:
+            # Reset daily
+            if self._last_ny_reset_day != utc_dt.day:
+                self._ny_high = mid
+                self._ny_low = mid
+                self._last_ny_reset_day = utc_dt.day
+            else:
+                if self._ny_high is None or mid > self._ny_high:
+                    self._ny_high = mid
+                if self._ny_low is None or mid < self._ny_low:
+                    self._ny_low = mid
+
+        # 1c. Today's rolling high/low
+        if self._last_today_reset_day != utc_dt.day:
+            self._today_high = mid
+            self._today_low = mid
+            self._last_today_reset_day = utc_dt.day
+        else:
+            if self._today_high is None or mid > self._today_high:
+                self._today_high = mid
+            if self._today_low is None or mid < self._today_low:
+                self._today_low = mid
+
+        # Ensure active levels for LDH/LDL/LNDH/LNDL/NYH/NYL/TODAY_H/TODAY_L are present/updated in the list
+        self.price_levels = [l for l in self.price_levels if l.level_type not in ("LDH", "LDL", "LNDH", "LNDL", "NYH", "NYL", "TODAY_H", "TODAY_L")]
+        if self._london_high is not None:
+            self.price_levels.append(PriceLevel(
+                price=float(self._london_high),
+                level_type="LNDH",
+                timeframe="SESSION",
+                touches=0,
+                last_touch=utc_dt,
+                direction="resistance",
+                strength=0.8,
+                is_active=True
+            ))
+            self.price_levels.append(PriceLevel(
+                price=float(self._london_high),
+                level_type="LDH",
+                timeframe="SESSION",
+                touches=0,
+                last_touch=utc_dt,
+                direction="resistance",
+                strength=0.8,
+                is_active=True
+            ))
+        if self._london_low is not None:
+            self.price_levels.append(PriceLevel(
+                price=float(self._london_low),
+                level_type="LNDL",
+                timeframe="SESSION",
+                touches=0,
+                last_touch=utc_dt,
+                direction="support",
+                strength=0.8,
+                is_active=True
+            ))
+            self.price_levels.append(PriceLevel(
+                price=float(self._london_low),
+                level_type="LDL",
+                timeframe="SESSION",
+                touches=0,
+                last_touch=utc_dt,
+                direction="support",
+                strength=0.8,
+                is_active=True
+            ))
+        if self._ny_high is not None:
+            self.price_levels.append(PriceLevel(
+                price=float(self._ny_high),
+                level_type="NYH",
+                timeframe="SESSION",
+                touches=0,
+                last_touch=utc_dt,
+                direction="resistance",
+                strength=0.8,
+                is_active=True
+            ))
+        if self._ny_low is not None:
+            self.price_levels.append(PriceLevel(
+                price=float(self._ny_low),
+                level_type="NYL",
+                timeframe="SESSION",
+                touches=0,
+                last_touch=utc_dt,
+                direction="support",
+                strength=0.8,
+                is_active=True
+            ))
+        if self._today_high is not None:
+            self.price_levels.append(PriceLevel(
+                price=float(self._today_high),
+                level_type="TODAY_H",
+                timeframe="SESSION",
+                touches=0,
+                last_touch=utc_dt,
+                direction="resistance",
+                strength=0.8,
+                is_active=True
+            ))
+        if self._today_low is not None:
+            self.price_levels.append(PriceLevel(
+                price=float(self._today_low),
+                level_type="TODAY_L",
+                timeframe="SESSION",
+                touches=0,
+                last_touch=utc_dt,
+                direction="support",
+                strength=0.8,
+                is_active=True
+            ))
 
         # 2. Touch Counting & Confirmed Reversals
         for level in self.price_levels:
@@ -1079,6 +1174,7 @@ class LiveMarketEvidence:
             self._m15_candles.append(candle)
             self._detect_patterns(candle)
             self._update_indicators()
+            self._update_m15_swings()
         elif candle.timeframe == "H1":
             self._h1_candles.append(candle)
             self._detect_patterns(candle)
@@ -1106,6 +1202,54 @@ class LiveMarketEvidence:
             self._detect_patterns(candle)
             self._update_indicators()
             self._invalidate_price_levels(candle.close, "H4")
+
+    def _update_m15_swings(self):
+        """Scan self._m15_candles to find local swing highs and swing lows (window of 3) as micro S/R levels."""
+        # Clean up existing M15_SWING levels
+        self.price_levels = [l for l in self.price_levels if l.level_type != "M15_SWING"]
+        if len(self._m15_candles) < 7:
+            return
+        
+        now_utc = datetime.now(timezone.utc)
+        m15_list = list(self._m15_candles)
+        # Scan completed candles, ensuring 3 candles confirmation to the right
+        for i in range(3, len(m15_list) - 3):
+            row = m15_list[i]
+            left = m15_list[i-3:i]
+            right = m15_list[i+1:i+4]
+            
+            row_high = row.high
+            row_low = row.low
+            
+            # Swing High
+            if row_high > max(c.high for c in left) and row_high > max(c.high for c in right):
+                window_low = min(c.low for c in m15_list[i-3:i+4])
+                if row_high - window_low >= 3 * self._pip_mult:
+                    self.price_levels.append(PriceLevel(
+                        price=float(row_high),
+                        level_type="M15_SWING",
+                        timeframe="M15",
+                        touches=0,
+                        last_touch=now_utc,
+                        direction="resistance",
+                        strength=0.1,
+                        is_active=True
+                    ))
+            
+            # Swing Low
+            if row_low < min(c.low for c in left) and row_low < min(c.low for c in right):
+                window_high = max(c.high for c in m15_list[i-3:i+4])
+                if window_high - row_low >= 3 * self._pip_mult:
+                    self.price_levels.append(PriceLevel(
+                        price=float(row_low),
+                        level_type="M15_SWING",
+                        timeframe="M15",
+                        touches=0,
+                        last_touch=now_utc,
+                        direction="support",
+                        strength=0.1,
+                        is_active=True
+                    ))
 
     def _invalidate_price_levels(self, close_price: float, timeframe: str):
         """Invalidate levels if closed through, too old, etc."""

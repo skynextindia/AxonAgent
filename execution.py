@@ -244,12 +244,12 @@ class ExecutionEngine:
         return record
 
     def _has_open_position(self, symbol: str) -> bool:
-        """Checks if there is already an open position for this symbol."""
+        """Checks if there is already an open position globally."""
         if self.dry_run:
             # In paper/dry run mode, simulate no open positions to allow continuous testing
             return False
         
-        positions = mt5.positions_get(symbol=symbol)
+        positions = mt5.positions_get()
         if positions is None:
             return False
         return len(positions) > 0

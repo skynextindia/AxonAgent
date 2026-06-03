@@ -25,7 +25,7 @@ logger = logging.getLogger("intraday_bt")
 import pandas as pd
 import yfinance as yf
 
-csv_path = "/tmp/eurusd_m15_may2026.csv"
+csv_path = "eurusd_m15_may2026.csv"
 
 try:
     df = pd.read_csv(csv_path, index_col=0, parse_dates=True)
@@ -216,7 +216,7 @@ if engine.simulated_trades:
             f" | {t['exit_price']:.5f} | {t['pips']:+.1f} {status} | {t['trigger']} |"
         )
 
-with open(md_path, "w") as f:
+with open(md_path, "w", encoding="utf-8") as f:
     f.write("\n".join(lines))
 
 import json

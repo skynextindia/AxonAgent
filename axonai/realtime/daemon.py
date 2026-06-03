@@ -280,6 +280,9 @@ class AxonDaemon:
             "rsi_h1": me.rsi_h1,
             "macd_signal_h1": me.macd_signal_h1,
             "london_open_bias": me.london_open_bias,
+            "today_bias": me.london_open_bias,
+            "today_high": me.london_range_high,
+            "today_low": me.london_range_low,
             "asian_range_high": me.asian_range_high,
             "asian_range_low": me.asian_range_low,
             "london_range_high": me.london_range_high,
@@ -663,8 +666,47 @@ class AxonDaemon:
             peak_type = event.details.get("peak_type", "") if is_peak else ""
             is_exhaustion = peak_type in ("velocity_exhaustion", "microstructure_exhaustion")
             
+            # S/R Proximity & Daily Trend Gate
+            is_gate_passed = True
+            gate_reason = ""
+            if is_peak and is_exhaustion:
+                dir_str = event.details.get("direction", "")
+                direction = None
+                if "bullish" in dir_str or "low" in peak_type:
+                    direction = "BUY"
+                elif "bearish" in dir_str or "high" in peak_type:
+                    direction = "SELL"
+                
+                if direction is not None:
+                    # 1. Proximity Check to ANY S/R Zone (5.0 pips)
+                    active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
+                    closest_dist = float("inf")
+                    closest_lvl = None
+                    pip_mult = self.live_evidence._pip_mult
+                    for lvl in active_levels:
+                        dist_pips = abs(event.price - lvl.price) / pip_mult
+                        if dist_pips < closest_dist:
+                            closest_dist = dist_pips
+                            closest_lvl = lvl
+                    
+                    if closest_lvl is None or closest_dist > 5.0:
+                        is_gate_passed = False
+                        gate_reason = f"not near any S/R zone (closest: {closest_dist:.2f} pips)"
+                    else:
+                        # 2. Daily Trend Alignment Check (H4 trend direction)
+                        daily_trend = getattr(self.live_evidence, "trend_direction_h4", "sideways")
+                        if daily_trend == "up" and direction != "BUY":
+                            is_gate_passed = False
+                            gate_reason = f"counter daily trend (trend: UP, trade: {direction})"
+                        elif daily_trend == "down" and direction != "SELL":
+                            is_gate_passed = False
+                            gate_reason = f"counter daily trend (trend: DOWN, trade: {direction})"
+                        else:
+                            logger.info("LIVE PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f is %.2f pips from %s level %.5f. Trend=%s, Trade=%s",
+                                        event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
+
             dashboard = get_dashboard()
-            if not self.config.get("test_mode", False) and not (is_peak and is_exhaustion):
+            if not self.config.get("test_mode", False) and not (is_peak and is_exhaustion and is_gate_passed):
                 self._events_skipped += 1
                 if dashboard:
                     dashboard.broadcast({
@@ -676,7 +718,7 @@ class AxonDaemon:
                         "details": event.details,
                         "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                         "status": "skipped",
-                        "reason": "Strategy restricted to Microstructure Peaks",
+                        "reason": gate_reason if not is_gate_passed else "Strategy restricted to Microstructure Peaks",
                         "events_detected": self._events_detected,
                         "events_fired": self._events_fired,
                         "events_skipped": self._events_skipped,
@@ -705,7 +747,9 @@ class AxonDaemon:
                     "events_skipped": self._events_skipped,
                 })
 
-            if not self.graph_executor.should_execute(event):
+            is_dry_run = self.config.get("realtime_dry_run", False)
+
+            if not is_dry_run and not self.graph_executor.should_execute(event):
                 self._events_skipped += 1
                 remaining = self.graph_executor.seconds_until_ready
                 logger.info("SKIPPED (cooldown=%.0fs remaining | priority=%s)",
@@ -733,7 +777,7 @@ class AxonDaemon:
             me = self.live_evidence.snapshot()
 
             # Check WorldState gate
-            if not ws.should_run_graph:
+            if not is_dry_run and not ws.should_run_graph:
                 self._events_skipped += 1
                 logger.info("SKIPPED (WorldState gate: belief=%.2f reason=%s)",
                             ws.belief_score, ws.abort_reason)
@@ -756,7 +800,6 @@ class AxonDaemon:
                 continue
 
             # Fire graph or execute directly for dryrun
-            is_dry_run = self.config.get("realtime_dry_run", False)
             if is_dry_run and not self.config.get("test_mode", False):
                 self._events_fired += 1
                 dir_str = event.details.get("direction", "")
