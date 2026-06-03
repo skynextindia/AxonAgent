@@ -1212,8 +1212,11 @@ class LiveMarketEvidence:
         
         now_utc = datetime.now(timezone.utc)
         m15_list = list(self._m15_candles)
-        # Scan completed candles, ensuring 3 candles confirmation to the right
-        for i in range(3, len(m15_list) - 3):
+        current_close = m15_list[-1].close
+        
+        # Scan only the last 48 candles (~12 hours) to avoid cluttering with old historical swings
+        start_idx = max(3, len(m15_list) - 48)
+        for i in range(start_idx, len(m15_list) - 3):
             row = m15_list[i]
             left = m15_list[i-3:i]
             right = m15_list[i+1:i+4]
@@ -1221,35 +1224,37 @@ class LiveMarketEvidence:
             row_high = row.high
             row_low = row.low
             
-            # Swing High
+            # Swing High (Resistance) - Only add if current price is below it (not breached)
             if row_high > max(c.high for c in left) and row_high > max(c.high for c in right):
-                window_low = min(c.low for c in m15_list[i-3:i+4])
-                if row_high - window_low >= 3 * self._pip_mult:
-                    self.price_levels.append(PriceLevel(
-                        price=float(row_high),
-                        level_type="M15_SWING",
-                        timeframe="M15",
-                        touches=0,
-                        last_touch=now_utc,
-                        direction="resistance",
-                        strength=0.1,
-                        is_active=True
-                    ))
+                if current_close < row_high:
+                    window_low = min(c.low for c in m15_list[i-3:i+4])
+                    if row_high - window_low >= 3 * self._pip_mult:
+                        self.price_levels.append(PriceLevel(
+                            price=float(row_high),
+                            level_type="M15_SWING",
+                            timeframe="M15",
+                            touches=0,
+                            last_touch=now_utc,
+                            direction="resistance",
+                            strength=0.1,
+                            is_active=True
+                        ))
             
-            # Swing Low
+            # Swing Low (Support) - Only add if current price is above it (not breached)
             if row_low < min(c.low for c in left) and row_low < min(c.low for c in right):
-                window_high = max(c.high for c in m15_list[i-3:i+4])
-                if window_high - row_low >= 3 * self._pip_mult:
-                    self.price_levels.append(PriceLevel(
-                        price=float(row_low),
-                        level_type="M15_SWING",
-                        timeframe="M15",
-                        touches=0,
-                        last_touch=now_utc,
-                        direction="support",
-                        strength=0.1,
-                        is_active=True
-                    ))
+                if current_close > row_low:
+                    window_high = max(c.high for c in m15_list[i-3:i+4])
+                    if window_high - row_low >= 3 * self._pip_mult:
+                        self.price_levels.append(PriceLevel(
+                            price=float(row_low),
+                            level_type="M15_SWING",
+                            timeframe="M15",
+                            touches=0,
+                            last_touch=now_utc,
+                            direction="support",
+                            strength=0.1,
+                            is_active=True
+                        ))
 
     def _invalidate_price_levels(self, close_price: float, timeframe: str):
         """Invalidate levels if closed through, too old, etc."""
