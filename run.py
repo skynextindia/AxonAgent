@@ -77,6 +77,15 @@ def main():
     env = "wsl" if is_wsl() else "windows" if is_windows() else "linux"
     bridge_mode = args.bridge or (env == "wsl" and not args.direct)
 
+    if is_windows():
+        try:
+            import ctypes
+            flags = 0x80000000 | 0x00000001 | 0x00000040
+            ctypes.windll.kernel32.SetThreadExecutionState(flags)
+            print("  [+] Windows Sleep Prevention activated (ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED)")
+        except Exception as e:
+            print(f"  [!] Failed to activate sleep prevention: {e}")
+
     print("=" * 60)
     print(f"  AxonAI Dashboard — Environment: {env.upper()}")
     print(f"  Mode: {'Bridge (MT5 via Windows)' if bridge_mode else 'Direct (MT5 local)'}")

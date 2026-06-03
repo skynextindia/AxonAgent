@@ -660,6 +660,15 @@ async def main():
     global symbol
     symbol = args.symbol
 
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            flags = 0x80000000 | 0x00000001 | 0x00000040
+            ctypes.windll.kernel32.SetThreadExecutionState(flags)
+            print("  [+] Windows Sleep Prevention activated (ES_SYSTEM_REQUIRED | ES_AWAYMODE_REQUIRED)")
+        except Exception as e:
+            print(f"  [!] Failed to activate sleep prevention: {e}")
+
     print("=" * 60)
     print("  MT5 Bridge Service")
     print("  Connects to MetaTrader 5 and exposes live data")

@@ -358,6 +358,8 @@ class DashboardController {
     try { this.initChart(); this._debug("Chart init OK, chart:", !!this.chart, "series:", !!this.candleSeries); } catch(e) { console.error("Chart init failed:", e); this._debug("Chart init FAILED:", e.message); }
     this.connect();
     this.startClock();
+    document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"){this._debug("Visibility change: visible. Checking socket.");if(!this.ws||this.ws.readyState!==WebSocket.OPEN){this._debug("Socket closed/missing on visibility restoration. Reconnecting...");this.connect()}}});
+    window.addEventListener("focus",()=>{this._debug("Window focus. Checking socket.");if(!this.ws||this.ws.readyState!==WebSocket.OPEN){this._debug("Socket closed/missing on focus. Reconnecting...");this.connect()}});
   }
   _debug(...args) {
     const el = document.getElementById("chart-debug");
