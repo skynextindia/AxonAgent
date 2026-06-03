@@ -645,6 +645,7 @@ class LiveMarketEvidence:
         self._seed_candles_from_history()
         self._calculate_initial_institutional_levels()
         self._update_indicators()
+        self._update_m15_swings()
 
     def _seed_candles_from_history(self):
         """Populate _m15_candles and _h1_candles deques from recent MT5 bars."""

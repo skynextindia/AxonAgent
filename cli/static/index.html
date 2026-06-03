@@ -497,8 +497,8 @@ class DashboardController {
     if(this.priceBid)this.priceBid.textContent=this.sf(d.bid,5);if(this.priceAsk)this.priceAsk.textContent=this.sf(d.ask,5);
     if(this.spreadVal)this.spreadVal.textContent=this.sf(d.spread,1);
     this.updatePipDistances();
-    // Tick activity strip
-    if(prevBid!==0&&this.tickActivityStrip){const c=d.bid>prevBid?"bg-[#00ff66]":d.bid<prevBid?"bg-[#ff0055]":"bg-[#252538]";const b=document.createElement("span");b.className="w-1.5 h-3.5 flex-shrink-0 transition-all "+c;this.tickActivityStrip.appendChild(b);if(this.tickActivityStrip.children.length>8)this.tickActivityStrip.removeChild(this.tickActivityStrip.firstChild)}
+    // Tick activity strip — raw tick bars
+    if(prevBid!==0&&this.tickActivityStrip){const col=d.bid>prevBid?"#00ff66":d.bid<prevBid?"#ff0055":"#252538";const b=document.createElement("span");b.style.cssText="width:6px;height:10px;flex-shrink:0;background:"+col+";border:1px solid rgba(255,255,255,.08);transition:background .15s;";this.tickActivityStrip.appendChild(b);if(this.tickActivityStrip.children.length>8)this.tickActivityStrip.removeChild(this.tickActivityStrip.firstChild)}
     // Live tick dot
     const dot=e("live-tick-dot");if(dot){dot.style.background="#00ff66";dot.style.boxShadow="0 0 8px #00ff66";setTimeout(()=>{dot.style.background="var(--text-dim)";dot.style.boxShadow="none"},80)}
     // Live candle update
