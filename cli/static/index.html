@@ -187,7 +187,16 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
   <div class="cyber-panel" style="flex-shrink:0;display:flex;flex-direction:column;padding:6px;background:#040406;">
     <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:4px;margin-bottom:2px;"><span style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">POSITIONS</span><span style="font-size:7px;color:var(--text-dim);font-weight:700;letter-spacing:.04em;">MT5 REAL-TIME</span></div>
     <div style="max-height:80px;overflow-y:auto;">
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr 1fr 2fr 1fr;gap:2px;padding:3px 4px;font-size:7px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid rgba(31,31,46,.6);">Ticket Sym Type Vol Open Current SL/TP PnL</div>
+      <div style="display:grid;grid-template-columns:2.5fr 1.5fr 1fr 1fr 1.5fr 1.5fr 3fr 1.5fr;gap:2px;padding:3px 4px;font-size:7.5px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid rgba(31,31,46,.6);">
+        <span>TICKET</span>
+        <span>SYM</span>
+        <span>TYPE</span>
+        <span>VOL</span>
+        <span>OPEN</span>
+        <span>CURRENT</span>
+        <span>SL/TP</span>
+        <span>PNL</span>
+      </div>
       <div id="positions-table-body" style="font-size:7px;"><div style="color:var(--text-dim);text-align:center;padding:8px;font-style:italic;">No active positions.</div></div>
     </div>
   </div>
@@ -601,7 +610,7 @@ class DashboardController {
     const fmt=v=>"$"+v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
     const fmtP=v=>(v>=0?"+":"")+fmt(v);
     ["broker-balance-val","broker-equity-val","broker-profit-val","broker-margin-val","broker-marginlevel-val"].forEach((id,i)=>{const el=document.getElementById(id);if(el){const vals=[fmt(tb),fmt(te),fmtP(tp),fmt(tf),tml?this.sf(tml,2)+"%":"0.00%"];el.textContent=vals[i];if(i===2)el.style.color=tp>0?"var(--green)":tp<0?"var(--red)":"var(--text-primary)"}});
-    const tb2=document.getElementById("positions-table-body");if(tb2){const all=[...(d.positions||[]),...this.mockPositions];if(all.length>0){tb2.innerHTML="";all.forEach(p=>{const div=document.createElement("div");div.style.cssText="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr 1fr 2fr 1fr;gap:2px;padding:2px 4px;border-bottom:1px solid rgba(31,31,46,.5);font-size:7px;";div.innerHTML='<span style="color:var(--text-secondary);font-weight:700;">'+p.ticket+'</span><span style="color:#fff;">'+p.symbol+'</span><span style="color:'+(p.type==="BUY"?"var(--green)":"var(--red)")+';font-weight:700;">'+p.type+'</span><span style="color:var(--text-secondary);">'+this.sf(p.volume,2)+'</span><span style="color:var(--text-secondary);">'+this.sf(p.price_open,5)+'</span><span style="color:var(--text-secondary);">'+this.sf(p.price_current,5)+'</span><span style="color:var(--text-dim);">'+this.sf(p.sl,5)+'/'+this.sf(p.tp,5)+'</span><span style="color:'+(p.profit>0?"var(--green)":p.profit<0?"var(--red)":"#fff")+';font-weight:700;">'+(p.profit>=0?"+":"")+this.sf(p.profit,2)+'</span>';tb2.appendChild(div)})}else{tb2.innerHTML='<div style="color:var(--text-dim);text-align:center;padding:8px;font-style:italic;">No active positions.</div>'}}
+    const tb2=document.getElementById("positions-table-body");if(tb2){const all=[...(d.positions||[]),...this.mockPositions];if(all.length>0){tb2.innerHTML="";all.forEach(p=>{const div=document.createElement("div");div.style.cssText="display:grid;grid-template-columns:2.5fr 1.5fr 1fr 1fr 1.5fr 1.5fr 3fr 1.5fr;gap:2px;padding:3px 4px;border-bottom:1px solid rgba(31,31,46,.5);font-size:7.5px;text-align:center;align-items:center;";div.innerHTML='<span style="color:var(--text-secondary);font-weight:700;">'+p.ticket+'</span><span style="color:#fff;">'+p.symbol+'</span><span style="color:'+(p.type==="BUY"?"var(--green)":"var(--red)")+';font-weight:700;">'+p.type+'</span><span style="color:var(--text-secondary);">'+this.sf(p.volume,2)+'</span><span style="color:var(--text-secondary);">'+this.sf(p.price_open,5)+'</span><span style="color:var(--text-secondary);">'+this.sf(p.price_current,5)+'</span><span style="color:var(--text-dim);">'+this.sf(p.sl,5)+'/'+this.sf(p.tp,5)+'</span><span style="color:'+(p.profit>0?"var(--green)":p.profit<0?"var(--red)":"#fff")+';font-weight:700;">'+(p.profit>=0?"+":"")+this.sf(p.profit,2)+'</span>';tb2.appendChild(div)})}else{tb2.innerHTML='<div style="color:var(--text-dim);text-align:center;padding:8px;font-style:italic;">No active positions.</div>'}}
   }
   handleSingleCandle(d) {
     const tf=d.timeframe||this.currentTimeframe;
