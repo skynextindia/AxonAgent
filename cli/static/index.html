@@ -497,7 +497,20 @@ class DashboardController {
     const sd=e("tick-spread-delta");if(sd&&d.tick_spread_delta!==undefined)sd.textContent=this.sf(d.tick_spread_delta,5);
     [["tick-collapse","tick_collapse"],["tick-agg-shift","tick_agg_shift"],["tick-absorption","tick_absorption"]].forEach(([id,key])=>{const el=e(id);if(el&&d[key]!==undefined)el.textContent=d[key]?"TRUE":"FALSE";});
     const ra=e("tick-rule-a");if(ra&&d.rule_a_max_vel!==undefined){const maxV=Number(d.rule_a_max_vel),avgV=Number(d.rule_a_avg_vel);if(maxV>5*avgV&&maxV>5.0){ra.textContent="CLIMAX "+this.sf(maxV,1);ra.style.color="#ff0055"}else{ra.textContent="IDLE";ra.style.color="var(--text-dim)"}}
-    const rb=e("tick-rule-b");if(rb&&d.rule_b_divergence!==undefined){const divg=Number(d.rule_b_divergence),eff=Number(d.rule_b_efficiency);if(d.rule_b_confirmed){rb.textContent="CONFIRMED";rb.style.color="#00ff66"}else if(divg>0.6){rb.textContent="WARN "+this.sf(divg,2);rb.style.color="#ffab00"}else{rb.textContent="DIV: "+this.sf(divg,2);rb.style.color="var(--text-dim)"}}
+    const rb=e("tick-rule-b");if(rb&&d.rule_b_divergence!==undefined){
+      const divg=Number(d.rule_b_divergence);
+      if(d.rule_b_confirmed){
+        rb.innerHTML='<span style="color:#00ff66;font-weight:900;">CONFIRMED</span> <span style="color:var(--text-dim);font-size:7px;">'+this.sf(divg,2)+'</span>';
+        this._ruleBLatch = Date.now();
+      } else if (this._ruleBLatch && (Date.now() - this._ruleBLatch < 2000)) {
+        // Keep confirmed lit for 2 seconds so it doesn't flicker
+      } else if(divg>0.6){
+        rb.innerHTML='<span style="color:#ffab00;">WARN</span> <span style="color:var(--text-dim);font-size:7px;">'+this.sf(divg,2)+'</span>';
+      } else {
+        rb.textContent="DIV: "+this.sf(divg,2);
+        rb.style.color="var(--text-dim)";
+      }
+    }
     if(this.priceBid)this.priceBid.textContent=this.sf(d.bid,5);if(this.priceAsk)this.priceAsk.textContent=this.sf(d.ask,5);
     if(this.spreadVal)this.spreadVal.textContent=this.sf(d.spread,1);
     this.updatePipDistances();
