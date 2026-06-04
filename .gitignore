@@ -221,3 +221,4 @@ __marimo__/
 # AxonAI session and reports
 .axon_session.json
 reports/
+*.csv
