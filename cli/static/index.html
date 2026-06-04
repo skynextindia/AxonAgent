@@ -458,7 +458,7 @@ class DashboardController {
   initChart() {
     const el = document.getElementById("price-chart");
     if(!el) return;
-    this.chart = LightweightCharts.createChart(el,{layout:{attributionLogo:false,background:{color:"#000"},textColor:"#00f0ff",fontFamily:'"JetBrains Mono",monospace'},grid:{vertLines:{color:"rgba(255,255,255,.03)"},horzLines:{color:"rgba(255,255,255,.03)"}},crosshair:{vertLine:{color:"rgba(255,255,255,.12)",width:1,style:LightweightCharts.LineStyle.Dashed},horzLine:{color:"rgba(255,255,255,.12)",width:1,style:LightweightCharts.LineStyle.Dashed}},rightPriceScale:{borderColor:"#1f1f2e",scaleMargins:{top:.05,bottom:.05}},timeScale:{borderColor:"#1f1f2e",timeVisible:true,secondsVisible:false,barSpacing:8,minBarSpacing:3,rightOffset:5}});
+    this.chart = LightweightCharts.createChart(el,{layout:{attributionLogo:false,background:{color:"#000"},textColor:"#00f0ff",fontFamily:'"JetBrains Mono",monospace'},grid:{vertLines:{color:"rgba(255,255,255,.03)"},horzLines:{color:"rgba(255,255,255,.03)"}},crosshair:{vertLine:{color:"rgba(255,255,255,.12)",width:1,style:LightweightCharts.LineStyle.Dashed},horzLine:{color:"rgba(255,255,255,.12)",width:1,style:LightweightCharts.LineStyle.Dashed}},rightPriceScale:{borderColor:"#1f1f2e",scaleMargins:{top:.05,bottom:.05}},timeScale:{borderColor:"#1f1f2e",timeVisible:true,secondsVisible:false,barSpacing:8,minBarSpacing:3,rightOffset:15}});
     this.candleSeries = this.chart.addSeries(LightweightCharts.CandlestickSeries, {upColor:"#00ff66",downColor:"#ff0055",borderUpColor:"#00ff66",borderDownColor:"#ff0055",wickUpColor:"#00ff66",wickDownColor:"#ff0055",priceFormat:{type:"custom",minMove:.00001,formatter:p=>{if(typeof p!=="number")return"";if(p>200)return p.toFixed(2);if(p>50)return p.toFixed(3);return p.toFixed(5)}}});
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(() => this.drawSessions());
     const ro = new ResizeObserver(entries=>{if(entries[0]&&entries[0].contentRect){const {width,height}=entries[0].contentRect;if(width>0&&height>0){this.chart.resize(width,height);setTimeout(()=>this.drawSessions(),50)}}});ro.observe(el);
@@ -481,7 +481,7 @@ class DashboardController {
     this._debug("Rendering candles:", fmt.length, "chart div:", document.getElementById("price-chart")?.offsetWidth+"x"+document.getElementById("price-chart")?.offsetHeight);
     try { this.candleSeries.setData(fmt); this._debug("setData OK"); } catch(e) { console.error("setData error:", e); this._debug("setData ERROR:", e.message); }
     this.updateMarkers(this.getMarkersForTimeframe(this.currentTimeframe));
-    if(this.chart){if(!this.timeframeLoaded[this.currentTimeframe]){this.chart.timeScale().fitContent();this.timeframeLoaded[this.currentTimeframe]=true;this._debug("fitContent done");}else this.chart.timeScale().scrollToRealTime()}
+    if(this.chart){if(!this.timeframeLoaded[this.currentTimeframe]){this.chart.timeScale().fitContent();this.timeframeLoaded[this.currentTimeframe]=true;this._debug("fitContent done");}}
     this.drawSessions();
   }
   updateMarkers(m) {if(typeof this.candleSeries.setMarkers==="function")this.candleSeries.setMarkers(m);}
@@ -519,7 +519,7 @@ class DashboardController {
     // Live tick dot
     const dot=e("live-tick-dot");if(dot){dot.style.background="#00ff66";dot.style.boxShadow="0 0 8px #00ff66";setTimeout(()=>{dot.style.background="var(--text-dim)";dot.style.boxShadow="none"},80)}
     // Live candle update
-    if(this.candleSeries){const tfs=[{name:"M15",target:this.m15Candles,ps:900},{name:"H1",target:this.h1Candles,ps:3600},{name:"H4",target:this.h4Candles,ps:14400}];const now=Math.floor(Date.now()/1000);const tt=d.time?Math.floor(d.time):now;tfs.forEach(tf=>{const t=tf.target;if(!t||t.length===0)return;const ps=Math.floor(tt/tf.ps)*tf.ps;const lc=t[t.length-1];const p=d.bid;if(ps===Number(lc.time)){lc.close=p;lc.high=Math.max(Number(lc.high),p);lc.low=Math.min(Number(lc.low),p);if(tf.name===this.currentTimeframe)this.candleSeries.update({time:Number(lc.time),open:Number(lc.open),high:Number(lc.high),low:Number(lc.low),close:Number(lc.close)})}else if(ps>Number(lc.time)){const nc={time:ps,open:p,high:p,low:p,close:p};t.push(nc);this.sessionsCache[tf.name]=this.getSessions(t);if(tf.name===this.currentTimeframe){this.candleSeries.update(nc);this.chart.timeScale().scrollToRealTime()}}})}
+    if(this.candleSeries){const tfs=[{name:"M15",target:this.m15Candles,ps:900},{name:"H1",target:this.h1Candles,ps:3600},{name:"H4",target:this.h4Candles,ps:14400}];const now=Math.floor(Date.now()/1000);const tt=d.time?Math.floor(d.time):now;tfs.forEach(tf=>{const t=tf.target;if(!t||t.length===0)return;const ps=Math.floor(tt/tf.ps)*tf.ps;const lc=t[t.length-1];const p=d.bid;if(ps===Number(lc.time)){lc.close=p;lc.high=Math.max(Number(lc.high),p);lc.low=Math.min(Number(lc.low),p);if(tf.name===this.currentTimeframe)this.candleSeries.update({time:Number(lc.time),open:Number(lc.open),high:Number(lc.high),low:Number(lc.low),close:Number(lc.close)})}else if(ps>Number(lc.time)){const nc={time:ps,open:p,high:p,low:p,close:p};t.push(nc);this.sessionsCache[tf.name]=this.getSessions(t);if(tf.name===this.currentTimeframe){this.candleSeries.update(nc);}}})}
   }
   handleRegime(d) {
     if(d.symbol&&this.ticker)this.ticker.textContent=d.symbol;
