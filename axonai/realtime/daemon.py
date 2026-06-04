@@ -1288,6 +1288,12 @@ class AxonDaemon:
             self._tracked_positions.discard(ticket)
             self._active_trade_initial_sl.pop(ticket, None)
             
+            # Apply post-trade global cooldown to prevent immediate reversal trades
+            # caused by our own TP/SL orders hitting the market and causing a tick climax
+            cooldown_minutes = 45 if profit < 0 else 15
+            logger.info("Trade closed (Profit: %.2f). Applying %d minute post-trade cooldown.", profit, cooldown_minutes)
+            self.event_detector.set_cooldown(cooldown_minutes * 60)
+            
         # Update tracked positions with active ones
         self._tracked_positions = active_tickets.copy()
 
