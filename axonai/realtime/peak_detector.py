@@ -126,8 +126,12 @@ class PeakDetector:
         # 3. Compute velocity divergence
         buy_acc = 0.0
         sell_acc = 0.0
-        if len(recent_indices) > 1:
-            dt = max(0.001, (recent_timestamps[-1] - recent_timestamps[-2]).total_seconds())
+        if len(recent_indices) > 5:
+            dt = max(0.25, (recent_timestamps[-1] - recent_timestamps[-5]).total_seconds())
+            buy_acc = (recent_buy_vels[-1] - recent_buy_vels[-5]) / dt
+            sell_acc = (recent_sell_vels[-1] - recent_sell_vels[-5]) / dt
+        elif len(recent_indices) > 1:
+            dt = max(0.25, (recent_timestamps[-1] - recent_timestamps[-2]).total_seconds())
             buy_acc = (recent_buy_vels[-1] - recent_buy_vels[-2]) / dt
             sell_acc = (recent_sell_vels[-1] - recent_sell_vels[-2]) / dt
 
