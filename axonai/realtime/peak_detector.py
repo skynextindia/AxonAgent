@@ -164,6 +164,11 @@ class PeakDetector:
         # Rule B Confirmation
         peak_confirmed = (velocity_divergence > 0.8) and (price_per_tick_efficiency < efficiency_threshold)
 
+        # Store for dashboard live telemetry
+        self._last_divergence = velocity_divergence
+        self._last_efficiency = price_per_tick_efficiency
+        self._last_peak_confirmed = peak_confirmed
+
         # Cooldown Suppression (tightened: longer time + wider price gap)
         COOLDOWN_SEC = 120.0
         COOLDOWN_PIPS = 3.0
@@ -211,6 +216,10 @@ class PeakDetector:
             
             max_vel = max(spike_vels)
             avg_vel = sum(baseline_vels) / len(baseline_vels) if len(baseline_vels) > 0 else 1.0
+            
+            # Store for dashboard live telemetry
+            self._last_max_vel = max_vel
+            self._last_avg_vel = avg_vel
             
             # Calculate dynamic velocity floor using rolling mean and standard deviation (Z-score = 3.0)
             all_vels = list(self.tick_velocities)

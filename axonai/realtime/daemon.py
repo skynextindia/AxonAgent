@@ -607,7 +607,14 @@ class AxonDaemon:
                 "tick_spread_delta": spread_delta,
                 "tick_collapse": collapse,
                 "tick_agg_shift": agg_shift,
-                "tick_absorption": absorption
+                "tick_absorption": absorption,
+                
+                # Rule A & B Live Stats
+                "rule_b_divergence": getattr(self.event_detector.peak_detector, "_last_divergence", 0.0),
+                "rule_b_efficiency": getattr(self.event_detector.peak_detector, "_last_efficiency", 1.0),
+                "rule_b_confirmed": getattr(self.event_detector.peak_detector, "_last_peak_confirmed", False),
+                "rule_a_max_vel": getattr(self.event_detector.peak_detector, "_last_max_vel", 0.0),
+                "rule_a_avg_vel": getattr(self.event_detector.peak_detector, "_last_avg_vel", 0.0)
             })
             
             # Throttle heavier updates to once every 5 ticks
