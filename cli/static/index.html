@@ -407,7 +407,11 @@ class DashboardController {
       const hrs=Math.floor(r),mins=Math.floor((r-hrs)*60);
       const fs=hrs+"H "+String(mins).padStart(2,"0")+"M";
       if(o){
-        tel.style.color="var(--cyan)";bel.style.width=Math.min(100,Math.max(0,p))+"%";bel.style.background="var(--cyan)";
+        const velVal=this.latestVelocity||0;const vr=Math.min(1,velVal/5);
+        const cr=Math.round(0+vr*(255-0)),cg=Math.round(240+vr*(0-240)),cb=Math.round(255+vr*(85-255));
+        const gradColor=`rgb(${cr},${cg},${cb})`;
+        tel.style.color=gradColor;bel.style.width=Math.min(100,Math.max(0,p))+"%";
+        bel.style.background=gradColor;bel.style.boxShadow=`0 0 5px ${gradColor}80`;
         tmel.textContent="CLOSES IN "+fs;tmel.style.color="var(--text-secondary)";
       }else{
         tel.style.color="#555";bel.style.width="0%";bel.style.background="#222";
@@ -531,7 +535,7 @@ class DashboardController {
     if(d.symbol&&this.ticker)this.ticker.textContent=d.symbol;
     const prevBid=this.currentBid;this.currentBid=d.bid;this.currentAsk=d.ask;
     const e=(id)=>document.getElementById(id);
-    const vel=e("tick-velocity");if(vel&&d.tick_velocity!==undefined)vel.textContent=this.sf(d.tick_velocity,2);
+    const vel=e("tick-velocity");if(vel&&d.tick_velocity!==undefined){vel.textContent=this.sf(d.tick_velocity,2);this.latestVelocity=Number(d.tick_velocity);}
     const imb=(id,v)=>{const el=e(id);if(!el||v===undefined||v===null)return;const val=Math.max(-1,Math.min(1,v));let c="#888";if(val>=.5)c="#00ff66";else if(val<=-.5)c="#ff0055";else if(val>=.25)c="#66ff99";else if(val<=-.25)c="#ff6666";let l="NEUTRAL";if(val>=.5)l="STR BUY";else if(val<=-.5)l="STR SELL";else if(val>=.25)l="MOD BUY";else if(val<=-.25)l="MOD SELL";const f=(val>=0?"+":"")+this.sf(val,2);el.innerHTML='<span style="color:'+c+';font-weight:700;">'+f+'</span><span style="color:'+c+';font-size:7px;margin-left:4px;">'+l+'</span>';};
     imb("tick-imbalance-10s",d.tick_imbalance_10s);imb("tick-imbalance-60s",d.tick_imbalance_60s);imb("tick-imbalance-300s",d.tick_imbalance_300s);
     const con=e("tick-imbalance-confluence");if(con&&d.tick_imbalance_10s!==undefined){const v10=d.tick_imbalance_10s,v60=d.tick_imbalance_60s,v300=d.tick_imbalance_300s;if(v10>=.25&&v60>=.25&&v300>=.25){con.textContent="CONFLUENCE: SUSTAINED BUY";con.style.color="#00ff66"}else if(v10<=-.25&&v60<=-.25&&v300<=-.25){con.textContent="CONFLUENCE: SUSTAINED SELL";con.style.color="#ff0055"}else{con.textContent="CONFLUENCE: MIXED — WAIT";con.style.color="var(--text-dim)"}}
