@@ -415,23 +415,23 @@ class DashboardController {
         const cr=Math.round(0+vr*(255-0)),cg=Math.round(240+vr*(0-240)),cb=Math.round(255+vr*(85-255));
         const gradColor=`rgb(${cr},${cg},${cb})`;
         if(p<0.1||(sm.length>0&&p<sm[sm.length-1].p))sm.length=0;
-        if(sm.length===0){
-          if(this.m15Candles&&this.m15Candles.length>0){
-            const nts=Math.floor(Date.now()/1000);let sDt=new Date();
-            if(x.s>x.e&&t<x.e)sDt.setUTCDate(sDt.getUTCDate()-1);
-            sDt.setUTCHours(x.s,0,0,0);const sts=Math.floor(sDt.getTime()/1000);
-            const dur=(x.s>x.e?(24-x.s+x.e):(x.e-x.s))*3600;
-            this.m15Candles.forEach(c=>{
-              if(c.time>=sts&&c.time<=nts){
-                let cp=((c.time-sts)/dur)*100,cVel=((c.high-c.low)/this.pipMult)/5,cvr=Math.min(1,cVel/5);
-                let ccr=Math.round(0+cvr*(255-0)),ccg=Math.round(240+cvr*(0-240)),ccb=Math.round(255+cvr*(85-255));
-                sm.push({p:cp,c:`rgb(${ccr},${ccg},${ccb})`});
-              }
-            });
-            sm.sort((a,b)=>a.p-b.p);
-          }
-          if(sm.length===0)sm.push({p:p,c:"rgba(0,240,255,0.1)"});
+        if(!sm.backfilled && this.m15Candles && this.m15Candles.length > 0) {
+          sm.length = 0; // clear dummy data
+          const nts=Math.floor(Date.now()/1000);let sDt=new Date();
+          if(x.s>x.e&&t<x.e)sDt.setUTCDate(sDt.getUTCDate()-1);
+          sDt.setUTCHours(x.s,0,0,0);const sts=Math.floor(sDt.getTime()/1000);
+          const dur=(x.s>x.e?(24-x.s+x.e):(x.e-x.s))*3600;
+          this.m15Candles.forEach(c=>{
+            if(c.time>=sts&&c.time<=nts){
+              let cp=((c.time-sts)/dur)*100,cVel=((c.high-c.low)/this.pipMult)/5,cvr=Math.min(1,cVel/5);
+              let ccr=Math.round(0+cvr*(255-0)),ccg=Math.round(240+cvr*(0-240)),ccb=Math.round(255+cvr*(85-255));
+              sm.push({p:cp,c:`rgb(${ccr},${ccg},${ccb})`});
+            }
+          });
+          sm.sort((a,b)=>a.p-b.p);
+          sm.backfilled = true;
         }
+        if(sm.length===0){sm.push({p:p,c:"rgba(0,240,255,0.1)"});}
         if((p-sm[sm.length-1].p)>=0.02)sm.push({p:p,c:gradColor});
         let gs=[],lp=0;
         for(let i=0;i<sm.length;i++){
