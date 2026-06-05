@@ -586,11 +586,19 @@ class AxonDaemon:
                 
                 # Calculate spread delta
                 spread_delta = ticks[-1]['ask'] - ticks[-1]['bid'] - (ticks[-2]['ask'] - ticks[-2]['bid'])
-                
-                # Check for absorption
+                # 1. Check for tick efficiency collapse (Price is moving fast but not going anywhere)
+                eff = getattr(self.event_detector.peak_detector, "_last_efficiency", 1.0)
+                collapse = (eff < 0.15) and (velocity > 1.5)
+
+                # 2. Check for aggression shift (Sudden reversal in order flow dominance)
+                i60 = imb.get("imbalance_60s", 0.0)
+                i10 = imb.get("imbalance_10s", 0.0)
+                agg_shift = (i60 > 0.4 and i10 < -0.4) or (i60 < -0.4 and i10 > 0.4)
+
+                # 3. Check for absorption (High volume, high velocity, but zero displacement)
                 t_30s = [t for t in ticks if (ticks[-1]['time'] - t['time']).total_seconds() <= 30.0]
                 pip_unit = 0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001
-                absorption = len(t_30s) >= 10 and velocity > 0.1 and abs(t_30s[-1]['mid'] - t_30s[0]['mid']) < pip_unit
+                absorption = len(t_30s) >= 20 and velocity > 1.5 and abs(t_30s[-1]['mid'] - t_30s[0]['mid']) < (2.0 * pip_unit)
 
             dashboard.broadcast({
                 "type": "tick",
