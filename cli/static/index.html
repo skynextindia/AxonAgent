@@ -423,11 +423,13 @@ class DashboardController {
         gs.push(`${gradColor} ${lp}%`);gs.push(`${gradColor} 100%`);
         tel.style.color=gradColor;bel.style.width=Math.min(100,Math.max(0,p))+"%";
         bel.style.background=`linear-gradient(to right, ${gs.join(", ")})`;
-        bel.style.boxShadow=`0 0 5px ${gradColor}80`;
+        bel.style.position="relative";
+        bel.innerHTML=`<div style="position:absolute;right:0;top:-1px;bottom:-1px;width:2px;background:#fff;box-shadow:0 0 8px ${gradColor};border-radius:1px;"></div>`;
         tmel.textContent="CLOSES IN "+fs;tmel.style.color="var(--text-secondary)";
       }else{
         sm.length=0;
         tel.style.color="#555";bel.style.width="0%";bel.style.background="#222";bel.style.boxShadow="none";
+        bel.innerHTML="";
         tmel.textContent="OPENS IN "+fs;tmel.style.color="#444";
       }
     });
