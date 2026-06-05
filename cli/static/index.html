@@ -372,6 +372,8 @@ class DashboardController {
     this.startClock();
     document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"){this._debug("Visibility change: visible. Checking socket.");if(!this.ws||this.ws.readyState!==WebSocket.OPEN){this._debug("Socket closed/missing on visibility restoration. Reconnecting...");this.connect()}}});
     window.addEventListener("focus",()=>{this._debug("Window focus. Checking socket.");if(!this.ws||this.ws.readyState!==WebSocket.OPEN){this._debug("Socket closed/missing on focus. Reconnecting...");this.connect()}});
+    this.updateSessionTimers();
+    setInterval(() => this.updateSessionTimers(), 1000);
   }
   _debug(...args) {
     const el = document.getElementById("chart-debug");
@@ -379,6 +381,44 @@ class DashboardController {
     el.style.display = "inline";
     el.textContent = args.map(a=>typeof a==="object"?JSON.stringify(a):String(a)).join(" ");
     console.log("[DBG]", ...args);
+  }
+  updateSessionTimers() {
+    const now=new Date(),h=now.getUTCHours(),m=now.getUTCMinutes(),s=now.getUTCSeconds(),t=h+m/60+s/3600;
+    const sess=[
+      {id:"Sydney",nm:"SYD",s:22,e:7,el:document.querySelector('[data-sess="Sydney"]')},
+      {id:"Tokyo",nm:"TYO",s:0,e:9,el:document.querySelector('[data-sess="Tokyo"]')},
+      {id:"London",nm:"LDN",s:8,e:16,el:document.querySelector('[data-sess="London"]')},
+      {id:"New York",nm:"NYC",s:13,e:22,el:document.querySelector('[data-sess="New York"]')}
+    ];
+    let anyOpen=false;
+    sess.forEach(x=>{
+      if(!x.el)return;
+      let o=false,p=0,r=0;
+      if(x.s>x.e){
+        o=(t>=x.s||t<x.e);
+        if(o){anyOpen=true;let e=t>=x.s?(t-x.s):(24-x.s+t);let d=24-x.s+x.e;p=(e/d)*100;r=d-e;}
+        else{r=x.s-t;if(r<0)r+=24;}
+      }else{
+        o=(t>=x.s&&t<x.e);
+        if(o){anyOpen=true;p=((t-x.s)/(x.e-x.s))*100;r=x.e-t;}
+        else{r=x.s-t;if(r<0)r+=24;}
+      }
+      const tel=x.el.querySelector("span"),tmel=x.el.querySelector(".sess-time"),bel=x.el.querySelector(".sess-bar");
+      const hrs=Math.floor(r),mins=Math.floor((r-hrs)*60);
+      const fs=hrs+"H "+String(mins).padStart(2,"0")+"M";
+      if(o){
+        tel.style.color="var(--cyan)";bel.style.width=Math.min(100,Math.max(0,p))+"%";bel.style.background="var(--cyan)";
+        tmel.textContent="CLOSES IN "+fs;tmel.style.color="var(--text-secondary)";
+      }else{
+        tel.style.color="#555";bel.style.width="0%";bel.style.background="#222";
+        tmel.textContent="OPENS IN "+fs;tmel.style.color="#444";
+      }
+    });
+    const b=document.getElementById("market-status-badge");
+    if(b){
+      if(anyOpen){b.textContent="OPEN";b.style.color="var(--cyan)";b.style.background="rgba(0,240,255,.1)";b.style.borderColor="rgba(0,240,255,.2)";}
+      else{b.textContent="CLOSED";b.style.color="var(--text-dim)";b.style.background="rgba(255,255,255,.05)";b.style.borderColor="rgba(255,255,255,.1)";}
+    }
   }
   sf(v, d=5, f="--") { return (v===undefined||v===null||isNaN(Number(v))) ? f : Number(v).toFixed(d); }
   bindDOM() {
