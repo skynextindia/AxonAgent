@@ -414,7 +414,8 @@ class DashboardController {
         const cr=Math.round(0+vr*(255-0)),cg=Math.round(240+vr*(0-240)),cb=Math.round(255+vr*(85-255));
         const gradColor=`rgb(${cr},${cg},${cb})`;
         if(p<0.1||(sm.length>0&&p<sm[sm.length-1].p))sm.length=0;
-        if(sm.length===0||(p-sm[sm.length-1].p)>=0.2)sm.push({p:p,c:gradColor});
+        if(sm.length===0){sm.push({p:p,c:"rgba(0,240,255,0.1)"});}
+        if((p-sm[sm.length-1].p)>=0.02)sm.push({p:p,c:gradColor});
         let gs=[],lp=0;
         for(let i=0;i<sm.length;i++){
           let sp=Math.min(100,Math.max(0,(sm[i].p/p)*100));
