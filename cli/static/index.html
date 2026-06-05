@@ -279,21 +279,32 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
     </div>
   </div>
   <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;flex:1;min-height:0;">
-    <div class="cyber-panel" style="padding:12px;background:#040406;display:flex;flex-direction:column;">
-      <span style="font-size:8px;color:var(--text-secondary);font-weight:900;letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;">CACHE STATE</span>
-      <div style="display:flex;flex-direction:column;gap:4px;font-size:8px;">
-        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">M15 Candles</span><span id="sys-candles-M15" style="color:#fff;font-weight:700;">0</span></div>
-        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">H1 Candles</span><span id="sys-candles-H1" style="color:#fff;font-weight:700;">0</span></div>
-        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">H4 Candles</span><span id="sys-candles-H4" style="color:#fff;font-weight:700;">0</span></div>
+    <div style="display:flex;flex-direction:column;gap:8px;min-height:0;">
+      <div class="cyber-panel" style="padding:12px;background:#040406;display:flex;flex-direction:column;">
+        <span style="font-size:8px;color:var(--text-secondary);font-weight:900;letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;">CACHE STATE</span>
+        <div style="display:flex;flex-direction:column;gap:4px;font-size:8px;">
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">M15 Candles</span><span id="sys-candles-M15" style="color:#fff;font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">H1 Candles</span><span id="sys-candles-H1" style="color:#fff;font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">H4 Candles</span><span id="sys-candles-H4" style="color:#fff;font-weight:700;">0</span></div>
+        </div>
+      </div>
+      <div class="cyber-panel" style="padding:12px;background:#040406;display:flex;flex-direction:column;">
+        <span style="font-size:8px;color:var(--text-secondary);font-weight:900;letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;">TOKEN USAGE</span>
+        <div style="display:flex;flex-direction:column;gap:4px;font-size:8px;">
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Input Tokens</span><span id="sys-tokens-input" style="color:var(--cyan);font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Output Tokens</span><span id="sys-tokens-output" style="color:var(--amber);font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Total Tokens</span><span id="sys-tokens-total" style="color:var(--purple);font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">LLM/Tool Calls</span><span id="sys-token-calls" style="color:#fff;font-weight:700;">0 / 0</span></div>
+        </div>
       </div>
     </div>
-    <div class="cyber-panel" style="padding:12px;background:#040406;display:flex;flex-direction:column;">
-      <span style="font-size:8px;color:var(--text-secondary);font-weight:900;letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;">TOKEN USAGE</span>
-      <div style="display:flex;flex-direction:column;gap:4px;font-size:8px;">
-        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Input Tokens</span><span id="sys-tokens-input" style="color:var(--cyan);font-weight:700;">0</span></div>
-        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Output Tokens</span><span id="sys-tokens-output" style="color:var(--amber);font-weight:700;">0</span></div>
-        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Total Tokens</span><span id="sys-tokens-total" style="color:var(--purple);font-weight:700;">0</span></div>
-        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">LLM/Tool Calls</span><span id="sys-token-calls" style="color:#fff;font-weight:700;">0 / 0</span></div>
+    <div class="cyber-panel" style="flex:1;min-height:0;display:flex;flex-direction:column;background:#040406;border-top:3px solid var(--orange);">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 12px 4px 12px;">
+        <span style="font-size:8px;color:var(--orange);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">MICROSTRUCTURE EVENTS</span>
+        <span id="sys-total-events" style="font-size:8px;color:var(--text-secondary);font-weight:700;">TOTAL: 0</span>
+      </div>
+      <div id="sys-events-log" style="flex:1;overflow-y:auto;padding:8px 12px;font-size:8px;display:flex;flex-direction:column;gap:4px;">
+        <div style="color:var(--text-dim);font-style:italic;text-align:center;padding:12px;">Awaiting microstructure events...</div>
       </div>
     </div>
   </div>

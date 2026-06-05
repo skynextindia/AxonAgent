@@ -553,6 +553,7 @@ class AxonDaemon:
 
     def _on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Called by TickEngine on every new tick."""
+        self.event_detector.is_in_trade = len(self._tracked_positions) > 0
         self.event_detector.on_tick(bid, ask, timestamp)
 
         # Handle trailing stops and closed position logging for dryrun

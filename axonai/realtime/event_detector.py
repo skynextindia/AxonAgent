@@ -678,6 +678,11 @@ class EventDetector:
 
     def _emit(self, event: MarketEvent):
         """Push event into queue with filtering."""
+        if getattr(self, "is_in_trade", False):
+            if self._log_events:
+                logger.debug("Event suppressed (in active trade): %s", event)
+            return
+
         self._enrich_event(event)
         
         # Track if a tradable structure is detected
