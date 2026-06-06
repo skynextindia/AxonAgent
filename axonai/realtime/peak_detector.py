@@ -169,21 +169,36 @@ class PeakDetector:
         self._last_efficiency = price_per_tick_efficiency
         self._last_peak_confirmed = peak_confirmed
 
+        # Determine pinpoint price (the absolute extreme of the move)
+        if dominant_side == "sell":
+            pinpoint_price = min(recent_prices)
+        else:
+            pinpoint_price = max(recent_prices)
+
         # Cooldown Suppression (tightened: longer time + wider price gap)
         COOLDOWN_SEC = 120.0
         COOLDOWN_PIPS = 3.0
 
         if self._last_confirmed_time is not None:
             elapsed = (timestamp - self._last_confirmed_time).total_seconds()
-            pip_distance = abs(price - self._last_confirmed_price) / self.pip_mult
+            pip_distance = abs(pinpoint_price - self._last_confirmed_price) / self.pip_mult
             if elapsed < COOLDOWN_SEC and pip_distance < COOLDOWN_PIPS:
-                # suppress — too close in time and price to last confirmed peak
-                peak_confirmed = False
+                # Bypass suppression if this is a better (more extreme) peak
+                # For bullish reversal (dominant_side == "sell"), we want a lower price
+                # For bearish reversal (dominant_side == "buy"), we want a higher price
+                is_better_peak = False
+                if dominant_side == "sell" and pinpoint_price < self._last_confirmed_price:
+                    is_better_peak = True
+                elif dominant_side == "buy" and pinpoint_price > self._last_confirmed_price:
+                    is_better_peak = True
+                
+                if not is_better_peak:
+                    peak_confirmed = False
 
         # If peak is confirmed, update the tracking values
         if peak_confirmed:
             self._last_confirmed_time = timestamp
-            self._last_confirmed_price = price
+            self._last_confirmed_price = pinpoint_price
 
         # Weighted Confidence Score
         peak_confidence = (
@@ -237,14 +252,23 @@ class PeakDetector:
                     if self.last_fired_peak_time is None or (timestamp - self.last_fired_peak_time).total_seconds() > 180:
                         self.last_fired_peak_time = timestamp
                         max_vel_idx = spike_indices[spike_vels.index(max_vel)]
-                        peak_price = self.tick_prices[max_vel_idx]
-                        direction = "bullish_exhaustion" if price < peak_price else "bearish_exhaustion"
+                        max_vel_price = self.tick_prices[max_vel_idx]
+                        
+                        # Correct direction classification:
+                        # - If dominant side was BUY (price spiked up), it's a bearish reversal (bearish_exhaustion)
+                        # - If dominant side was SELL (price spiked down), it's a bullish reversal (bullish_exhaustion)
+                        if dominant_side == "buy":
+                            direction = "bearish_exhaustion"
+                            pinpoint_a = max(recent_prices)
+                        else:
+                            direction = "bullish_exhaustion"
+                            pinpoint_a = min(recent_prices)
                         
                         logger.info("PeakDetector: Velocity exhaustion climax detected. Max velocity: %.2f", max_vel)
                         return PeakSignal(
                             peak_type="velocity_exhaustion",
                             direction=direction,
-                            peak_price=peak_price,
+                            peak_price=pinpoint_a,
                             intensity="HIGH",
                             velocity_divergence=velocity_divergence,
                             price_per_tick_efficiency=price_per_tick_efficiency,
@@ -264,7 +288,7 @@ class PeakDetector:
                 return PeakSignal(
                     peak_type="microstructure_exhaustion",
                     direction=direction,
-                    peak_price=price,
+                    peak_price=pinpoint_price,
                     intensity="HIGH",
                     velocity_divergence=velocity_divergence,
                     price_per_tick_efficiency=price_per_tick_efficiency,
