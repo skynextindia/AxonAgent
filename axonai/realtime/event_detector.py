@@ -195,7 +195,7 @@ class EventDetector:
                 priority=EventPriority.HIGH if peak_res.intensity == "HIGH" else EventPriority.MEDIUM,
                 timestamp=timestamp,
                 symbol=self.live_state.symbol,
-                price=mid,
+                price=peak_res.peak_price,
                 details=peak_res.to_dict()
             ))
 

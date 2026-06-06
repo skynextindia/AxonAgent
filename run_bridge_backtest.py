@@ -485,6 +485,8 @@ async def main():
 
     # Shift all trade timestamps to Broker Server Time for exact chart matching
     offset_seconds = getattr(collector, "broker_offset", 0)
+    if abs(offset_seconds) >= 24 * 3600:
+        offset_seconds = (offset_seconds + 12 * 3600) % (24 * 3600) - 12 * 3600
     broker_tz = timezone(timedelta(seconds=offset_seconds))
     for t in trades:
         if t.get("entry_time"):
