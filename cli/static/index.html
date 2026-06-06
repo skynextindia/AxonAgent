@@ -84,6 +84,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
 <nav style="display:flex;gap:4px;flex-shrink:0;margin-bottom:2px;">
   <button id="tab-cockpit-btn" class="tab-btn active">&#9654; COCKPIT</button>
   <button id="tab-intel-btn" class="tab-btn">&#9674; INTELLIGENCE</button>
+  <button id="tab-journal-btn" class="tab-btn">&#128203; JOURNAL</button>
   <button id="tab-system-btn" class="tab-btn">&#9881; SYSTEM</button>
 </nav>
 <!-- ═══ MAIN VIEWPORT ═══ -->
@@ -313,6 +314,57 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
     <div id="backtest-results" style="font-size:8px;color:var(--text-dim);font-style:italic;">No results yet. Run <code style="color:var(--cyan);">python run_intraday_backtest.py</code> first.</div>
   </div>
 </div>
+
+<!-- ─── PANEL: JOURNAL ─── -->
+<div id="panel-journal" style="position:absolute;inset:0;display:none;flex-direction:column;gap:3px;min-height:0;overflow:hidden;padding:8px;">
+  <!-- Log Sub-Tabs -->
+  <div style="display:flex;gap:4px;flex-shrink:0;margin-bottom:4px;border-bottom:1px solid var(--border);padding-bottom:4px;">
+    <button id="jtab-trades-btn" class="pair-btn active" style="font-size:8px;padding:3px 8px;">TRADE HISTORY</button>
+    <button id="jtab-decisions-btn" class="pair-btn" style="font-size:8px;padding:3px 8px;">COGNITIVE DECISIONS</button>
+    <button id="jtab-dryrun-btn" class="pair-btn" style="font-size:8px;padding:3px 8px;">DRYRUN AUDIT</button>
+    <button id="jtab-system-btn" class="pair-btn" style="font-size:8px;padding:3px 8px;">SYSTEM CONSOLE</button>
+    <div style="flex:1;"></div>
+    <button id="refresh-journal-btn" style="border:1px solid var(--border);background:#000;color:var(--cyan);font-size:8px;padding:2px 8px;font-family:inherit;font-weight:700;cursor:pointer;letter-spacing:.05em;">REFRESH</button>
+  </div>
+  
+  <!-- Log Views -->
+  <div class="cyber-panel" style="flex:1;min-height:0;display:flex;flex-direction:column;background:#040406;overflow:hidden;padding:8px;">
+    <!-- Trade History View -->
+    <div id="jview-trades" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;max-width:1200px;margin:0 auto;width:100%;">
+      <div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.6fr 1.2fr 0.4fr;gap:4px;padding:6px 12px;font-size:8px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid var(--border);flex-shrink:0;text-transform:uppercase;letter-spacing:.08em;">
+        <span>Timestamp</span>
+        <span>Symbol</span>
+        <span>Type</span>
+        <span>Vol</span>
+        <span>Entry</span>
+        <span>Exit</span>
+        <span>Pips</span>
+        <span>Profit</span>
+        <span>Reason</span>
+        <span>Outcome</span>
+        <span></span>
+      </div>
+      <div id="jview-trades-body" style="flex:1;overflow-y:auto;font-size:7.5px;padding:4px 0;display:flex;flex-direction:column;gap:4px;">
+        <div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No trades in history yet.</div>
+      </div>
+    </div>
+
+    <!-- Cognitive Decisions View -->
+    <div id="jview-decisions" style="flex:1;display:none;flex-direction:column;min-height:0;overflow-y:auto;gap:12px;padding:4px;max-width:1200px;margin:0 auto;width:100%;">
+      <div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No decisions logged yet.</div>
+    </div>
+
+    <!-- Dryrun Audit View -->
+    <div id="jview-dryrun" style="flex:1;display:none;flex-direction:column;min-height:0;overflow-y:auto;gap:4px;padding:4px;font-size:7.5px;max-width:1200px;margin:0 auto;width:100%;">
+      <div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No dryrun logs yet.</div>
+    </div>
+
+    <!-- System Console View -->
+    <div id="jview-system" style="flex:1;display:none;flex-direction:column;min-height:0;overflow:hidden;max-width:1200px;margin:0 auto;width:100%;">
+      <pre id="jview-system-body" style="flex:1;overflow-y:auto;background:#000;color:var(--text-primary);padding:8px;font-size:7.5px;font-family:'JetBrains Mono',monospace;white-space:pre-wrap;margin:0;border:1px solid var(--border-dim);"></pre>
+    </div>
+  </div>
+</div>
 </main>
 <!-- ═══ SETTINGS MODAL ═══ -->
 <div id="settings-modal" style="position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.75);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:all .3s;">
@@ -366,6 +418,7 @@ class DashboardController {
     this.pipMult = 0.0001;
     this.tickHistory = [];
     this.activeTab = "cockpit";
+    this.activeJournalTab = "trades";
     this.mockPositions = [];
     this.latestAccountData = null;
     this.m15Candles = []; this.h1Candles = []; this.h4Candles = [];
@@ -501,9 +554,18 @@ class DashboardController {
       (async()=>{try{const r=await fetch("/config");const j=await r.json();if(j.status==="success"&&j.config){const c=j.config;if(c.tick_poll_interval_ms!==undefined)form.querySelector('[name="tick_poll_interval_ms"]').value=c.tick_poll_interval_ms;if(c.realtime_suppress_asian!==undefined)form.querySelector('[name="realtime_suppress_asian"]').checked=!!c.realtime_suppress_asian;if(c.realtime_level_reset_atr_multiple!==undefined)form.querySelector('[name="realtime_level_reset_atr_multiple"]').value=c.realtime_level_reset_atr_multiple;if(c.indicator_rsi_length!==undefined)form.querySelector('[name="indicator_rsi_length"]').value=c.indicator_rsi_length;if(c.indicator_ema_fast!==undefined)form.querySelector('[name="indicator_ema_fast"]').value=c.indicator_ema_fast;if(c.indicator_ema_slow!==undefined)form.querySelector('[name="indicator_ema_slow"]').value=c.indicator_ema_slow}}catch(e){}})();
     }
     // Tab buttons
-    ["cockpit","intel","system"].forEach(t=>{const btn=g("tab-"+t+"-btn");if(btn)btn.onclick=()=>this.switchTab(t);});
+    ["cockpit","intel","journal","system"].forEach(t=>{const btn=g("tab-"+t+"-btn");if(btn)btn.onclick=()=>this.switchTab(t);});
+    
+    // Journal tab listeners
+    ["trades","decisions","dryrun","system"].forEach(sub=>{
+      const btn = g("jtab-"+sub+"-btn");
+      if(btn) btn.onclick = () => this.switchJournalTab(sub);
+    });
+    const refBtn = g("refresh-journal-btn");
+    if(refBtn) refBtn.onclick = () => this.loadJournalData();
+
     // Keyboard
-    window.addEventListener("keydown",e=>{const inp=e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA";if(!inp&&(e.key==="1"||e.key==="2"||e.key==="3")){e.preventDefault();this.switchTab({1:"cockpit",2:"intel",3:"system"}[e.key])}if(!inp&&(e.key==="ArrowLeft"||e.key==="ArrowRight")){e.preventDefault();const tabs=["cockpit","intel","system"];let i=tabs.indexOf(this.activeTab);if(i===-1)i=0;i=(i+(e.key==="ArrowLeft"?-1:1)+tabs.length)%tabs.length;this.switchTab(tabs[i])}});
+    window.addEventListener("keydown",e=>{const inp=e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA";if(!inp&&(e.key==="1"||e.key==="2"||e.key==="3"||e.key==="4")){e.preventDefault();this.switchTab({1:"cockpit",2:"intel",3:"journal",4:"system"}[e.key])}if(!inp&&(e.key==="ArrowLeft"||e.key==="ArrowRight")){e.preventDefault();const tabs=["cockpit","intel","journal","system"];let i=tabs.indexOf(this.activeTab);if(i===-1)i=0;i=(i+(e.key==="ArrowLeft"?-1:1)+tabs.length)%tabs.length;this.switchTab(tabs[i])}});
   }
   selectTimeframe(tf) {
     this.currentTimeframe = tf;
@@ -594,6 +656,29 @@ class DashboardController {
     const dot=e("live-tick-dot");if(dot){dot.style.background="#00ff66";dot.style.boxShadow="0 0 8px #00ff66";setTimeout(()=>{dot.style.background="var(--text-dim)";dot.style.boxShadow="none"},80)}
     // Live candle update
     if(this.candleSeries){const tfs=[{name:"M15",target:this.m15Candles,ps:900},{name:"H1",target:this.h1Candles,ps:3600},{name:"H4",target:this.h4Candles,ps:14400}];const now=Math.floor(Date.now()/1000);const tt=d.time?Math.floor(d.time):now;tfs.forEach(tf=>{const t=tf.target;if(!t||t.length===0)return;const ps=Math.floor(tt/tf.ps)*tf.ps;const lc=t[t.length-1];const p=d.bid;if(ps===Number(lc.time)){lc.close=p;lc.high=Math.max(Number(lc.high),p);lc.low=Math.min(Number(lc.low),p);if(tf.name===this.currentTimeframe)this.candleSeries.update({time:Number(lc.time),open:Number(lc.open),high:Number(lc.high),low:Number(lc.low),close:Number(lc.close)})}else if(ps>Number(lc.time)){const nc={time:ps,open:p,high:p,low:p,close:p};t.push(nc);this.sessionsCache[tf.name]=this.getSessions(t);if(tf.name===this.currentTimeframe){this.candleSeries.update(nc);}}})}
+    
+    // Process Microstructure Events for the SYSTEM tab log
+    if (d.tick_collapse || d.tick_agg_shift || d.tick_absorption) {
+      this.totalMicroEvents = (this.totalMicroEvents || 0) + 1;
+      const sTel = document.getElementById("sys-total-events");
+      if (sTel) sTel.textContent = "TOTAL: " + this.totalMicroEvents;
+      
+      const log = document.getElementById("sys-events-log");
+      if (log) {
+         if (this.totalMicroEvents === 1) log.innerHTML = "";
+         let type = d.tick_collapse ? "COLLAPSE" : (d.tick_agg_shift ? "AGGR SHIFT" : "ABSORPTION");
+         let color = d.tick_collapse ? "var(--red)" : (d.tick_agg_shift ? "var(--cyan)" : "var(--purple)");
+         let strength = d.tick_collapse ? `Eff:${this.sf(d.rule_b_efficiency,3)}` : (d.tick_agg_shift ? `I60:${this.sf(d.tick_imbalance_60s,2)} I10:${this.sf(d.tick_imbalance_10s,2)}` : `Vel:${this.sf(d.tick_velocity,1)}`);
+         
+         const entry = document.createElement("div");
+         entry.style.cssText = "display:flex;align-items:center;gap:8px;padding:4px;background:rgba(255,255,255,.02);border-left:2px solid "+color;
+         entry.innerHTML = `<span style="color:var(--text-dim);width:40px;">${(d.timestamp||"").split(' ')[1] ? (d.timestamp||"").split(' ')[1].substring(0,8) : ""}</span>
+         <span style="color:${color};font-weight:700;width:70px;">${type}</span>
+         <span style="color:#fff;">Strength: ${strength}</span>`;
+         log.prepend(entry);
+         if (log.children.length > 50) log.removeChild(log.lastChild);
+      }
+    }
   }
   handleRegime(d) {
     if(d.symbol&&this.ticker)this.ticker.textContent=d.symbol;
@@ -778,7 +863,7 @@ class DashboardController {
   }
   switchTab(tab) {
     this.activeTab=tab;
-    ["cockpit","intel","system"].forEach(t=>{const btn=document.getElementById("tab-"+t+"-btn");const p=document.getElementById("panel-"+t);if(btn)btn.className=t===tab?"tab-btn active":"tab-btn";if(p)p.style.display=t===tab?"flex":"none";if(t==="intel"&&p)p.style.display=t===tab?"grid":"none"});
+    ["cockpit","intel","journal","system"].forEach(t=>{const btn=document.getElementById("tab-"+t+"-btn");const p=document.getElementById("panel-"+t);if(btn)btn.className=t===tab?"tab-btn active":"tab-btn";if(p)p.style.display=t===tab?"flex":"none";if(t==="intel"&&p)p.style.display=t===tab?"grid":"none"});
     // Update system panel
     if(tab==="system"){const p=document.getElementById("health-ws");if(p&&this.socketStatus)p.textContent=this.socketStatus.textContent;const d=document.getElementById("health-daemon");if(d)d.textContent=this.uptime?this.uptime.textContent:"--";const m=document.getElementById("health-mt5");if(m&&this.latestAccountData)m.textContent="CONNECTED";const lt=document.getElementById("health-last-tick");if(lt&&this.currentBid)lt.textContent=this.sf(this.currentBid,5);const hp=document.getElementById("health-pair");if(hp&&this.ticker)hp.textContent=this.ticker.textContent;const hc=document.getElementById("health-candles");if(hc){const tf=this.currentTimeframe==="M15"?this.m15Candles:this.currentTimeframe==="H1"?this.h1Candles:this.h4Candles;hc.textContent=(tf||[]).length}
       const su=document.getElementById("sys-uptime");if(su&&this.uptime)su.textContent=this.uptime.textContent;
@@ -787,8 +872,188 @@ class DashboardController {
       ["M15","H1","H4"].forEach(tf=>{const el=document.getElementById("sys-candles-"+tf);if(el){const arr=tf==="M15"?this.m15Candles:tf==="H1"?this.h1Candles:this.h4Candles;el.textContent=(arr||[]).length}});
       ["token-input-val","token-output-val","token-total-val","token-calls-val"].forEach((id,i)=>{const el=document.getElementById(id);const targets=["sys-tokens-input","sys-tokens-output","sys-tokens-total","sys-token-calls"];const te=document.getElementById(targets[i]);if(te&&el)te.textContent=el.textContent});
     }
+    if(tab==="journal"){
+      this.loadJournalData();
+    }
+  }
+  switchJournalTab(sub) {
+    ["trades","decisions","dryrun","system"].forEach(k=>{
+      const btn = document.getElementById("jtab-"+k+"-btn");
+      const view = document.getElementById("jview-"+k);
+      if(btn) btn.className = k===sub ? "pair-btn active" : "pair-btn";
+      if(view) view.style.display = k===sub ? "flex" : "none";
+    });
+    this.activeJournalTab = sub;
+    this.loadJournalData();
+  }
+  async loadJournalData() {
+    const sub = this.activeJournalTab || "trades";
+    if (sub === "trades") {
+      try {
+        const r = await fetch("/api/logs/trades");
+        const j = await r.json();
+        const body = document.getElementById("jview-trades-body");
+        if (body && j.status === "success") {
+          if (j.entries.length === 0) {
+            body.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No trades in history yet.</div>';
+          } else {
+            body.innerHTML = j.entries.map(e => {
+              const color = e.outcome === "WIN" ? "var(--green)" : e.outcome === "LOSS" ? "var(--red)" : "var(--text-secondary)";
+              const dirColor = e.direction === "BUY" ? "var(--green)" : "var(--red)";
+              const exitPriceDisplay = e.exit_price ? parseFloat(e.exit_price).toFixed(5) : "--";
+              const profitDisplay = e.profit !== null && e.profit !== undefined ? (e.profit > 0 ? '+' : '') + parseFloat(e.profit).toFixed(2) : "--";
+              const pipsDisplay = e.pips !== null && e.pips !== undefined ? (e.pips > 0 ? '+' : '') + parseFloat(e.pips).toFixed(1) : "--";
+              
+              return `<div class="trade-row-container" style="border-bottom:1px solid var(--border-dim);display:flex;flex-direction:column;transition:all .15s;">
+                <!-- Main Grid Row -->
+                <div onclick="window.dashboardController.toggleTradeDetails('${e.ticket}')" style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.6fr 1.2fr 0.4fr;gap:4px;padding:8px 12px;cursor:pointer;align-items:center;background:#050507;transition:background 0.1s;" onmouseover="this.style.background='#0d0d14'" onmouseout="this.style.background='#050507'">
+                  <span style="color:var(--text-secondary);">${e.entry_time || '--'}</span>
+                  <span style="color:#fff;font-weight:700;text-align:center;">${e.symbol || '--'}</span>
+                  <span style="color:${dirColor};font-weight:900;text-align:center;">${e.direction || '--'}</span>
+                  <span style="color:#fff;text-align:center;">${e.volume || '--'}</span>
+                  <span style="color:var(--text-secondary);text-align:center;">${e.entry_price ? parseFloat(e.entry_price).toFixed(5) : '--'}</span>
+                  <span style="color:var(--text-secondary);text-align:center;">${exitPriceDisplay}</span>
+                  <span style="color:${color};font-weight:700;text-align:center;">${pipsDisplay}</span>
+                  <span style="color:${color};font-weight:700;text-align:center;">${profitDisplay}</span>
+                  <span style="color:var(--text-secondary);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:4px;">${e.reason || '--'}</span>
+                  <span style="text-align:center;"><span style="background:${e.outcome === "WIN" ? 'rgba(0,200,83,0.1)' : e.outcome === "LOSS" ? 'rgba(255,61,61,0.1)' : 'rgba(156,39,176,0.1)'};color:${color};padding:2px 6px;font-weight:900;border-radius:2px;font-size:7px;">${e.outcome}</span></span>
+                  <span id="tarrow-${e.ticket}" style="color:var(--text-dim);font-weight:700;text-align:center;font-size:8px;">▼</span>
+                </div>
+                
+                <!-- Expanded Detail Section -->
+                <div id="tdetails-${e.ticket}" style="display:none;background:#020203;border-top:1px solid #141419;padding:12px;font-size:8px;color:var(--text-secondary);">
+                  <div style="display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:16px;border-left:3px solid ${color};padding-left:12px;">
+                    <!-- Col 1: Trade Performance Metrics -->
+                    <div style="display:flex;flex-direction:column;gap:5px;">
+                      <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Trade Details</div>
+                      <div style="display:flex;justify-content:space-between;"><span>Ticket</span><span style="color:#fff;font-weight:700;">#${e.ticket}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Duration</span><span style="color:#fff;font-weight:700;">${e.duration_str || '--'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Peak Reached</span><span style="color:var(--green);font-weight:700;">+${e.peak || 0.0} pips</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Max Drawdown</span><span style="color:var(--red);font-weight:700;">-${e.drawdown || 0.0} pips</span></div>
+                    </div>
+                    
+                    <!-- Col 2: Rule A & B Detection Metrics -->
+                    <div style="display:flex;flex-direction:column;gap:5px;">
+                      <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Rule A/B Peak Metrics</div>
+                      <div style="display:flex;justify-content:space-between;"><span>Trigger Event</span><span style="color:#fff;font-weight:700;text-transform:uppercase;">${e.event_type || '--'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Priority</span><span style="color:${e.event_priority === "CRITICAL" ? 'var(--red)' : 'var(--amber)'};font-weight:700;">${e.event_priority || '--'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Velocity Divergence</span><span style="color:#fff;">${e.event_details && e.event_details.velocity_divergence !== undefined ? parseFloat(e.event_details.velocity_divergence).toFixed(2) : '--'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Tick Efficiency</span><span style="color:#fff;">${e.event_details && e.event_details.price_per_tick_efficiency !== undefined ? parseFloat(e.event_details.price_per_tick_efficiency).toFixed(4) : '--'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Peak Confidence</span><span style="color:#fff;">${e.event_details && e.event_details.peak_confidence !== undefined ? (e.event_details.peak_confidence * 100).toFixed(0) + '%' : '--'}</span></div>
+                    </div>
+                    
+                    <!-- Col 3: Market Context / Session -->
+                    <div style="display:flex;flex-direction:column;gap:5px;">
+                      <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Market Regime & Context</div>
+                      <div style="display:flex;justify-content:space-between;"><span>Regime</span><span style="color:#fff;text-transform:uppercase;">${e.dominant_regime || '--'} (${e.regime_confidence ? (e.regime_confidence * 100).toFixed(0) : 0}%)</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Volatility</span><span style="color:#fff;text-transform:uppercase;">${e.volatility || '--'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Spread</span><span style="color:#fff;">${e.spread_pips || 0.0} pips</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Trading Session</span><span style="color:var(--amber);font-weight:700;">${e.session || '--'}</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>`;
+            }).join("");
+          }
+        }
+      } catch (err) { console.error(err); }
+    } else if (sub === "decisions") {
+      try {
+        const r = await fetch("/api/logs/decisions");
+        const j = await r.json();
+        const body = document.getElementById("jview-decisions");
+        if (body && j.status === "success") {
+          if (j.entries.length === 0) {
+            body.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No decisions logged yet.</div>';
+          } else {
+            body.innerHTML = j.entries.slice().reverse().map(e => {
+              const outcomeColor = e.pending ? "var(--amber)" : parseFloat(e.raw) >= 0 ? "var(--green)" : "var(--red)";
+              const outcomeText = e.pending ? "PENDING" : `Raw: ${e.raw} | Alpha: ${e.alpha} | Hold: ${e.holding}`;
+              
+              const formatMarkdown = (txt) => {
+                if (!txt) return '<span style="color:var(--text-dim);font-style:italic;">None</span>';
+                return txt
+                  .replace(/### (.*)/g, '<h4 style="color:var(--cyan);font-weight:900;margin:6px 0 3px 0;font-size:8.5px;">$1</h4>')
+                  .replace(/## (.*)/g, '<h3 style="color:var(--cyan);font-weight:900;margin:8px 0 4px 0;font-size:9.5px;">$1</h3>')
+                  .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#fff;">$1</strong>')
+                  .replace(/\*(.*?)\*/g, '<em style="color:var(--text-secondary);">$1</em>')
+                  .replace(/`([^`]+)`/g, '<code style="background:#000;color:var(--cyan);padding:0 2px;">$1</code>')
+                  .replace(/\n/g, '<br/>');
+              };
+
+              return `<div class="cyber-panel" style="padding:10px;background:#060608;border-left:3px solid ${e.pending ? 'var(--amber)' : 'var(--cyan)'};display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border-dim);padding-bottom:4px;align-items:center;">
+                  <span style="color:#fff;font-weight:700;font-size:9px;">${e.ticker} [${e.date}]</span>
+                  <span style="font-weight:900;color:var(--purple);background:rgba(156,39,176,0.1);padding:1px 6px;border-radius:2px;">RATING: ${e.rating}</span>
+                  <span style="color:${outcomeColor};font-weight:900;font-size:8px;">${outcomeText}</span>
+                </div>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:8px;line-height:1.4;">
+                  <div>
+                    <span style="color:var(--cyan);font-weight:900;display:block;margin-bottom:4px;border-bottom:1px solid rgba(0,240,255,0.1);">DECISION</span>
+                    <div style="color:var(--text-primary);max-height:150px;overflow-y:auto;padding-right:4px;">${formatMarkdown(e.decision)}</div>
+                  </div>
+                  <div>
+                    <span style="color:var(--amber);font-weight:900;display:block;margin-bottom:4px;border-bottom:1px solid rgba(255,171,0,0.1);">REFLECTION</span>
+                    <div style="color:var(--text-secondary);max-height:150px;overflow-y:auto;padding-right:4px;">${formatMarkdown(e.reflection)}</div>
+                  </div>
+                </div>
+              </div>`;
+            }).join("");
+          }
+        }
+      } catch (err) { console.error(err); }
+    } else if (sub === "dryrun") {
+      try {
+        const r = await fetch("/api/logs/dryrun");
+        const j = await r.json();
+        const body = document.getElementById("jview-dryrun");
+        if (body && j.status === "success") {
+          if (j.entries.length === 0) {
+            body.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No dryrun logs yet.</div>';
+          } else {
+            body.innerHTML = j.entries.slice().reverse().map(e => {
+              let detailsText = "";
+              try {
+                detailsText = typeof e.details === "object" ? JSON.stringify(e.details) : e.details;
+              } catch(_) { detailsText = e.details; }
+              
+              let typeColor = "var(--text-secondary)";
+              if (e.event_type === "error") typeColor = "var(--red)";
+              else if (e.event_type === "decision") typeColor = "var(--green)";
+              else if (e.event_type === "graph_fire") typeColor = "var(--purple)";
+              else if (e.event_type === "event_detected") typeColor = "var(--cyan)";
+
+              return `<div style="display:flex;padding:3px 6px;border-bottom:1px solid var(--border-dim);font-family:'JetBrains Mono',monospace;gap:8px;line-height:1.3;align-items:flex-start;">
+                <span style="color:var(--text-dim);flex-shrink:0;">${e.timestamp.replace("T", " ").split(".")[0]}</span>
+                <span style="color:${typeColor};font-weight:900;min-width:100px;flex-shrink:0;">${e.event_type.toUpperCase()}</span>
+                <span style="color:var(--text-primary);word-break:break-all;">${detailsText}</span>
+              </div>`;
+            }).join("");
+          }
+        }
+      } catch (err) { console.error(err); }
+    } else if (sub === "system") {
+      try {
+        const r = await fetch("/api/logs/system");
+        const j = await r.json();
+        const body = document.getElementById("jview-system-body");
+        if (body && j.status === "success") {
+          body.textContent = j.lines.join("\n");
+          setTimeout(() => { body.scrollTop = body.scrollHeight; }, 50);
+        }
+      } catch (err) { console.error(err); }
+    }
   }
   triggerBeep(freq,dur){try{if(!this.audioCtx)this.audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(this.audioCtx.state==="suspended")this.audioCtx.resume();const osc=this.audioCtx.createOscillator(),gain=this.audioCtx.createGain();osc.type="sine";osc.frequency.setValueAtTime(freq,this.audioCtx.currentTime);gain.gain.setValueAtTime(.003,this.audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(.00001,this.audioCtx.currentTime+dur);osc.connect(gain);gain.connect(this.audioCtx.destination);osc.start();osc.stop(this.audioCtx.currentTime+dur)}catch(e){}}
+  toggleTradeDetails(ticket) {
+    const el = document.getElementById("tdetails-" + ticket);
+    const arrow = document.getElementById("tarrow-" + ticket);
+    if (el) {
+      const isHidden = el.style.display === "none";
+      el.style.display = isHidden ? "block" : "none";
+      if (arrow) arrow.textContent = isHidden ? "▲" : "▼";
+    }
+  }
 }
 window.onload=()=>{new DashboardController()};
 </script>

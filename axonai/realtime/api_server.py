@@ -185,6 +185,332 @@ class DashboardServer:
                     return {"status": "success", "message": f"LLM operations {state}"}
                 return {"status": "error", "message": "LLM bridge not available"}
 
+        @self.app.get("/api/logs/decisions")
+        def get_decisions_log():
+            import os
+            from axonai.agents.utils.memory import TradingMemoryLog
+            from axonai.default_config import DEFAULT_CONFIG
+            config = self.daemon.config if (self.daemon and hasattr(self.daemon, "config")) else DEFAULT_CONFIG
+            mem_path = config.get("memory_log_path", os.path.expanduser("~/.axonai/memory/trading_memory.md"))
+            try:
+                log = TradingMemoryLog({"memory_log_path": mem_path})
+                return {"status": "success", "entries": log.load_entries()}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        @self.app.get("/api/logs/trades")
+        def get_trades_log():
+            import os
+            import json
+            import time
+            from datetime import datetime, timedelta
+            import concurrent.futures
+
+            trades_path = os.path.join("reports", "signals.jsonl")
+            if not os.path.exists(trades_path):
+                return {"status": "success", "entries": []}
+            
+            # Blacklist of manually operated trades
+            BLACKLIST_TIMESTAMPS = {
+                "2026-06-03 16:56:58",
+                "2026-06-03 16:50:37",
+                "2026-06-03 16:50:31",
+                "2026-06-03 16:43:54",
+                "2026-06-02 17:47:22",
+                "2026-05-28 00:23:25"
+            }
+            BLACKLIST_TICKETS = {
+                4152710779,
+                4152685271,
+                4152655084,
+                4127567959,
+                2001608993
+            }
+
+            def parse_time_str(ts_str):
+                for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S.%f", "%Y-%m-%dT%H:%M:%S"):
+                    try:
+                        return datetime.strptime(ts_str, fmt)
+                    except ValueError:
+                        continue
+                raise ValueError(f"Unknown time format: {ts_str}")
+
+            def format_duration(start_str, end_str):
+                try:
+                    t1 = parse_time_str(start_str)
+                    t2 = parse_time_str(end_str)
+                    diff = t2 - t1
+                    secs = int(diff.total_seconds())
+                    if secs < 0:
+                        return "--"
+                    days, rem = divmod(secs, 86400)
+                    hours, rem = divmod(rem, 3600)
+                    minutes, seconds = divmod(rem, 60)
+                    if days > 0:
+                        return f"{days}d {hours}h {minutes}m"
+                    elif hours > 0:
+                        return f"{hours}h {minutes}m"
+                    elif minutes > 0:
+                        return f"{minutes}m {seconds}s"
+                    else:
+                        return f"{seconds}s"
+                except Exception:
+                    return "--"
+
+            def get_session_from_time(dt):
+                # Classify session based on UTC hour
+                import time
+                is_dst = time.daylight and time.localtime().tm_isdst > 0
+                utc_offset = - (time.altzone if is_dst else time.timezone) / 3600.0
+                utc_dt = dt - timedelta(hours=utc_offset)
+                hour = utc_dt.hour + utc_dt.minute / 60.0
+                
+                if 12.0 <= hour < 16.0:
+                    return "Overlap"
+                elif 7.0 <= hour < 12.0:
+                    return "London"
+                elif 16.0 <= hour < 21.0:
+                    return "New York"
+                elif 21.0 <= hour or hour < 7.0:
+                    return "Sydney/Tokyo"
+                else:
+                    return "Rollover"
+
+            def compute_drawdown_peak(symbol, direction, entry_price, exit_price, entry_dt, exit_dt, outcome, reason, entry_signal=None):
+                is_jpy = "JPY" in symbol.upper()
+                pip_multiplier = 0.01 if is_jpy else 0.0001
+                
+                if direction.upper() == "BUY":
+                    net_pips = (exit_price - entry_price) / pip_multiplier
+                else:
+                    net_pips = (entry_price - exit_price) / pip_multiplier
+                    
+                bars = []
+                # 1. Direct MT5 mode (if running on Windows with local MT5 package)
+                try:
+                    import MetaTrader5 as mt5
+                    if mt5.terminal_info() is not None:
+                        rates = mt5.copy_rates_range(symbol, mt5.TIMEFRAME_M1, entry_dt, exit_dt)
+                        if rates is not None:
+                            bars = [{"high": float(r["high"]), "low": float(r["low"])} for r in rates]
+                except Exception:
+                    pass
+                    
+                # 2. Bridge Client mode
+                if not bars:
+                    try:
+                        # self is DashboardServer
+                        client = getattr(self, "bridge_client", None)
+                        if client and client.is_connected():
+                            from_ts = int(entry_dt.timestamp())
+                            to_ts = int(exit_dt.timestamp())
+                            request_id = f"trades_{int(time.time() * 1000)}"
+                            fut = concurrent.futures.Future()
+                            client._pending_historical[request_id] = fut
+                            client.request_historical(symbol, "M1", from_ts, to_ts, request_id=request_id)
+                            try:
+                                bars = fut.result(timeout=1.5)
+                            except Exception:
+                                pass
+                    except Exception:
+                        pass
+                        
+                if bars:
+                    try:
+                        highs = [float(b.get("high", b.get("open", 0))) for b in bars]
+                        lows = [float(b.get("low", b.get("open", 0))) for b in bars]
+                        if highs and lows:
+                            max_high = max(highs)
+                            min_low = min(lows)
+                            
+                            if direction.upper() == "BUY":
+                                drawdown_pips = (entry_price - min_low) / pip_multiplier
+                                peak_pips = (max_high - entry_price) / pip_multiplier
+                            else:
+                                drawdown_pips = (max_high - entry_price) / pip_multiplier
+                                peak_pips = (entry_price - min_low) / pip_multiplier
+                                
+                            return round(max(0.0, drawdown_pips), 1), round(max(0.0, peak_pips), 1)
+                    except Exception:
+                        pass
+                        
+                # Fallback to estimate
+                drawdown_pips = 0.0
+                peak_pips = 0.0
+                sl = None
+                if entry_signal and isinstance(entry_signal.get("trade_result"), dict):
+                    sl = entry_signal["trade_result"].get("sl")
+                    
+                if outcome == "WIN":
+                    peak_pips = abs(net_pips)
+                    drawdown_pips = 0.0
+                elif outcome == "LOSS":
+                    if sl and sl > 0:
+                        if direction.upper() == "BUY":
+                            drawdown_pips = (entry_price - sl) / pip_multiplier
+                        else:
+                            drawdown_pips = (sl - entry_price) / pip_multiplier
+                    else:
+                        drawdown_pips = abs(net_pips)
+                    peak_pips = 0.0
+                return round(max(0.0, drawdown_pips), 1), round(max(0.0, peak_pips), 1)
+
+            try:
+                opens = {}
+                closes = {}
+
+                with open(trades_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            entry = json.loads(line)
+                            timestamp = entry.get("timestamp")
+                            if timestamp in BLACKLIST_TIMESTAMPS:
+                                continue
+
+                            if entry.get("type") == "trade_closed":
+                                ticket = entry.get("ticket")
+                                if ticket and int(ticket) in BLACKLIST_TICKETS:
+                                    continue
+                                if ticket:
+                                    closes[int(ticket)] = entry
+                            else:
+                                result = entry.get("trade_result")
+                                if isinstance(result, dict):
+                                    ticket = result.get("order")
+                                    if ticket and int(ticket) in BLACKLIST_TICKETS:
+                                        continue
+                                    is_executed = result.get("retcode") == 10009 or result.get("order", 0) > 0
+                                    if is_executed and ticket:
+                                        opens[int(ticket)] = entry
+                        except Exception:
+                            continue
+
+                merged_entries = []
+                all_tickets = set(opens.keys()) | set(closes.keys())
+
+                for ticket in all_tickets:
+                    open_evt = opens.get(ticket)
+                    close_evt = closes.get(ticket)
+
+                    base = {}
+                    if open_evt:
+                        base.update(open_evt)
+                    if close_evt:
+                        base.update(close_evt)
+
+                    trade = {
+                        "ticket": ticket,
+                        "symbol": base.get("symbol") or base.get("mt5_symbol") or "EURUSD",
+                        "direction": base.get("direction") or (open_evt and open_evt.get("decision", "").upper()) or "BUY",
+                        "volume": base.get("volume") or (open_evt and isinstance(open_evt.get("trade_result"), dict) and open_evt["trade_result"].get("volume")),
+                        "entry_price": base.get("entry_price") or (open_evt and isinstance(open_evt.get("trade_result"), dict) and open_evt["trade_result"].get("price")),
+                        "exit_price": base.get("exit_price"),
+                        "profit": base.get("profit"),
+                        "pips": base.get("pips"),
+                        "reason": base.get("reason") or "Open Position",
+                        "outcome": base.get("outcome") or "OPEN",
+                        "event_type": open_evt.get("event_type") if open_evt else base.get("event_type", "level_breach"),
+                        "event_priority": open_evt.get("event_priority") if open_evt else base.get("event_priority", "INFO"),
+                        "event_details": open_evt.get("event_details") if open_evt else base.get("event_details", {}),
+                        "dominant_regime": open_evt.get("dominant_regime") if open_evt else base.get("dominant_regime", "ranging"),
+                        "regime_confidence": open_evt.get("regime_confidence") if open_evt else base.get("regime_confidence", 0.5),
+                        "volatility": open_evt.get("volatility") if open_evt else base.get("volatility", "medium"),
+                        "spread_pips": open_evt.get("spread_pips") if open_evt else base.get("spread_pips", 0.0),
+                    }
+
+                    entry_time_str = open_evt.get("timestamp") if open_evt else (close_evt and close_evt.get("timestamp"))
+                    exit_time_str = close_evt.get("timestamp") if close_evt else None
+
+                    trade["entry_time"] = entry_time_str
+                    trade["exit_time"] = exit_time_str
+
+                    entry_dt = None
+                    exit_dt = None
+                    if entry_time_str:
+                        try:
+                            entry_dt = parse_time_str(entry_time_str)
+                        except Exception:
+                            pass
+                    if exit_time_str:
+                        try:
+                            exit_dt = parse_time_str(exit_time_str)
+                        except Exception:
+                            pass
+
+                    if entry_time_str and exit_time_str:
+                        trade["duration_str"] = format_duration(entry_time_str, exit_time_str)
+                    else:
+                        trade["duration_str"] = "--"
+
+                    if entry_dt:
+                        trade["session"] = get_session_from_time(entry_dt)
+                    else:
+                        trade["session"] = "--"
+
+                    if trade["entry_price"] is not None and trade["exit_price"] is not None and entry_dt and exit_dt:
+                        drawdown, peak = compute_drawdown_peak(
+                            symbol=trade["symbol"],
+                            direction=trade["direction"],
+                            entry_price=float(trade["entry_price"]),
+                            exit_price=float(trade["exit_price"]),
+                            entry_dt=entry_dt,
+                            exit_dt=exit_dt,
+                            outcome=trade["outcome"],
+                            reason=trade["reason"],
+                            entry_signal=open_evt
+                        )
+                        trade["drawdown"] = drawdown
+                        trade["peak"] = peak
+                    else:
+                        trade["drawdown"] = 0.0
+                        trade["peak"] = 0.0
+
+                    merged_entries.append(trade)
+
+                merged_entries.sort(key=lambda x: x.get("entry_time") or "", reverse=True)
+                return {"status": "success", "entries": merged_entries}
+            except Exception as e:
+                import traceback
+                logging.getLogger(__name__).error("Error loading trades log: %s\n%s", e, traceback.format_exc())
+                return {"status": "error", "message": str(e)}
+
+        @self.app.get("/api/logs/dryrun")
+        def get_dryrun_log():
+            import os
+            import json
+            dryrun_path = os.path.join("reports", "dry_run_session.jsonl")
+            if not os.path.exists(dryrun_path):
+                return {"status": "success", "entries": []}
+            try:
+                entries = []
+                with open(dryrun_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line:
+                            try:
+                                entries.append(json.loads(line))
+                            except Exception:
+                                continue
+                return {"status": "success", "entries": entries[-500:]}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
+        @self.app.get("/api/logs/system")
+        def get_system_log():
+            import os
+            bridge_log_path = "bridge.log"
+            if not os.path.exists(bridge_log_path):
+                return {"status": "success", "lines": ["bridge.log does not exist yet."]}
+            try:
+                with open(bridge_log_path, "r", encoding="utf-8", errors="ignore") as f:
+                    lines = f.readlines()
+                return {"status": "success", "lines": [line.strip() for line in lines[-200:]]}
+            except Exception as e:
+                return {"status": "error", "message": str(e)}
+
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             # Security: only accept WebSocket connections from localhost origins

@@ -1,8 +1,8 @@
 # AxonAI Trading Knowledge Base
 
-## SESSION CHECKPOINT — 2026-05-31
-**Status**: MT5 Windows bridge + WSL bridge client + dashboard integration complete.
-**Next step**: Fix any remaining dashboard rendering issues.
+## SESSION CHECKPOINT — 2026-06-07
+**Status**: Dashboard widescreen optimization, trade merging, click-to-expand metrics drawer completed & verified.
+**Next step**: Run intraday backtests or deploy Live LevelBehaviorTracker.
 
 ---
 

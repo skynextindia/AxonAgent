@@ -24,6 +24,7 @@ _ENV_OVERRIDES = {
     "AXONAI_REALTIME_DEFAULT_LOT_SIZE": "realtime_default_lot_size",
     "AXONAI_REALTIME_DEVIATION": "realtime_deviation",
     "AXONAI_REALTIME_MIN_CONFLUENCE_CONDITIONS": "realtime_min_confluence_conditions",
+    "AXONAI_REALTIME_DRY_RUN": "realtime_dry_run",
 }
 
 

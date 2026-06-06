@@ -716,7 +716,7 @@ class BacktestEngine:
             signal_quality = min(1.0, signal_quality + 0.15)
 
         # ── Gate 7: Minimum signal quality threshold (after all adjustments) ──
-        min_quality = 0.85
+        min_quality = 0.65
         if signal_quality < min_quality:
             return
 
@@ -866,6 +866,7 @@ class BacktestEngine:
                     self._close_position(trade, bid, ask, timestamp, "Stop Loss (SL) Hit")
                 elif bid >= tp:
                     self._close_position(trade, bid, ask, timestamp, "Take Profit (TP) Hit")
+                    
             elif dir == "SELL":
                 # Trailing stop for SELL
                 entry = trade["entry_price"]

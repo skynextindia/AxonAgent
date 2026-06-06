@@ -36,11 +36,14 @@ class BridgeClient:
         self.host = host
         self.port = port
         self.dashboard = dashboard_server
+        if dashboard_server:
+            dashboard_server.bridge_client = self
         self.auto_reconnect = auto_reconnect
         self.reconnect_delay = reconnect_delay
         self.on_connected = on_connected
         self.on_tick = on_tick
         self._running = False
+        self._pending_historical = {}
         self._thread = None
         self._loop = None
         self._ws = None
@@ -123,31 +126,38 @@ class BridgeClient:
                     if msg_type != "tick":
                         self.dashboard.broadcast(data)
 
-                # Handle "historical" responses: convert to "candles" format
-                # so the dashboard can serve them via hydration
-                if msg_type == "historical" and self.dashboard:
-                    bars = data.get("bars", [])
-                    tf = data.get("timeframe", "M15")
-                    if bars:
-                        candles_msg = {
-                            "type": "candles",
-                            "timeframe": tf,
-                            "candles": [
-                                {
-                                    "time": b["time"],
-                                    "open": b["open"],
-                                    "high": b["high"],
-                                    "low": b["low"],
-                                    "close": b["close"],
-                                }
-                                for b in bars
-                            ],
-                        }
-                        self.dashboard.broadcast(candles_msg)
-                        logger.info(
-                            "Bridge relayed historical %s: %d bars -> candles",
-                            tf, len(bars),
-                        )
+                # Handle "historical" responses
+                if msg_type == "historical":
+                    req_id = data.get("request_id")
+                    if req_id in self._pending_historical:
+                        fut = self._pending_historical.pop(req_id, None)
+                        if fut:
+                            fut.set_result(data.get("bars", []))
+                        continue
+                    
+                    if self.dashboard:
+                        bars = data.get("bars", [])
+                        tf = data.get("timeframe", "M15")
+                        if bars:
+                            candles_msg = {
+                                "type": "candles",
+                                "timeframe": tf,
+                                "candles": [
+                                    {
+                                        "time": b["time"],
+                                        "open": b["open"],
+                                        "high": b["high"],
+                                        "low": b["low"],
+                                        "close": b["close"],
+                                    }
+                                    for b in bars
+                                ],
+                            }
+                            self.dashboard.broadcast(candles_msg)
+                            logger.info(
+                                "Bridge relayed historical %s: %d bars -> candles",
+                                tf, len(bars),
+                            )
 
                 # Fire on_tick callback if registered
                 if msg_type == "tick" and self.on_tick:
