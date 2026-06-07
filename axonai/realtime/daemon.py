@@ -71,11 +71,20 @@ class AxonDaemon:
         self.graph_executor = GraphExecutor(symbol, config, callbacks=[self.stats_handler])
 
         # Layer 4: Trade Executor
-        self.trade_executor = MT5TradeExecutor(config)
+        config_base = config.copy()
+        config_base["realtime_magic_number"] = 123456
+        self.trade_executor_base = MT5TradeExecutor(config_base)
+
+        config_opt = config.copy()
+        config_opt["realtime_magic_number"] = 123457
+        self.trade_executor_opt = MT5TradeExecutor(config_opt)
+
+        self.trade_executor = self.trade_executor_opt  # Default fallback reference
 
         # Trailing stop and trade outcome tracking
         self._tracked_positions: set[int] = set()
         self._active_trade_initial_sl: dict[int, float] = {}
+        self._active_trade_system: dict[int, str] = {}
 
         # Stats
         self._events_detected: int = 0
@@ -792,6 +801,27 @@ class AxonDaemon:
             ws = self.live_state.snapshot()
             me = self.live_evidence.snapshot()
 
+            # Enforce Session Gate: only trade London and NY sessions
+            if ws and ws.session not in ("london", "overlap", "newyork"):
+                self._events_skipped += 1
+                logger.info("SKIPPED (session gate: current=%s not in london/overlap/newyork)", ws.session)
+                if dashboard:
+                    dashboard.broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": f"outside London/NY session ({ws.session})",
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
+
             # Check WorldState gate
             if not is_dry_run and not ws.should_run_graph:
                 self._events_skipped += 1
@@ -824,26 +854,30 @@ class AxonDaemon:
                 else:
                     signal = "Sell"
                 
-                logger.info("DRYRUN: Bypassing LLM Graph debate. Pure Rule A+B trigger direct signal: %s", signal)
+                system_name = event.details.get("system", "optimized")
+                logger.info("DRYRUN (%s): Bypassing LLM Graph debate. Pure Rule A+B trigger direct signal: %s", system_name, signal)
                 
                 # Broadcast decision status
                 if dashboard:
                     dashboard.broadcast({
                         "type": "decision",
                         "signal": signal,
+                        "system": system_name,
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     })
                 
-                # Execute order on MT5 terminal
+                # Execute order on MT5 terminal using the correct trade executor
                 trade_result = None
+                executor = self.trade_executor_opt if system_name == "optimized" else self.trade_executor_base
                 try:
-                    trade_result = self.trade_executor.execute_signal(self.mt5_symbol, signal, self.live_state)
+                    trade_result = executor.execute_signal(self.mt5_symbol, signal, self.live_state)
                     if trade_result:
-                        logger.info("AxonDaemon: Order execution complete: %s", trade_result)
+                        logger.info("AxonDaemon: Order execution complete for %s system: %s", system_name, trade_result)
                         ticket = trade_result.get("order")
                         if ticket:
                             self._tracked_positions.add(ticket)
                             self._active_trade_initial_sl[ticket] = trade_result.get("sl")
+                            self._active_trade_system[ticket] = system_name
                 except Exception as ex_err:
                     logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
                 
@@ -999,6 +1033,7 @@ class AxonDaemon:
         timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_payload = {
             "timestamp": timestamp_str,
+            "system": event.details.get("system", "optimized"),
             "ticker": self.yf_symbol,
             "mt5_symbol": self.mt5_symbol,
             "event_type": event.event_type.value,
@@ -1240,8 +1275,10 @@ class AxonDaemon:
                 
             outcome = "WIN" if pips > 0 else "LOSS" if pips < 0 else "BREAKEVEN"
             
+            system_name = self._active_trade_system.pop(ticket, "optimized")
+            
             # Log outcome to file
-            log_msg = f"TRADE CLOSED: Ticket {ticket} | {direction} | Entry: {entry_price:.5f} | Exit: {exit_price:.5f} | Profit: {profit:+.2f} | Pips: {pips:+.1f} | Reason: {reason} | Outcome: {outcome}"
+            log_msg = f"TRADE CLOSED: Ticket {ticket} | System: {system_name} | {direction} | Entry: {entry_price:.5f} | Exit: {exit_price:.5f} | Profit: {profit:+.2f} | Pips: {pips:+.1f} | Reason: {reason} | Outcome: {outcome}"
             logger.info("=" * 60)
             logger.info(log_msg)
             logger.info("=" * 60)
@@ -1253,6 +1290,7 @@ class AxonDaemon:
                 payload = {
                     "timestamp": exit_time_str,
                     "type": "trade_closed",
+                    "system": system_name,
                     "ticket": ticket,
                     "symbol": self.mt5_symbol,
                     "direction": direction,

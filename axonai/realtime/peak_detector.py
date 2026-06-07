@@ -40,10 +40,15 @@ class PeakSignal:
 class PeakDetector:
     """Detects price exhaustion peaks, volume climaxes, price-per-tick efficiency collapses, and velocity divergences."""
 
-    def __init__(self, window_size: int = 1000, pip_mult: float = 0.0001, rule_c_enabled: bool = True):
+    def __init__(self, window_size: int = 1000, pip_mult: float = 0.0001, rule_c_enabled: bool = True,
+                 use_pinpoint_price: bool = False, correct_rule_a_direction: bool = False,
+                 cooldown_bypass_better_peak: bool = False):
         self.window_size = window_size
         self.pip_mult = pip_mult
         self.rule_c_enabled = rule_c_enabled
+        self.use_pinpoint_price = use_pinpoint_price
+        self.correct_rule_a_direction = correct_rule_a_direction
+        self.cooldown_bypass_better_peak = cooldown_bypass_better_peak
         
         # History buffers (maxlen=window_size allows tracking enough ticks for 60s window)
         self.tick_prices: deque[float] = deque(maxlen=window_size)
@@ -181,16 +186,18 @@ class PeakDetector:
 
         if self._last_confirmed_time is not None:
             elapsed = (timestamp - self._last_confirmed_time).total_seconds()
-            pip_distance = abs(pinpoint_price - self._last_confirmed_price) / self.pip_mult
+            p_val = pinpoint_price if self.use_pinpoint_price else price
+            pip_distance = abs(p_val - self._last_confirmed_price) / self.pip_mult
             if elapsed < COOLDOWN_SEC and pip_distance < COOLDOWN_PIPS:
                 # Bypass suppression if this is a better (more extreme) peak
                 # For bullish reversal (dominant_side == "sell"), we want a lower price
                 # For bearish reversal (dominant_side == "buy"), we want a higher price
                 is_better_peak = False
-                if dominant_side == "sell" and pinpoint_price < self._last_confirmed_price:
-                    is_better_peak = True
-                elif dominant_side == "buy" and pinpoint_price > self._last_confirmed_price:
-                    is_better_peak = True
+                if self.cooldown_bypass_better_peak:
+                    if dominant_side == "sell" and pinpoint_price < self._last_confirmed_price:
+                        is_better_peak = True
+                    elif dominant_side == "buy" and pinpoint_price > self._last_confirmed_price:
+                        is_better_peak = True
                 
                 if not is_better_peak:
                     peak_confirmed = False
@@ -198,7 +205,7 @@ class PeakDetector:
         # If peak is confirmed, update the tracking values
         if peak_confirmed:
             self._last_confirmed_time = timestamp
-            self._last_confirmed_price = pinpoint_price
+            self._last_confirmed_price = pinpoint_price if self.use_pinpoint_price else price
 
         # Weighted Confidence Score
         peak_confidence = (
@@ -254,15 +261,20 @@ class PeakDetector:
                         max_vel_idx = spike_indices[spike_vels.index(max_vel)]
                         max_vel_price = self.tick_prices[max_vel_idx]
                         
-                        # Correct direction classification:
-                        # - If dominant side was BUY (price spiked up), it's a bearish reversal (bearish_exhaustion)
-                        # - If dominant side was SELL (price spiked down), it's a bullish reversal (bullish_exhaustion)
-                        if dominant_side == "buy":
-                            direction = "bearish_exhaustion"
-                            pinpoint_a = max(recent_prices)
+                        if self.correct_rule_a_direction:
+                            # Correct direction classification:
+                            # - If dominant side was BUY (price spiked up), it's a bearish reversal (bearish_exhaustion)
+                            # - If dominant side was SELL (price spiked down), it's a bullish reversal (bullish_exhaustion)
+                            if dominant_side == "buy":
+                                direction = "bearish_exhaustion"
+                                pinpoint_a = max(recent_prices) if self.use_pinpoint_price else max_vel_price
+                            else:
+                                direction = "bullish_exhaustion"
+                                pinpoint_a = min(recent_prices) if self.use_pinpoint_price else max_vel_price
                         else:
-                            direction = "bullish_exhaustion"
-                            pinpoint_a = min(recent_prices)
+                            # Old direction logic:
+                            direction = "bullish_exhaustion" if price < max_vel_price else "bearish_exhaustion"
+                            pinpoint_a = max_vel_price
                         
                         logger.info("PeakDetector: Velocity exhaustion climax detected. Max velocity: %.2f", max_vel)
                         return PeakSignal(
@@ -288,7 +300,7 @@ class PeakDetector:
                 return PeakSignal(
                     peak_type="microstructure_exhaustion",
                     direction=direction,
-                    peak_price=pinpoint_price,
+                    peak_price=pinpoint_price if self.use_pinpoint_price else price,
                     intensity="HIGH",
                     velocity_divergence=velocity_divergence,
                     price_per_tick_efficiency=price_per_tick_efficiency,

@@ -145,4 +145,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_dry_run": True,
     "peak_detector_rule_c_enabled": False,
     "trade_risk_pct": 0.01,
+    "realtime_use_pinpoint_price": False,
+    "realtime_correct_rule_a_direction": False,
+    "realtime_cooldown_bypass_better_peak": False,
+    "indicator_rsi_length": 14,
+    "indicator_ema_fast": 12,
+    "indicator_ema_slow": 26,
 })

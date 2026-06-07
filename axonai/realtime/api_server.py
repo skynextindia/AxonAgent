@@ -93,6 +93,9 @@ class DashboardServer:
                     "indicator_rsi_length": 14,
                     "indicator_ema_fast": 12,
                     "indicator_ema_slow": 26,
+                    "realtime_use_pinpoint_price": False,
+                    "realtime_correct_rule_a_direction": False,
+                    "realtime_cooldown_bypass_better_peak": False,
                 }}
 
         @self.app.post("/config")
@@ -119,6 +122,9 @@ class DashboardServer:
                     "indicator_rsi_length": new_config.get("indicator_rsi_length", 14),
                     "indicator_ema_fast": new_config.get("indicator_ema_fast", 12),
                     "indicator_ema_slow": new_config.get("indicator_ema_slow", 26),
+                    "realtime_use_pinpoint_price": new_config.get("realtime_use_pinpoint_price", False),
+                    "realtime_correct_rule_a_direction": new_config.get("realtime_correct_rule_a_direction", False),
+                    "realtime_cooldown_bypass_better_peak": new_config.get("realtime_cooldown_bypass_better_peak", False),
                 }}
 
         @self.app.post("/trigger")
@@ -404,6 +410,7 @@ class DashboardServer:
                     trade = {
                         "ticket": ticket,
                         "symbol": base.get("symbol") or base.get("mt5_symbol") or "EURUSD",
+                        "system": base.get("system") or (open_evt and open_evt.get("system")) or (close_evt and close_evt.get("system")) or "optimized",
                         "direction": base.get("direction") or (open_evt and open_evt.get("decision", "").upper()) or "BUY",
                         "volume": base.get("volume") or (open_evt and isinstance(open_evt.get("trade_result"), dict) and open_evt["trade_result"].get("volume")),
                         "entry_price": base.get("entry_price") or (open_evt and isinstance(open_evt.get("trade_result"), dict) and open_evt["trade_result"].get("price")),

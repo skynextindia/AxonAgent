@@ -79,11 +79,14 @@ class MT5TradeExecutor:
 
         price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
 
-        # Position conflict guard: enforce hard cap of maximum 1 open position globally (blocking opposite hedges)
+        # Position conflict guard: enforce cap of maximum 1 open position per strategy (by magic number)
         existing = mt5.positions_get()
-        if existing and len(existing) >= 1:
-            logger.info("TradeExecutor: Position already open globally. Skipping new order.")
-            return None
+        if existing:
+            # Filter by magic number to allow concurrent systems to trade independently
+            system_existing = [p for p in existing if p.magic == self.magic]
+            if len(system_existing) >= 1:
+                logger.info("TradeExecutor: Position already open for magic %d. Skipping new order.", self.magic)
+                return None
 
         # 1. Fetch H1 ATR for SL/TP calculations
         atr = 0.0

@@ -468,14 +468,24 @@ async def main():
     # ── Step 3: Run backtest ──────────────────────────────────────
     from axonai.realtime.backtester import BacktestEngine
 
+    # Determine pip multiplier based on symbol
+    is_gold = "XAU" in args.symbol.upper() or "GOLD" in args.symbol.upper()
+    pip_mult = 0.1 if is_gold else 0.01 if "JPY" in args.symbol.upper() else 0.0001
+
     engine = BacktestEngine(
         ticker=args.symbol.replace("EURUSD", "EURUSD=X"),
         days=args.months * 30,
     )
+    engine.pip_mult = pip_mult
+    engine.event_detector._pip_mult = pip_mult
+    engine.event_detector.set_pip_multiplier = lambda is_jpy: None
+    engine.event_detector.peak_detector_base.pip_mult = pip_mult
+    engine.event_detector.peak_detector_opt.pip_mult = pip_mult
+    engine.event_detector.peak_detector.pip_mult = pip_mult
 
     # Seed price_levels before run() so _update_indicators doesn't
     # overwrite swing_highs/swing_lows with empty lists.
-    BridgeDataCollector.seed_engine_levels(engine, bars, pip_mult=0.0001)
+    BridgeDataCollector.seed_engine_levels(engine, bars, pip_mult=pip_mult)
 
     logger.info("Running backtest on %d %s bars (%d months)...",
                 len(bars), args.timeframe, args.months)
