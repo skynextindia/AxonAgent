@@ -163,6 +163,7 @@ bt_mod.BacktestEngine.load_historical_data = patched_load_historical_data
 engine = BacktestEngine(
     ticker="EURUSD=X",
     days=29,
+    config={"require_sr_proximity": False}
 )
 
 logger.info("Starting INTRADAY backtest on real EURUSD M15 data (%d bars, 29 days)...", len(candle_rows))

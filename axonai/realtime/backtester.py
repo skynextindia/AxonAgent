@@ -63,7 +63,7 @@ class BacktestEngine:
         self.live_state._initialized = True
         self.live_evidence._initialized = True
 
-    def load_historical_data(self) -> Tuple[List[LiveCandle], List[Tuple[float, float, datetime]]]:
+    def load_historical_data(self) -> Tuple[List[LiveCandle], List[Tuple[float, float, datetime, int]]]:
         """Fetch real data from MT5 if connected, otherwise generate synthetic market dataset."""
         connected = False
         try:
@@ -79,7 +79,7 @@ class BacktestEngine:
             logger.info("BacktestEngine: MT5 offline. Generating realistic high-fidelity synthetic market dataset.")
             return self._generate_synthetic_data()
 
-    def _load_real_data(self) -> Tuple[List[LiveCandle], List[Tuple[float, float, datetime]]]:
+    def _load_real_data(self) -> Tuple[List[LiveCandle], List[Tuple[float, float, datetime, int]]]:
         """Load real historical bars from MetaTrader 5 and generate interpolated ticks."""
         mt5_sym = _to_mt5_symbol(self.ticker)
         _ensure_symbol_visible(mt5_sym)
@@ -94,7 +94,7 @@ class BacktestEngine:
             return self._generate_synthetic_data()
             
         candles: List[LiveCandle] = []
-        ticks: List[Tuple[float, float, datetime]] = []
+        ticks: List[Tuple[float, float, datetime, int]] = []
         
         # Convert M15 df to LiveCandle objects
         for t, row in df_m15.iterrows():
@@ -135,13 +135,14 @@ class BacktestEngine:
                 # Low to Close
                 sub_prices.extend(np.linspace(l, c, 5)[1:])
                 
+            volume_per_tick = max(1, int(candle.volume / len(sub_prices)))
             for idx, price in enumerate(sub_prices):
                 tick_time = t + dt * idx
-                ticks.append((price - 0.00005, price + 0.00005, tick_time))
+                ticks.append((price - 0.00005, price + 0.00005, tick_time, volume_per_tick))
                 
         return candles, ticks
 
-    def _generate_synthetic_data(self) -> Tuple[List[LiveCandle], List[Tuple[float, float, datetime]]]:
+    def _generate_synthetic_data(self) -> Tuple[List[LiveCandle], List[Tuple[float, float, datetime, int]]]:
         """Generate realistic multi-phase synthetic market dataset.
         
         Market phases (Wyckoff-inspired):
@@ -156,7 +157,7 @@ class BacktestEngine:
         np.random.seed(42)
         
         candles: List[LiveCandle] = []
-        ticks: List[Tuple[float, float, datetime]] = []
+        ticks: List[Tuple[float, float, datetime, int]] = []
         
         base_price = 1.1500
         current_time = datetime.now() - timedelta(days=self.days)
@@ -251,9 +252,10 @@ class BacktestEngine:
                                   list(np.linspace(high_p, low_p, 6)[1:]) +
                                   list(np.linspace(low_p, close_p, 5)[1:]))
             
+            volume_per_tick = max(1, int(candle.volume / len(sub_prices)))
             for idx, pr in enumerate(sub_prices):
                 tick_time = bar_time + dt * idx
-                ticks.append((round(pr - 0.00005, 5), round(pr + 0.00005, 5), tick_time))
+                ticks.append((round(pr - 0.00005, 5), round(pr + 0.00005, 5), tick_time, volume_per_tick))
                 
         return candles, ticks
 
@@ -423,12 +425,14 @@ class BacktestEngine:
             
             # Feed ticks that fall within this bar's time window
             while tick_index < total_ticks:
-                bid, ask, tick_time = ticks[tick_index]
+                tick_data = ticks[tick_index]
+                bid, ask, tick_time = tick_data[0], tick_data[1], tick_data[2]
+                volume = tick_data[3] if len(tick_data) > 3 else 1
                 if tick_time > bar_end:
                     break
                     
                 # 1. Update Peak/Microstructure Detections per Tick
-                self.event_detector.on_tick(bid, ask, tick_time)
+                self.event_detector.on_tick(bid, ask, tick_time, volume)
                 
                 # Check event queue for new tick-level detections
                 while not self.event_queue.empty():
@@ -610,7 +614,7 @@ class BacktestEngine:
                 trigger_reason = f"Bearish Microstructure Peak ({peak_type})"
             
             # S/R Proximity (ANY direction) & Daily Trend Gate
-            if direction is not None:
+            if direction is not None and self.config.get("require_sr_proximity", True):
                 # 1. Proximity Check to ANY S/R Zone (5.0 pips)
                 active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
                 closest_dist = float("inf")
@@ -626,17 +630,9 @@ class BacktestEngine:
                                  event.price, closest_dist if closest_lvl else -1.0)
                     return
                 
-                # 2. Daily Trend Alignment Check (using H4 trend direction as daily trend proxy)
-                daily_trend = getattr(self.live_evidence, "trend_direction_h4", "sideways")
-                if daily_trend == "up" and direction != "BUY":
-                    logger.debug("PEAK GATE: skipped (daily trend is UP, but trade is %s)", direction)
-                    return
-                elif daily_trend == "down" and direction != "SELL":
-                    logger.debug("PEAK GATE: skipped (daily trend is DOWN, but trade is %s)", direction)
-                    return
-                
-                logger.info("PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f (%.2f pips from %s level %.5f), Trend=%s, Trade=%s",
-                            event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
+
+                logger.info("PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f (%.2f pips from %s level %.5f), Trade=%s",
+                            event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, direction)
             
             # Quality scoring for peaks
             # HIGH (Rules A/B): 0.3 base + up to 0.5 from tick confidence
