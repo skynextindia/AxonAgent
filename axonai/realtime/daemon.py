@@ -29,6 +29,7 @@ from axonai.realtime.graph_executor import GraphExecutor
 from axonai.realtime.trade_executor import MT5TradeExecutor
 from axonai.realtime.api_server import get_dashboard
 from cli.stats_handler import StatsCallbackHandler
+from axonai.realtime.calendar_guard import CalendarGuard
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +81,9 @@ class AxonDaemon:
         self.trade_executor_opt = MT5TradeExecutor(config_opt)
 
         self.trade_executor = self.trade_executor_opt  # Default fallback reference
+
+        # Layer 3b: Calendar Guard
+        self.calendar_guard = CalendarGuard(symbol, config)
 
         # Trailing stop and trade outcome tracking
         self._tracked_positions: set[int] = set()
@@ -255,6 +259,9 @@ class AxonDaemon:
                         resume_dt += timedelta(days=1)
                     market_resume_timestamp = int(resume_dt.timestamp())
 
+        # Check economic calendar block status
+        is_cal_blocked, cal_ev, cal_reason = self.calendar_guard.check_block_status()
+
         return {
             "type": "regime",
             "symbol": self.mt5_symbol,
@@ -272,6 +279,8 @@ class AxonDaemon:
             "session_details": session_details,
             "market_closed": market_closed,
             "market_resume_timestamp": market_resume_timestamp,
+            "calendar_blocked": is_cal_blocked,
+            "calendar_reason": cal_reason,
             # --- Daemon Status and Stats ---
             "daemon_start_time": self._start_time.timestamp() * 1000 if self._start_time else None,
             "cooldown_remaining": int(self.graph_executor.seconds_until_ready),
@@ -419,6 +428,22 @@ class AxonDaemon:
             logger.warning("Failed to retrieve MT5 account info: %s", e)
             return None
 
+    def _get_calendar_payload(self) -> dict:
+        return {
+            "type": "calendar",
+            "events": [
+                {
+                    "title": ev["title"],
+                    "country": ev["country"],
+                    "impact": ev["impact"],
+                    "time": ev["time"].isoformat(),
+                    "forecast": ev["forecast"],
+                    "previous": ev["previous"],
+                    "actual": ev["actual"]
+                } for ev in self.calendar_guard.events
+            ]
+        }
+
     def start(self):
         """Cold start and enter main event loop."""
         self._start_time = datetime.now()
@@ -481,6 +506,13 @@ class AxonDaemon:
             
         logger.info("Step 2/4: Live state initialized")
 
+        # Initialize economic calendar
+        try:
+            logger.info("AxonDaemon: Initializing economic calendar feed...")
+            self.calendar_guard.update()
+        except Exception as ce:
+            logger.error("AxonDaemon: failed to initialize economic calendar: %s", ce)
+
         # 3. Compile graph
         logger.info("Step 3/4: Compiling LangGraph...")
         self.graph_executor.compile_graph()
@@ -513,6 +545,12 @@ class AxonDaemon:
             acc_payload = self._get_account_payload()
             if acc_payload:
                 dashboard.broadcast(acc_payload)
+            
+            # 4b. Economic Calendar
+            try:
+                dashboard.broadcast(self._get_calendar_payload())
+            except Exception as ce:
+                logger.error("AxonDaemon: failed to broadcast calendar payload: %s", ce)
             
             # 5. Latest Tick
             tick = mt5.symbol_info_tick(self.mt5_symbol) if mt5 else None
@@ -572,6 +610,12 @@ class AxonDaemon:
                 self._check_for_closed_positions(bid, ask)
             except Exception as e:
                 logger.error("Error managing trailing stops / closed positions: %s", e, exc_info=True)
+        
+        # Check calendar cuts
+        try:
+            self._check_calendar_cuts()
+        except Exception as e:
+            logger.error("Error checking calendar cuts on tick: %s", e)
         
         # Broadcast tick to dashboard WebSocket
         dashboard = get_dashboard()
@@ -682,6 +726,10 @@ class AxonDaemon:
                 if pytime.time() - last_stats_time > 10.0:
                     self._log_stats()
                     last_stats_time = pytime.time()
+                try:
+                    self._check_calendar_cuts()
+                except Exception as e:
+                    logger.error("Error checking calendar cuts in event loop: %s", e)
                 continue
 
             self._events_detected += 1
@@ -771,6 +819,28 @@ class AxonDaemon:
                     "events_fired": self._events_fired,
                     "events_skipped": self._events_skipped,
                 })
+
+            # Check calendar block status
+            is_blocked, ev, block_reason = self.calendar_guard.check_block_status()
+            if is_blocked:
+                self._events_skipped += 1
+                logger.info("SKIPPED (calendar block: %s)", block_reason)
+                if dashboard:
+                    dashboard.broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": block_reason,
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
 
             is_dry_run = self.config.get("realtime_dry_run", False)
 
@@ -1343,6 +1413,76 @@ class AxonDaemon:
             
         # Update tracked positions with active ones
         self._tracked_positions = active_tickets.copy()
+
+    def _check_calendar_cuts(self):
+        """Check if active positions must be closed due to an upcoming calendar event."""
+        if not self.calendar_guard.enabled:
+            return
+            
+        # Check if a new fetch occurred and broadcast updates to the dashboard
+        if self.calendar_guard.update():
+            dashboard = get_dashboard()
+            if dashboard:
+                try:
+                    dashboard.broadcast(self._get_calendar_payload())
+                except Exception as e:
+                    logger.error("Error broadcasting calendar update: %s", e)
+
+        # Analyze completed economic event outcomes
+        try:
+            self.check_event_outcomes()
+        except Exception as oe:
+            logger.error("Error analyzing event outcomes: %s", oe)
+            
+        import MetaTrader5 as mt5
+        if not mt5 or not mt5.terminal_info():
+            return
+            
+        positions = mt5.positions_get(symbol=self.mt5_symbol)
+        if not positions:
+            return
+            
+        # Determine if current market price is close to any crucial S/R level (5.0 pips)
+        is_near_level = False
+        active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
+        if active_levels and hasattr(self, "tick_engine") and self.tick_engine.latest_bid > 0:
+            current_price = self.tick_engine.latest_bid
+            pip_mult = self.live_evidence._pip_mult
+            for lvl in active_levels:
+                dist_pips = abs(current_price - lvl.price) / pip_mult
+                if dist_pips <= 5.0:
+                    is_near_level = True
+                    break
+                    
+        for pos in positions:
+            ticket = pos.ticket
+            # Only manage positions belonging to our daemon's magic numbers
+            if pos.magic in (self.trade_executor_base.magic, self.trade_executor_opt.magic):
+                is_in_profit = pos.profit > 0
+                
+                # Check cut status using position-specific metrics
+                should_cut, ev, reason = self.calendar_guard.check_cut_status(
+                    is_in_profit=is_in_profit, 
+                    is_near_level=is_near_level
+                )
+                
+                if should_cut:
+                    logger.warning("CalendarGuard: Cutting position ticket %d before economic event: %s", ticket, reason)
+                    # Close the position using the correct trade executor
+                    executor = self.trade_executor_opt if pos.magic == self.trade_executor_opt.magic else self.trade_executor_base
+                    success = executor.close_position(ticket)
+                    if success:
+                        from axonai.realtime.alerts import send_alert
+                        msg = f"CALENDAR CUT SUCCESS: Closed ticket {ticket} due to upcoming event: {ev['title']} ({ev['country']})"
+                        logger.info(msg)
+                        send_alert(msg, self.config)
+
+    def check_event_outcomes(self):
+        """Analyze completed events to measure price outcome against expectations."""
+        try:
+            self.calendar_guard.analyze_completed_events(self.mt5_symbol, self.offset_hours)
+        except Exception as e:
+            logger.error("Error analyzing event outcomes: %s", e)
 
 
 def generate_session_summary():
