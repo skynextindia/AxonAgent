@@ -394,8 +394,9 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
   <div class="cyber-panel" style="flex:1;min-height:0;display:flex;flex-direction:column;background:#040406;overflow:hidden;padding:8px;">
     <!-- Trade History View -->
     <div id="jview-trades" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;max-width:1200px;margin:0 auto;width:100%;">
-      <div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.6fr 1.2fr 0.4fr;gap:4px;padding:6px 12px;font-size:8px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid var(--border);flex-shrink:0;text-transform:uppercase;letter-spacing:.08em;">
+      <div style="display:grid;grid-template-columns:1.2fr 0.8fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.6fr 1.2fr 0.4fr;gap:4px;padding:6px 12px;font-size:8px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid var(--border);flex-shrink:0;text-transform:uppercase;letter-spacing:.08em;">
         <span>Timestamp</span>
+        <span>Trigger</span>
         <span>Symbol</span>
         <span>Type</span>
         <span>Vol</span>
@@ -987,11 +988,37 @@ class DashboardController {
               const exitPriceDisplay = e.exit_price ? parseFloat(e.exit_price).toFixed(5) : "--";
               const profitDisplay = e.profit !== null && e.profit !== undefined ? (e.profit > 0 ? '+' : '') + parseFloat(e.profit).toFixed(2) : "--";
               const pipsDisplay = e.pips !== null && e.pips !== undefined ? (e.pips > 0 ? '+' : '') + parseFloat(e.pips).toFixed(1) : "--";
+              let triggerShort = "--";
+              if (e.event_type === "peak_detection") triggerShort = "PEAK";
+              else if (e.event_type === "level_breach") triggerShort = "SWEEP";
+              
+              let col2HTML = "";
+              if (e.event_type === "level_breach") {
+                col2HTML = `
+                  <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Liquidity Sweep Metrics</div>
+                  <div style="display:flex;justify-content:space-between;"><span>Trigger Event</span><span style="color:#fff;font-weight:700;text-transform:uppercase;">${e.event_type || '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Priority</span><span style="color:${e.event_priority === "CRITICAL" ? 'var(--red)' : 'var(--amber)'};font-weight:700;">${e.event_priority || '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Level Type</span><span style="color:#fff;font-weight:700;">${e.event_details && e.event_details.level_type ? e.event_details.level_type : '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Level Direction</span><span style="color:#fff;">${e.event_details && e.event_details.direction ? e.event_details.direction : '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Strength / Touches</span><span style="color:#fff;">${e.event_details && e.event_details.strength !== undefined ? (e.event_details.strength * 100).toFixed(0) + '%' : '--'} / ${e.event_details && e.event_details.touches !== undefined ? e.event_details.touches : '--'}x</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Distance</span><span style="color:var(--amber);font-weight:700;">${e.event_details && e.event_details.distance_pips !== undefined ? parseFloat(e.event_details.distance_pips).toFixed(1) + ' pips' : '--'}</span></div>
+                `;
+              } else {
+                col2HTML = `
+                  <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Rule A/B Peak Metrics</div>
+                  <div style="display:flex;justify-content:space-between;"><span>Trigger Event</span><span style="color:#fff;font-weight:700;text-transform:uppercase;">${e.event_type || '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>MTF Alignment</span><span style="color:${e.event_details && e.event_details.mtf_alignment === 'BEARISH' ? 'var(--red)' : e.event_details && e.event_details.mtf_alignment === 'BULLISH' ? 'var(--green)' : '#fff'};font-weight:700;">${e.event_details && e.event_details.mtf_alignment ? e.event_details.mtf_alignment : '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Velocity Divergence</span><span style="color:#fff;">${e.event_details && e.event_details.velocity_divergence !== undefined ? parseFloat(e.event_details.velocity_divergence).toFixed(2) : '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Tick Efficiency</span><span style="color:#fff;">${e.event_details && e.event_details.price_per_tick_efficiency !== undefined ? parseFloat(e.event_details.price_per_tick_efficiency).toFixed(4) : '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Peak Confidence</span><span style="color:#fff;">${e.event_details && e.event_details.peak_confidence !== undefined ? (e.event_details.peak_confidence * 100).toFixed(0) + '%' : '--'}</span></div>
+                `;
+              }
               
               return `<div class="trade-row-container" style="border-bottom:1px solid var(--border-dim);display:flex;flex-direction:column;transition:all .15s;">
                 <!-- Main Grid Row -->
-                <div onclick="window.dashboardController.toggleTradeDetails('${e.ticket}')" style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.6fr 1.2fr 0.4fr;gap:4px;padding:8px 12px;cursor:pointer;align-items:center;background:#050507;transition:background 0.1s;" onmouseover="this.style.background='#0d0d14'" onmouseout="this.style.background='#050507'">
+                <div onclick="window.dashboardController.toggleTradeDetails('${e.ticket}')" style="display:grid;grid-template-columns:1.2fr 0.8fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.6fr 1.2fr 0.4fr;gap:4px;padding:8px 12px;cursor:pointer;align-items:center;background:#050507;transition:background 0.1s;" onmouseover="this.style.background='#0d0d14'" onmouseout="this.style.background='#050507'">
                   <span style="color:var(--text-secondary);">${e.entry_time || '--'}</span>
+                  <span style="color:var(--purple);font-weight:700;text-align:center;">${triggerShort}</span>
                   <span style="color:#fff;font-weight:700;text-align:center;">${e.symbol || '--'}</span>
                   <span style="color:${dirColor};font-weight:900;text-align:center;">${e.direction || '--'}</span>
                   <span style="color:#fff;text-align:center;">${e.volume || '--'}</span>
@@ -1000,8 +1027,8 @@ class DashboardController {
                   <span style="color:${color};font-weight:700;text-align:center;">${pipsDisplay}</span>
                   <span style="color:${color};font-weight:700;text-align:center;">${profitDisplay}</span>
                   <span style="color:var(--text-secondary);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:4px;">${e.reason || '--'}</span>
-                  <span style="text-align:center;"><span style="background:${e.outcome === "WIN" ? 'rgba(0,200,83,0.1)' : e.outcome === "LOSS" ? 'rgba(255,61,61,0.1)' : 'rgba(156,39,176,0.1)'};color:${color};padding:2px 6px;font-weight:900;border-radius:2px;font-size:7px;">${e.outcome}</span></span>
-                  <span id="tarrow-${e.ticket}" style="color:var(--text-dim);font-weight:700;text-align:center;font-size:8px;">Γû╝</span>
+                  <span style="text-align:center;"><span style="background:${e.outcome === 'WIN' ? 'rgba(0,200,83,0.1)' : e.outcome === 'LOSS' ? 'rgba(255,61,61,0.1)' : 'rgba(156,39,176,0.1)'};color:${color};padding:2px 6px;font-weight:900;border-radius:2px;font-size:7px;">${e.outcome}</span></span>
+                  <span id="tarrow-${e.ticket}" style="color:var(--text-dim);font-weight:700;text-align:center;font-size:8px;">&#9660;</span>
                 </div>
                 
                 <!-- Expanded Detail Section -->
@@ -1019,12 +1046,7 @@ class DashboardController {
                     
                     <!-- Col 2: Rule A & B Detection Metrics -->
                     <div style="display:flex;flex-direction:column;gap:5px;">
-                      <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Rule A/B Peak Metrics</div>
-                      <div style="display:flex;justify-content:space-between;"><span>Trigger Event</span><span style="color:#fff;font-weight:700;text-transform:uppercase;">${e.event_type || '--'}</span></div>
-                      <div style="display:flex;justify-content:space-between;"><span>Priority</span><span style="color:${e.event_priority === "CRITICAL" ? 'var(--red)' : 'var(--amber)'};font-weight:700;">${e.event_priority || '--'}</span></div>
-                      <div style="display:flex;justify-content:space-between;"><span>Velocity Divergence</span><span style="color:#fff;">${e.event_details && e.event_details.velocity_divergence !== undefined ? parseFloat(e.event_details.velocity_divergence).toFixed(2) : '--'}</span></div>
-                      <div style="display:flex;justify-content:space-between;"><span>Tick Efficiency</span><span style="color:#fff;">${e.event_details && e.event_details.price_per_tick_efficiency !== undefined ? parseFloat(e.event_details.price_per_tick_efficiency).toFixed(4) : '--'}</span></div>
-                      <div style="display:flex;justify-content:space-between;"><span>Peak Confidence</span><span style="color:#fff;">${e.event_details && e.event_details.peak_confidence !== undefined ? (e.event_details.peak_confidence * 100).toFixed(0) + '%' : '--'}</span></div>
+                      ${col2HTML}
                     </div>
                     
                     <!-- Col 3: Market Context / Session -->
