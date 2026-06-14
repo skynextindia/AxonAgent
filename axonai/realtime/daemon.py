@@ -91,6 +91,9 @@ class AxonDaemon:
         self._tracked_positions: set[int] = set()
         self._active_trade_initial_sl: dict[int, float] = {}
         self._active_trade_system: dict[int, str] = {}
+        self._active_trade_peak_profit: dict[int, float] = {}
+        self._active_trade_peak_efficiency: dict[int, float] = {}
+        self._active_trade_stage: dict[int, int] = {}
 
         # Stats
         self._events_detected: int = 0
@@ -1179,6 +1182,9 @@ class AxonDaemon:
         pip = 0.01 if "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() else 0.0001
         digits = 3 if "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() else 5
         
+        pd = self.event_detector.peak_detector
+        curr_eff = float(getattr(pd, "last_efficiency", 1.0))
+        
         for pos in positions:
             ticket = pos.ticket
             # If we don't have the initial SL recorded, initialize it from pos.sl
@@ -1190,11 +1196,102 @@ class AxonDaemon:
             if initial_sl <= 0.0:
                 continue
                 
+            # Initialize dynamic metrics if not present
+            if ticket not in self._active_trade_peak_profit:
+                self._active_trade_peak_profit[ticket] = 0.0
+            if ticket not in self._active_trade_peak_efficiency:
+                self._active_trade_peak_efficiency[ticket] = curr_eff
+            if ticket not in self._active_trade_stage:
+                self._active_trade_stage[ticket] = 1
+                
+            # 1. Update profit metrics
             if pos.type == mt5.POSITION_TYPE_BUY:
-                # BUY: profit is (bid - price_open). SL distance is (price_open - initial_sl)
+                current_profit = (bid - pos.price_open) / pip
+            else:
+                current_profit = (pos.price_open - ask) / pip
+                
+            self._active_trade_peak_profit[ticket] = max(self._active_trade_peak_profit[ticket], current_profit)
+            
+            # 2. Update efficiency metric
+            self._active_trade_peak_efficiency[ticket] = max(self._active_trade_peak_efficiency[ticket], curr_eff)
+            
+            # 3. Stage 3: Exhaustion Exit (Close Trade)
+            entry_t = datetime.fromtimestamp(pos.time)
+            is_entry_aware = entry_t.tzinfo is not None
+            recent_indices = []
+            for idx, t in enumerate(pd.timestamps):
+                is_t_aware = t.tzinfo is not None
+                if is_entry_aware == is_t_aware:
+                    if t >= entry_t:
+                        recent_indices.append(idx)
+                else:
+                    if t.replace(tzinfo=None) >= entry_t.replace(tzinfo=None):
+                        recent_indices.append(idx)
+                        
+            recent_len = len(recent_indices)
+            if recent_len >= 20:
+                buy_vels = [pd.buy_velocities[idx] for idx in recent_indices]
+                sell_vels = [pd.sell_velocities[idx] for idx in recent_indices]
+                prices = [pd.tick_prices[idx] for idx in recent_indices]
+                
+                avg_buy_vel = sum(buy_vels) / recent_len
+                avg_sell_vel = sum(sell_vels) / recent_len
+                
+                if pos.type == mt5.POSITION_TYPE_BUY:
+                    max_idx = prices.index(max(prices))
+                    stalled = max_idx < (recent_len - 15)
+                    velocity_flip = (avg_sell_vel > 1.5 * max(0.1, avg_buy_vel)) and (avg_sell_vel > 2.0)
+                    if stalled and velocity_flip:
+                        self._close_mt5_position(pos, "Exhaustion Exit (Stage 3 Close)")
+                        continue
+                elif pos.type == mt5.POSITION_TYPE_SELL:
+                    min_idx = prices.index(min(prices))
+                    stalled = min_idx < (recent_len - 15)
+                    velocity_flip = (avg_buy_vel > 1.5 * max(0.1, avg_sell_vel)) and (avg_buy_vel > 2.0)
+                    if stalled and velocity_flip:
+                        self._close_mt5_position(pos, "Exhaustion Exit (Stage 3 Close)")
+                        continue
+                        
+            # 4. Stage 2: Slowdown Phase (Reduce Risk / Tighten SL)
+            if self._active_trade_stage[ticket] == 1 and current_profit > 0 and curr_eff < 0.6 * self._active_trade_peak_efficiency[ticket]:
+                self._active_trade_stage[ticket] = 2
+                peak_p = self._active_trade_peak_profit[ticket]
+                if peak_p >= 5.0:
+                    new_sl_val = pos.price_open + (peak_p * 0.5) * pip if pos.type == mt5.POSITION_TYPE_BUY else pos.price_open - (peak_p * 0.5) * pip
+                else:
+                    new_sl_val = pos.price_open + 1 * pip if pos.type == mt5.POSITION_TYPE_BUY else pos.price_open - 1 * pip
+                
+                new_sl = round(new_sl_val, digits)
+                
+                # Check if this new SL actually tightens our risk
+                should_modify = False
+                if pos.type == mt5.POSITION_TYPE_BUY:
+                    if new_sl > pos.sl:
+                        should_modify = True
+                else:
+                    if new_sl < pos.sl or pos.sl == 0.0:
+                        should_modify = True
+                        
+                if should_modify:
+                    logger.info("AxonDaemon: Slowdown Stage 2 triggered for ticket %d. Modifying SL: %.5f -> %.5f",
+                                ticket, pos.sl, new_sl)
+                    request = {
+                        "action": mt5.TRADE_ACTION_SLTP,
+                        "position": ticket,
+                        "symbol": self.mt5_symbol,
+                        "sl": new_sl,
+                        "tp": pos.tp,
+                    }
+                    res = mt5.order_send(request)
+                    if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                        logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
+                    continue
+            
+            # 5. Standard Trailing Stop (1:1 Risk-Reward breakeven fallback)
+            if pos.type == mt5.POSITION_TYPE_BUY:
                 sl_dist = pos.price_open - initial_sl
-                current_profit = bid - pos.price_open
-                if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
+                current_profit_val = bid - pos.price_open
+                if sl_dist > 0 and current_profit_val >= 1.0 * sl_dist:
                     breakeven_sl = round(pos.price_open + 1 * pip, digits)
                     if pos.sl < breakeven_sl:
                         logger.info("AxonDaemon: Trailing SL triggered for BUY ticket %d. Modifying SL: %.5f -> %.5f",
@@ -1211,10 +1308,9 @@ class AxonDaemon:
                             logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
                             
             elif pos.type == mt5.POSITION_TYPE_SELL:
-                # SELL: profit is (price_open - ask). SL distance is (initial_sl - price_open)
                 sl_dist = initial_sl - pos.price_open
-                current_profit = pos.price_open - ask
-                if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
+                current_profit_val = pos.price_open - ask
+                if sl_dist > 0 and current_profit_val >= 1.0 * sl_dist:
                     breakeven_sl = round(pos.price_open - 1 * pip, digits)
                     if pos.sl > breakeven_sl or pos.sl == 0.0:
                         logger.info("AxonDaemon: Trailing SL triggered for SELL ticket %d. Modifying SL: %.5f -> %.5f",
@@ -1229,6 +1325,58 @@ class AxonDaemon:
                         res = mt5.order_send(request)
                         if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                             logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
+
+    def _close_mt5_position(self, pos, reason: str):
+        """Close an active MT5 position."""
+        import MetaTrader5 as mt5
+        ticket = pos.ticket
+        symbol = pos.symbol
+        volume = pos.volume
+        
+        # Determine opposite order type
+        order_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        
+        # Get current tick
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick:
+            logger.error("AxonDaemon: Failed to get tick to close position %d", ticket)
+            return False
+            
+        price = tick.bid if order_type == mt5.ORDER_TYPE_SELL else tick.ask
+        
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": volume,
+            "type": order_type,
+            "position": ticket,
+            "price": price,
+            "deviation": self.config.get("realtime_deviation", 20),
+            "magic": pos.magic,
+            "comment": f"AxonDaemon Close: {reason}",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_FOK,
+        }
+        
+        logger.info("AxonDaemon: Sending close order request for ticket %d. Reason: %s", ticket, reason)
+        res = mt5.order_send(request)
+        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+            logger.info("AxonDaemon: Close order successful for ticket %d", ticket)
+            return True
+        else:
+            ret = res.retcode if res else -1
+            comm = res.comment if res else "No response"
+            logger.error("AxonDaemon: Close order failed for ticket %d. Retcode: %s, Comment: %s", ticket, ret, comm)
+            
+            # Retry with IOC
+            if res and res.retcode in [mt5.TRADE_RETCODE_INVALID_FILL, mt5.TRADE_RETCODE_LIMIT_VOLUME]:
+                logger.info("AxonDaemon: Retrying close with ORDER_FILLING_IOC...")
+                request["type_filling"] = mt5.ORDER_FILLING_IOC
+                res = mt5.order_send(request)
+                if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                    logger.info("AxonDaemon: Close order successful on retry for ticket %d", ticket)
+                    return True
+            return False
 
     def _check_for_closed_positions(self, bid: float, ask: float):
         """Detect closed positions and log outcomes."""
@@ -1371,6 +1519,9 @@ class AxonDaemon:
             # Remove from tracking cache
             self._tracked_positions.discard(ticket)
             self._active_trade_initial_sl.pop(ticket, None)
+            self._active_trade_peak_profit.pop(ticket, None)
+            self._active_trade_peak_efficiency.pop(ticket, None)
+            self._active_trade_stage.pop(ticket, None)
             
             # Apply post-trade global cooldown to prevent immediate reversal trades
             # caused by our own TP/SL orders hitting the market and causing a tick climax

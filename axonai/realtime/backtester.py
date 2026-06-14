@@ -46,6 +46,7 @@ class BacktestEngine:
         self.simulated_trades: List[Dict[str, Any]] = []
         self.active_trades: List[Dict[str, Any]] = []
         self._pending_level_breaches: list = []
+        self._last_loss_time: Optional[datetime] = None
         
         # Initialize Core Real-Time Components
         self.live_state = LiveWorldState(self.ticker, self.config)
@@ -577,21 +578,53 @@ class BacktestEngine:
             if trade["direction"] == direction:
                 return
                     
-        # ── Dynamic SL/TP based on ATR ──
+        # ── Dynamic SL/TP based on Invalidation Level and ATR ──
         entry_price = event.price
         state = self.live_state._state
         atr = state.atr_14_h1 if state else 0.0012
-        
-        # SL = 1.0 × ATR, TP = 2.0 × ATR (optimized risk-reward ratio for WR/PF)
-        sl_distance = max(atr * 1.0, 8 * self.pip_mult)   # floor of 8 pips
-        tp_distance = max(atr * 2.0, 16 * self.pip_mult)   # floor of 16 pips
 
         if direction == "BUY":
+            m15_list = list(self.live_evidence._m15_candles)
+            recent_lows = [c.low for c in m15_list[-3:]] if len(m15_list) >= 3 else [c.low for c in m15_list]
+            if not recent_lows:
+                recent_lows = [entry_price]
+            invalidation_low = min(recent_lows)
+            
+            support_lvls = [l.price for l in getattr(self.live_evidence, "price_levels", [])
+                            if l.is_active and l.price < entry_price]
+            if support_lvls:
+                closest_support = max(support_lvls)
+                invalidation_low = min(invalidation_low, closest_support)
+                
+            if invalidation_low >= entry_price:
+                invalidation_low = entry_price - 8 * self.pip_mult
+                
+            sl_distance = (entry_price - invalidation_low) + 0.5 * atr
+            sl_distance = max(min(sl_distance, 25 * self.pip_mult), 5 * self.pip_mult)
+            
             sl = entry_price - sl_distance
-            tp = entry_price + tp_distance
+            tp = entry_price + sl_distance * 3.0  # Wide initial TP to allow velocity exits to run
         else:
+            m15_list = list(self.live_evidence._m15_candles)
+            recent_highs = [c.high for c in m15_list[-3:]] if len(m15_list) >= 3 else [c.high for c in m15_list]
+            if not recent_highs:
+                recent_highs = [entry_price]
+            invalidation_high = max(recent_highs)
+            
+            resistance_lvls = [l.price for l in getattr(self.live_evidence, "price_levels", [])
+                               if l.is_active and l.price > entry_price]
+            if resistance_lvls:
+                closest_resistance = min(resistance_lvls)
+                invalidation_high = max(invalidation_high, closest_resistance)
+                
+            if invalidation_high <= entry_price:
+                invalidation_high = entry_price + 8 * self.pip_mult
+                
+            sl_distance = (invalidation_high - entry_price) + 0.5 * atr
+            sl_distance = max(min(sl_distance, 25 * self.pip_mult), 5 * self.pip_mult)
+            
             sl = entry_price + sl_distance
-            tp = entry_price - tp_distance
+            tp = entry_price - sl_distance * 3.0  # Wide initial TP to allow velocity exits to run
                 
         trade = {
             "id": len(self.simulated_trades) + 1,
@@ -607,7 +640,10 @@ class BacktestEngine:
             "exit_price": None,
             "pips": 0.0,
             "close_reason": "",
-            "explainability": explainability
+            "explainability": explainability,
+            "peak_efficiency": float(getattr(self.event_detector.peak_detector, "last_efficiency", 1.0)),
+            "peak_profit": 0.0,
+            "stage": 1
         }
         
         self.active_trades.append(trade)
@@ -703,34 +739,102 @@ class BacktestEngine:
             dir = trade["direction"]
             sl = trade["sl"]
             tp = trade["tp"]
+            entry = trade["entry_price"]
             
+            # 1. Update profit metrics
             if dir == "BUY":
-                # Trailing stop: when price reaches 1.0:1 risk-reward, lock breakeven + 1 pip
-                entry = trade["entry_price"]
+                current_profit = (bid - entry) / self.pip_mult
+            else:
+                current_profit = (entry - ask) / self.pip_mult
+                
+            trade["peak_profit"] = max(trade.get("peak_profit", 0.0), current_profit)
+            
+            # 2. Update efficiency metric
+            pd = self.event_detector.peak_detector
+            curr_eff = float(getattr(pd, "last_efficiency", 1.0))
+            trade["peak_efficiency"] = max(trade.get("peak_efficiency", curr_eff), curr_eff)
+            
+            # 3. Stage 3: Exhaustion Exit (Close Trade)
+            entry_t = trade["entry_time"]
+            is_entry_aware = entry_t.tzinfo is not None
+            recent_indices = []
+            for idx, t in enumerate(pd.timestamps):
+                is_t_aware = t.tzinfo is not None
+                if is_entry_aware == is_t_aware:
+                    if t >= entry_t:
+                        recent_indices.append(idx)
+                else:
+                    if t.replace(tzinfo=None) >= entry_t.replace(tzinfo=None):
+                        recent_indices.append(idx)
+                        
+            recent_len = len(recent_indices)
+            if recent_len >= 20:
+                buy_vels = [pd.buy_velocities[idx] for idx in recent_indices]
+                sell_vels = [pd.sell_velocities[idx] for idx in recent_indices]
+                prices = [pd.tick_prices[idx] for idx in recent_indices]
+                
+                avg_buy_vel = sum(buy_vels) / recent_len
+                avg_sell_vel = sum(sell_vels) / recent_len
+                
+                if dir == "BUY":
+                    max_idx = prices.index(max(prices))
+                    stalled = max_idx < (recent_len - 15)
+                    velocity_flip = (avg_sell_vel > 1.5 * max(0.1, avg_buy_vel)) and (avg_sell_vel > 2.0)
+                    if stalled and velocity_flip:
+                        self._close_position(trade, bid, ask, timestamp, "Exhaustion Exit (Stage 3 Close)")
+                        continue
+                elif dir == "SELL":
+                    min_idx = prices.index(min(prices))
+                    stalled = min_idx < (recent_len - 15)
+                    velocity_flip = (avg_buy_vel > 1.5 * max(0.1, avg_sell_vel)) and (avg_buy_vel > 2.0)
+                    if stalled and velocity_flip:
+                        self._close_position(trade, bid, ask, timestamp, "Exhaustion Exit (Stage 3 Close)")
+                        continue
+            
+            # 4. Stage 2: Slowdown Phase (Reduce Risk / Tighten SL)
+            if trade.get("stage", 1) == 1 and current_profit > 0 and curr_eff < 0.6 * trade.get("peak_efficiency", 1.0):
+                trade["stage"] = 2
+                peak_p = trade.get("peak_profit", 0.0)
+                if peak_p >= 5.0:
+                    new_sl = entry + (peak_p * 0.5) * self.pip_mult if dir == "BUY" else entry - (peak_p * 0.5) * self.pip_mult
+                else:
+                    new_sl = entry + 1 * self.pip_mult if dir == "BUY" else entry - 1 * self.pip_mult
+                
+                # Enforce tightening only (don't widen SL)
+                if dir == "BUY":
+                    if new_sl > trade["sl"]:
+                        trade["sl"] = round(new_sl, 5)
+                        sl = trade["sl"]
+                        logger.info("BacktestEngine: Slowdown Stage 2. SL tightened to %.5f", trade["sl"])
+                else:
+                    if new_sl < trade["sl"]:
+                        trade["sl"] = round(new_sl, 5)
+                        sl = trade["sl"]
+                        logger.info("BacktestEngine: Slowdown Stage 2. SL tightened to %.5f", trade["sl"])
+            
+            # 5. Standard Trailing Stop (1:1 Risk-Reward breakeven fallback)
+            if dir == "BUY":
                 sl_dist = entry - sl
-                current_profit = bid - entry
-                if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
+                if sl_dist > 0 and current_profit >= sl_dist / self.pip_mult:
                     breakeven_sl = entry + 1 * self.pip_mult
                     if trade["sl"] < breakeven_sl:
                         trade["sl"] = breakeven_sl
                         sl = breakeven_sl
                 
+                # Check execution
                 if bid <= sl:
                     self._close_position(trade, bid, ask, timestamp, "Stop Loss (SL) Hit")
                 elif bid >= tp:
                     self._close_position(trade, bid, ask, timestamp, "Take Profit (TP) Hit")
-                    
-            elif dir == "SELL":
-                # Trailing stop for SELL
-                entry = trade["entry_price"]
+            else:
                 sl_dist = sl - entry
-                current_profit = entry - ask
-                if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
+                if sl_dist > 0 and current_profit >= sl_dist / self.pip_mult:
                     breakeven_sl = entry - 1 * self.pip_mult
                     if trade["sl"] > breakeven_sl:
                         trade["sl"] = breakeven_sl
                         sl = breakeven_sl
                 
+                # Check execution
                 if ask >= sl:
                     self._close_position(trade, bid, ask, timestamp, "Stop Loss (SL) Hit")
                 elif ask <= tp:

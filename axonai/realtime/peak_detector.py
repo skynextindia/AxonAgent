@@ -72,6 +72,14 @@ class PeakDetector:
         self._last_confirmed_time: Optional[datetime] = None
         self._last_confirmed_price: float = 0.0
 
+        # Latest raw metrics for active trade management
+        self.last_buy_vel = 0.0
+        self.last_sell_vel = 0.0
+        self.last_dominant_side = "buy"
+        self.last_efficiency = 1.0
+        self.last_velocity_divergence = 0.0
+        self.last_z_score = 0.0
+
     def update(self, price: float, timestamp: datetime, volume: int = 1) -> Optional[PeakSignal]:
         """Update indicators with new tick data and check for peaks.
         
@@ -169,6 +177,14 @@ class PeakDetector:
             avg_vol = sum(self.tick_volumes) / len(self.tick_volumes)
             if avg_vol > 0:
                 relative_volume = volume / avg_vol
+
+        # Update latest raw metrics
+        self.last_buy_vel = buy_vel
+        self.last_sell_vel = sell_vel
+        self.last_dominant_side = dominant_side
+        self.last_efficiency = price_per_tick_efficiency
+        self.last_velocity_divergence = velocity_divergence
+        self.last_z_score = z_score
 
         # Detect backtest-interpolated ticks (60s apart)
         is_backtest = False
