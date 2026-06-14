@@ -27,8 +27,10 @@ from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
 from axonai.realtime.event_detector import EventDetector
 from axonai.realtime.graph_executor import GraphExecutor
 from axonai.realtime.trade_executor import MT5TradeExecutor
+from axonai.realtime.decision_intelligence import ExecutionDecisionLayer
 from axonai.realtime.api_server import get_dashboard
 from cli.stats_handler import StatsCallbackHandler
+from axonai.realtime.calendar_guard import CalendarGuard
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,7 @@ class AxonDaemon:
             self.live_state, self.live_evidence,
             self.event_queue, config,
         )
+        self.decision_layer = ExecutionDecisionLayer(config)
 
         # Layer 3: Graph Executor
         self.stats_handler = StatsCallbackHandler()
@@ -80,6 +83,9 @@ class AxonDaemon:
         self.trade_executor_opt = MT5TradeExecutor(config_opt)
 
         self.trade_executor = self.trade_executor_opt  # Default fallback reference
+
+        # Layer 3b: Calendar Guard
+        self.calendar_guard = CalendarGuard(symbol, config)
 
         # Trailing stop and trade outcome tracking
         self._tracked_positions: set[int] = set()
@@ -255,6 +261,9 @@ class AxonDaemon:
                         resume_dt += timedelta(days=1)
                     market_resume_timestamp = int(resume_dt.timestamp())
 
+        # Check economic calendar block status
+        is_cal_blocked, cal_ev, cal_reason = self.calendar_guard.check_block_status()
+
         return {
             "type": "regime",
             "symbol": self.mt5_symbol,
@@ -272,6 +281,8 @@ class AxonDaemon:
             "session_details": session_details,
             "market_closed": market_closed,
             "market_resume_timestamp": market_resume_timestamp,
+            "calendar_blocked": is_cal_blocked,
+            "calendar_reason": cal_reason,
             # --- Daemon Status and Stats ---
             "daemon_start_time": self._start_time.timestamp() * 1000 if self._start_time else None,
             "cooldown_remaining": int(self.graph_executor.seconds_until_ready),
@@ -419,6 +430,22 @@ class AxonDaemon:
             logger.warning("Failed to retrieve MT5 account info: %s", e)
             return None
 
+    def _get_calendar_payload(self) -> dict:
+        return {
+            "type": "calendar",
+            "events": [
+                {
+                    "title": ev["title"],
+                    "country": ev["country"],
+                    "impact": ev["impact"],
+                    "time": ev["time"].isoformat(),
+                    "forecast": ev["forecast"],
+                    "previous": ev["previous"],
+                    "actual": ev["actual"]
+                } for ev in self.calendar_guard.events
+            ]
+        }
+
     def start(self):
         """Cold start and enter main event loop."""
         self._start_time = datetime.now()
@@ -481,6 +508,13 @@ class AxonDaemon:
             
         logger.info("Step 2/4: Live state initialized")
 
+        # Initialize economic calendar
+        try:
+            logger.info("AxonDaemon: Initializing economic calendar feed...")
+            self.calendar_guard.update()
+        except Exception as ce:
+            logger.error("AxonDaemon: failed to initialize economic calendar: %s", ce)
+
         # 3. Compile graph
         logger.info("Step 3/4: Compiling LangGraph...")
         self.graph_executor.compile_graph()
@@ -513,6 +547,12 @@ class AxonDaemon:
             acc_payload = self._get_account_payload()
             if acc_payload:
                 dashboard.broadcast(acc_payload)
+            
+            # 4b. Economic Calendar
+            try:
+                dashboard.broadcast(self._get_calendar_payload())
+            except Exception as ce:
+                logger.error("AxonDaemon: failed to broadcast calendar payload: %s", ce)
             
             # 5. Latest Tick
             tick = mt5.symbol_info_tick(self.mt5_symbol) if mt5 else None
@@ -563,7 +603,7 @@ class AxonDaemon:
     def _on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Called by TickEngine on every new tick."""
         self.event_detector.is_in_trade = len(self._tracked_positions) > 0
-        self.event_detector.on_tick(bid, ask, timestamp)
+        self.event_detector.on_tick(bid, ask, timestamp, volume)
 
         # Handle trailing stops and closed position logging for dryrun
         if self.config.get("realtime_dry_run", False):
@@ -572,6 +612,12 @@ class AxonDaemon:
                 self._check_for_closed_positions(bid, ask)
             except Exception as e:
                 logger.error("Error managing trailing stops / closed positions: %s", e, exc_info=True)
+        
+        # Check calendar cuts
+        try:
+            self._check_calendar_cuts()
+        except Exception as e:
+            logger.error("Error checking calendar cuts on tick: %s", e)
         
         # Broadcast tick to dashboard WebSocket
         dashboard = get_dashboard()
@@ -682,56 +728,25 @@ class AxonDaemon:
                 if pytime.time() - last_stats_time > 10.0:
                     self._log_stats()
                     last_stats_time = pytime.time()
+                try:
+                    self._check_calendar_cuts()
+                except Exception as e:
+                    logger.error("Error checking calendar cuts in event loop: %s", e)
                 continue
 
             self._events_detected += 1
 
-            # Filter: Only allow Advanced Microstructure Peak Reversals (Rule A & Rule B)
-            is_peak = event.event_type == EventType.PEAK_DETECTION
-            peak_type = event.details.get("peak_type", "") if is_peak else ""
-            is_exhaustion = peak_type in ("velocity_exhaustion", "microstructure_exhaustion")
-            
-            # S/R Proximity & Daily Trend Gate
-            is_gate_passed = True
-            gate_reason = ""
-            if is_peak and is_exhaustion:
-                dir_str = event.details.get("direction", "")
-                direction = None
-                if "bullish" in dir_str or "low" in peak_type:
-                    direction = "BUY"
-                elif "bearish" in dir_str or "high" in peak_type:
-                    direction = "SELL"
-                
-                if direction is not None:
-                    # 1. Proximity Check to ANY S/R Zone (5.0 pips)
-                    active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
-                    closest_dist = float("inf")
-                    closest_lvl = None
-                    pip_mult = self.live_evidence._pip_mult
-                    for lvl in active_levels:
-                        dist_pips = abs(event.price - lvl.price) / pip_mult
-                        if dist_pips < closest_dist:
-                            closest_dist = dist_pips
-                            closest_lvl = lvl
-                    
-                    if closest_lvl is None or closest_dist > 5.0:
-                        is_gate_passed = False
-                        gate_reason = f"not near any S/R zone (closest: {closest_dist:.2f} pips)"
-                    else:
-                        # 2. Daily Trend Alignment Check (H4 trend direction)
-                        daily_trend = getattr(self.live_evidence, "trend_direction_h4", "sideways")
-                        if daily_trend == "up" and direction != "BUY":
-                            is_gate_passed = False
-                            gate_reason = f"counter daily trend (trend: UP, trade: {direction})"
-                        elif daily_trend == "down" and direction != "SELL":
-                            is_gate_passed = False
-                            gate_reason = f"counter daily trend (trend: DOWN, trade: {direction})"
-                        else:
-                            logger.info("LIVE PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f is %.2f pips from %s level %.5f. Trend=%s, Trade=%s",
-                                        event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
+            # Call Decision Intelligence Layer
+            decision = self.decision_layer.evaluate(self.live_state, self.live_evidence, event)
+            is_gate_passed = decision["trade_allowed"]
+            gate_reason = decision["reason"]
+            explainability = decision["explainability"]
 
+            # Save explainability in event details so the front-end dashboard can display it
+            event.details["explainability"] = explainability
+            
             dashboard = get_dashboard()
-            if not self.config.get("test_mode", False) and not (is_peak and is_exhaustion and is_gate_passed):
+            if not self.config.get("test_mode", False) and not is_gate_passed:
                 self._events_skipped += 1
                 if dashboard:
                     dashboard.broadcast({
@@ -743,7 +758,7 @@ class AxonDaemon:
                         "details": event.details,
                         "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                         "status": "skipped",
-                        "reason": gate_reason if not is_gate_passed else "Strategy restricted to Microstructure Peaks",
+                        "reason": gate_reason,
                         "events_detected": self._events_detected,
                         "events_fired": self._events_fired,
                         "events_skipped": self._events_skipped,
@@ -771,6 +786,28 @@ class AxonDaemon:
                     "events_fired": self._events_fired,
                     "events_skipped": self._events_skipped,
                 })
+
+            # Check calendar block status
+            is_blocked, ev, block_reason = self.calendar_guard.check_block_status()
+            if is_blocked:
+                self._events_skipped += 1
+                logger.info("SKIPPED (calendar block: %s)", block_reason)
+                if dashboard:
+                    dashboard.broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": block_reason,
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
 
             is_dry_run = self.config.get("realtime_dry_run", False)
 
@@ -1343,6 +1380,76 @@ class AxonDaemon:
             
         # Update tracked positions with active ones
         self._tracked_positions = active_tickets.copy()
+
+    def _check_calendar_cuts(self):
+        """Check if active positions must be closed due to an upcoming calendar event."""
+        if not self.calendar_guard.enabled:
+            return
+            
+        # Check if a new fetch occurred and broadcast updates to the dashboard
+        if self.calendar_guard.update():
+            dashboard = get_dashboard()
+            if dashboard:
+                try:
+                    dashboard.broadcast(self._get_calendar_payload())
+                except Exception as e:
+                    logger.error("Error broadcasting calendar update: %s", e)
+
+        # Analyze completed economic event outcomes
+        try:
+            self.check_event_outcomes()
+        except Exception as oe:
+            logger.error("Error analyzing event outcomes: %s", oe)
+            
+        import MetaTrader5 as mt5
+        if not mt5 or not mt5.terminal_info():
+            return
+            
+        positions = mt5.positions_get(symbol=self.mt5_symbol)
+        if not positions:
+            return
+            
+        # Determine if current market price is close to any crucial S/R level (5.0 pips)
+        is_near_level = False
+        active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
+        if active_levels and hasattr(self, "tick_engine") and self.tick_engine.latest_bid > 0:
+            current_price = self.tick_engine.latest_bid
+            pip_mult = self.live_evidence._pip_mult
+            for lvl in active_levels:
+                dist_pips = abs(current_price - lvl.price) / pip_mult
+                if dist_pips <= 5.0:
+                    is_near_level = True
+                    break
+                    
+        for pos in positions:
+            ticket = pos.ticket
+            # Only manage positions belonging to our daemon's magic numbers
+            if pos.magic in (self.trade_executor_base.magic, self.trade_executor_opt.magic):
+                is_in_profit = pos.profit > 0
+                
+                # Check cut status using position-specific metrics
+                should_cut, ev, reason = self.calendar_guard.check_cut_status(
+                    is_in_profit=is_in_profit, 
+                    is_near_level=is_near_level
+                )
+                
+                if should_cut:
+                    logger.warning("CalendarGuard: Cutting position ticket %d before economic event: %s", ticket, reason)
+                    # Close the position using the correct trade executor
+                    executor = self.trade_executor_opt if pos.magic == self.trade_executor_opt.magic else self.trade_executor_base
+                    success = executor.close_position(ticket)
+                    if success:
+                        from axonai.realtime.alerts import send_alert
+                        msg = f"CALENDAR CUT SUCCESS: Closed ticket {ticket} due to upcoming event: {ev['title']} ({ev['country']})"
+                        logger.info(msg)
+                        send_alert(msg, self.config)
+
+    def check_event_outcomes(self):
+        """Analyze completed events to measure price outcome against expectations."""
+        try:
+            self.calendar_guard.analyze_completed_events(self.mt5_symbol, self.offset_hours)
+        except Exception as e:
+            logger.error("Error analyzing event outcomes: %s", e)
 
 
 def generate_session_summary():

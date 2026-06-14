@@ -22,6 +22,7 @@ from axonai.realtime.event_types import LiveCandle, MarketEvent, EventType, Even
 from axonai.realtime.event_detector import EventDetector
 from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
 from axonai.realtime.peak_detector import PeakDetector
+from axonai.realtime.decision_intelligence import ExecutionDecisionLayer
 from axonai.dataflows.mt5_data import mt5_initialize, _to_mt5_symbol, _ensure_symbol_visible, _fetch_bars
 
 logger = logging.getLogger(__name__)
@@ -58,12 +59,13 @@ class BacktestEngine:
             self.config
         )
         self.event_detector.set_pip_multiplier(self.is_jpy)
+        self.decision_layer = ExecutionDecisionLayer(self.config)
         
         # Override initialization constraints
         self.live_state._initialized = True
         self.live_evidence._initialized = True
 
-    def load_historical_data(self) -> Tuple[List[LiveCandle], List[Tuple[float, float, datetime]]]:
+    def load_historical_data(self) -> Tuple[List[LiveCandle], List[Tuple[float, float, datetime, int]]]:
         """Fetch real data from MT5 if connected, otherwise generate synthetic market dataset."""
         connected = False
         try:
@@ -79,7 +81,7 @@ class BacktestEngine:
             logger.info("BacktestEngine: MT5 offline. Generating realistic high-fidelity synthetic market dataset.")
             return self._generate_synthetic_data()
 
-    def _load_real_data(self) -> Tuple[List[LiveCandle], List[Tuple[float, float, datetime]]]:
+    def _load_real_data(self) -> Tuple[List[LiveCandle], List[Tuple[float, float, datetime, int]]]:
         """Load real historical bars from MetaTrader 5 and generate interpolated ticks."""
         mt5_sym = _to_mt5_symbol(self.ticker)
         _ensure_symbol_visible(mt5_sym)
@@ -94,7 +96,7 @@ class BacktestEngine:
             return self._generate_synthetic_data()
             
         candles: List[LiveCandle] = []
-        ticks: List[Tuple[float, float, datetime]] = []
+        ticks: List[Tuple[float, float, datetime, int]] = []
         
         # Convert M15 df to LiveCandle objects
         for t, row in df_m15.iterrows():
@@ -135,13 +137,14 @@ class BacktestEngine:
                 # Low to Close
                 sub_prices.extend(np.linspace(l, c, 5)[1:])
                 
+            volume_per_tick = max(1, int(candle.volume / len(sub_prices)))
             for idx, price in enumerate(sub_prices):
                 tick_time = t + dt * idx
-                ticks.append((price - 0.00005, price + 0.00005, tick_time))
+                ticks.append((price - 0.00005, price + 0.00005, tick_time, volume_per_tick))
                 
         return candles, ticks
 
-    def _generate_synthetic_data(self) -> Tuple[List[LiveCandle], List[Tuple[float, float, datetime]]]:
+    def _generate_synthetic_data(self) -> Tuple[List[LiveCandle], List[Tuple[float, float, datetime, int]]]:
         """Generate realistic multi-phase synthetic market dataset.
         
         Market phases (Wyckoff-inspired):
@@ -156,7 +159,7 @@ class BacktestEngine:
         np.random.seed(42)
         
         candles: List[LiveCandle] = []
-        ticks: List[Tuple[float, float, datetime]] = []
+        ticks: List[Tuple[float, float, datetime, int]] = []
         
         base_price = 1.1500
         current_time = datetime.now() - timedelta(days=self.days)
@@ -251,9 +254,10 @@ class BacktestEngine:
                                   list(np.linspace(high_p, low_p, 6)[1:]) +
                                   list(np.linspace(low_p, close_p, 5)[1:]))
             
+            volume_per_tick = max(1, int(candle.volume / len(sub_prices)))
             for idx, pr in enumerate(sub_prices):
                 tick_time = bar_time + dt * idx
-                ticks.append((round(pr - 0.00005, 5), round(pr + 0.00005, 5), tick_time))
+                ticks.append((round(pr - 0.00005, 5), round(pr + 0.00005, 5), tick_time, volume_per_tick))
                 
         return candles, ticks
 
@@ -423,12 +427,14 @@ class BacktestEngine:
             
             # Feed ticks that fall within this bar's time window
             while tick_index < total_ticks:
-                bid, ask, tick_time = ticks[tick_index]
+                tick_data = ticks[tick_index]
+                bid, ask, tick_time = tick_data[0], tick_data[1], tick_data[2]
+                volume = tick_data[3] if len(tick_data) > 3 else 1
                 if tick_time > bar_end:
                     break
                     
                 # 1. Update Peak/Microstructure Detections per Tick
-                self.event_detector.on_tick(bid, ask, tick_time)
+                self.event_detector.on_tick(bid, ask, tick_time, volume)
                 
                 # Check event queue for new tick-level detections
                 while not self.event_queue.empty():
@@ -553,172 +559,18 @@ class BacktestEngine:
 
         direction = None
         trigger_reason = ""
-        signal_quality = 0.0  # 0.0 – 1.0 confluence score
-        
-        # Check level behavior if available (for sweeps, patterns, structure breaks)
-        level_behavior = event.details.get("level_behavior", {}) if hasattr(event, "details") else {}
-        level_attack_quality = level_behavior.get("attack_quality", "") if level_behavior else ""
-        
-        # 1. Candle Patterns
-        if event.event_type == EventType.CANDLE_PATTERN:
-            return  # Skip noisy candle patterns to maximize selectivity and win rate
-                
-        # 2. Liquidity Sweeps (high quality, modulated by level behavior)
-        elif event.event_type == EventType.SWEEP_DETECTED:
-            dir_str = event.details.get("direction", "")
-            if "bullish" in dir_str:
-                direction = "BUY"
-                trigger_reason = "Bullish Liquidity Sweep"
-            elif "bearish" in dir_str:
-                direction = "SELL"
-                trigger_reason = "Bearish Liquidity Sweep"
-            signal_quality = 0.75  # base — sweeps are decent conviction
-            # Boost if absorption pattern confirmed (level is weakening)
-            if level_attack_quality in ("weakening", "pressured"):
-                signal_quality += 0.10
-                trigger_reason += " + Absorption Confirmed"
-                
-        # 3. Peak Exhaustion & Reversals (filtered by confidence)
-        elif event.event_type == EventType.PEAK_DETECTION:
-            peak_type = event.details.get("peak_type", "")
-            dir_str = event.details.get("direction", "")
-            confidence = event.details.get("peak_confidence", 0.0)
-            confirmed = event.details.get("peak_confirmed", False)
-            intensity = event.details.get("intensity", "MEDIUM")
-            
-            # Debug: log raw details before gate
-            logger.debug("PEAK RAW: confidence=%.2f confirmed=%s intensity=%s details_keys=%s",
-                         confidence, confirmed, intensity, list(event.details.keys())[:10])
-            
-            # ── Gate: Require HIGH/MEDIUM intensity ──
-            if intensity not in ("HIGH", "MEDIUM"):
-                return
-            # HIGH peaks (Rules A/B) require tick-microstructure confidence.
-            # MEDIUM peaks (Rule C fractal local swings) pass on their own
-            # validation (1.5 pip min swing, 300s cooldown) since tick-based
-            # confidence is unreliable on interpolated backtest data.
-            if intensity == "HIGH" and not confirmed and confidence < 0.6:
-                logger.debug("PEAK GATE: skipped (confirmed=%s conf=%.2f dir=%s type=%s)",
-                             confirmed, confidence, dir_str, peak_type)
-                return
-            
-            if "bullish" in dir_str or "low" in peak_type:
-                direction = "BUY"
-                trigger_reason = f"Bullish Microstructure Peak ({peak_type})"
-            elif "bearish" in dir_str or "high" in peak_type:
-                direction = "SELL"
-                trigger_reason = f"Bearish Microstructure Peak ({peak_type})"
-            
-            # S/R Proximity (ANY direction) & Daily Trend Gate
-            if direction is not None:
-                # 1. Proximity Check to ANY S/R Zone (5.0 pips)
-                active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
-                closest_dist = float("inf")
-                closest_lvl = None
-                for lvl in active_levels:
-                    dist_pips = abs(event.price - lvl.price) / self.pip_mult
-                    if dist_pips < closest_dist:
-                        closest_dist = dist_pips
-                        closest_lvl = lvl
-                
-                if closest_lvl is None or closest_dist > 5.0:
-                    logger.debug("PEAK GATE: skipped (not near any S/R zone; price=%.5f, closest_dist=%.2f pips)",
-                                 event.price, closest_dist if closest_lvl else -1.0)
-                    return
-                
-                # 2. Daily Trend Alignment Check (using H4 trend direction as daily trend proxy)
-                daily_trend = getattr(self.live_evidence, "trend_direction_h4", "sideways")
-                if daily_trend == "up" and direction != "BUY":
-                    logger.debug("PEAK GATE: skipped (daily trend is UP, but trade is %s)", direction)
-                    return
-                elif daily_trend == "down" and direction != "SELL":
-                    logger.debug("PEAK GATE: skipped (daily trend is DOWN, but trade is %s)", direction)
-                    return
-                
-                logger.info("PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f (%.2f pips from %s level %.5f), Trend=%s, Trade=%s",
-                            event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
-            
-            # Quality scoring for peaks
-            # HIGH (Rules A/B): 0.3 base + up to 0.5 from tick confidence
-            # MEDIUM (Rule C): use swing_confidence if available, else fixed floor
-            if intensity == "MEDIUM":
-                sc = event.details.get("swing_confidence", None)
-                if sc is not None:
-                    signal_quality = 0.5 + 0.3 * sc  # 0.5–0.8 based on swing quality
-                else:
-                    signal_quality = 0.65  # fixed floor — Rule C already validated
-            else:
-                signal_quality = 0.3 + confidence * 0.5  # 0.3 base + up to 0.5 from confidence
-            if confirmed:
-                signal_quality += 0.2
- 
-        # 4. Structure Break (BOS)
-        elif event.event_type == EventType.STRUCTURE_BREAK:
-            dir_str = event.details.get("direction", "")
-            if "bullish" in dir_str:
-                direction = "BUY"
-                trigger_reason = "Bullish Structure Break (BOS)"
-            elif "bearish" in dir_str:
-                direction = "SELL"
-                trigger_reason = "Bearish Structure Break (BOS)"
-            signal_quality = 0.65  # base quality floor
+        signal_quality = 0.0
+        explainability = {}
 
-        # 5. Level Breach — store as pending; confirmed on next M15 candle close
-        elif event.event_type == EventType.LEVEL_BREACH:
-            # Skip pending storage if this is a confirmed event from _check_pending_level_breaches
-            if event.details.get("_confirmed", False):
-                level_dir = event.details.get("direction", "")
-                if level_dir == "support":
-                    direction = "BUY"
-                    trigger_reason = f"Level Breach Bounce (Support {event.details.get('level_price', 0):.5f})"
-                else:
-                    direction = "SELL"
-                    trigger_reason = f"Level Breach Rejection (Resistance {event.details.get('level_price', 0):.5f})"
-                signal_quality = event.details.get("signal_quality", 0.70)
-            else:
-                level_price = event.details.get("level_price", 0.0)
-                strength = event.details.get("strength", 0.0)
-                level_dir = event.details.get("direction", "")
-                if strength >= 0.7 and level_dir in ("support", "resistance"):
-                    self._pending_level_breaches.append({
-                        "level_price": level_price,
-                        "direction": level_dir,
-                        "strength": strength,
-                        "event": event,
-                        "entry_price": event.price,
-                        "timestamp": event.timestamp,
-                        "attack_count": event.details.get("attack_count", 0),
-                        "is_absorbing": event.details.get("is_absorbing", False),
-                    })
-                    if self.config.get("realtime_log_events", True):
-                        logger.debug("Level breach PENDING (%.5f %s strength=%.2f)",
-                                     level_price, level_dir, strength)
-                return
+        # Call the Decision Intelligence Layer
+        decision = self.decision_layer.evaluate(self.live_state, self.live_evidence, event)
+        if not decision["trade_allowed"]:
+            return
 
-        if not direction:
-            return
-            
-        # ── Gate 4: Level behavior check — skip if level is showing pressured absorption ──
-        if level_attack_quality in ("weakening", "pressured") and event.event_type not in (EventType.SWEEP_DETECTED,):
-            # A weakening/pressured level that hasn't swept yet is likely to get breached
-            return
-            
-        # ── Gate 5: Regime filter — skip during high compression (no room for moves) ──
-        if state:
-            regime = state.dominant_regime if hasattr(state, "dominant_regime") else ""
-            if regime == "compression":
-                return
-            
-        # ── Gate 6: MTF Alignment (Bypassed trend blocks to allow two-way reversals) ──
-        mtf = event.details.get("mtf_alignment", "NEUTRAL")
-        # Aligned MTF boosts quality
-        if (direction == "BUY" and mtf == "BULLISH") or (direction == "SELL" and mtf == "BEARISH"):
-            signal_quality = min(1.0, signal_quality + 0.15)
-
-        # ── Gate 7: Minimum signal quality threshold (after all adjustments) ──
-        min_quality = 0.65
-        if signal_quality < min_quality:
-            return
+        direction = decision["direction"]
+        trigger_reason = decision["reason"]
+        signal_quality = decision["confidence"]
+        explainability = decision["explainability"]
 
         # ── Gate 8: Check for duplicate active trade in same direction ──
         for trade in self.active_trades:
@@ -754,7 +606,8 @@ class BacktestEngine:
             "exit_time": None,
             "exit_price": None,
             "pips": 0.0,
-            "close_reason": ""
+            "close_reason": "",
+            "explainability": explainability
         }
         
         self.active_trades.append(trade)

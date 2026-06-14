@@ -59,6 +59,12 @@ class PeakDetector:
         self.buy_velocities: deque[float] = deque(maxlen=window_size)
         self.sell_velocities: deque[float] = deque(maxlen=window_size)
         
+        # Log-scaled divergence history for Z-score calculation
+        self.log_divergences: deque[float] = deque(maxlen=window_size)
+        
+        # Volume history
+        self.tick_volumes: deque[int] = deque(maxlen=window_size)
+        
         # Track peaks to avoid double firing
         self.last_fired_peak_time: Optional[datetime] = None
         
@@ -66,7 +72,7 @@ class PeakDetector:
         self._last_confirmed_time: Optional[datetime] = None
         self._last_confirmed_price: float = 0.0
 
-    def update(self, price: float, timestamp: datetime) -> Optional[PeakSignal]:
+    def update(self, price: float, timestamp: datetime, volume: int = 1) -> Optional[PeakSignal]:
         """Update indicators with new tick data and check for peaks.
         
         Returns:
@@ -74,18 +80,17 @@ class PeakDetector:
         """
         self.tick_prices.append(price)
         self.timestamps.append(timestamp)
+        self.tick_volumes.append(volume)
 
-        # Compute instantaneous tick velocities
+        # Compute tick-count velocity using a constant virtual time step of 0.05s per tick.
+        # This completely decouples calculations from raw clock time, making it 100% broker-portable.
         velocity = 0.0
         buy_vel = 0.0
         sell_vel = 0.0
         
         if len(self.tick_prices) > 1:
             prev_price = self.tick_prices[-2]
-            prev_time = self.timestamps[-2]
-            dt_raw = (timestamp - prev_time).total_seconds()
-            # Scale dt if running on backtest-interpolated ticks (60s apart)
-            dt = 0.05 if dt_raw >= 5.0 else max(0.001, dt_raw)
+            dt = 0.05  # constant virtual time step per event step
             
             dp = price - prev_price
             velocity = (abs(dp) / dt) / self.pip_mult
@@ -102,21 +107,13 @@ class PeakDetector:
         if len(self.tick_prices) < 10:
             return None
 
-        # 1. Filter ticks within the last 60 seconds
-        recent_indices = [
-            i for i, ts in enumerate(self.timestamps)
-            if (timestamp - ts).total_seconds() <= 60.0
-        ]
-        
-        # Fallback to last 50 ticks if we have very few ticks in 60s window
-        if len(recent_indices) < 10:
-            recent_indices = list(range(max(0, len(self.timestamps) - 50), len(self.timestamps)))
+        # 1. Use a fixed rolling window of 50 ticks (completely broker-portable)
+        recent_indices = list(range(max(0, len(self.timestamps) - 50), len(self.timestamps)))
 
         recent_prices = [self.tick_prices[idx] for idx in recent_indices]
         recent_velocities = [self.tick_velocities[idx] for idx in recent_indices]
         recent_buy_vels = [self.buy_velocities[idx] for idx in recent_indices]
         recent_sell_vels = [self.sell_velocities[idx] for idx in recent_indices]
-        recent_timestamps = [self.timestamps[idx] for idx in recent_indices]
 
         # 2. Compute price-per-tick efficiency
         pip_movement = abs(recent_prices[-1] - recent_prices[0]) / self.pip_mult
@@ -128,11 +125,11 @@ class PeakDetector:
                 
         price_per_tick_efficiency = pip_movement / max(1, aggressive_ticks)
 
-        # 3. Compute velocity divergence
+        # 3. Compute velocity divergence with constant virtual time step dt = 0.05
         buy_acc = 0.0
         sell_acc = 0.0
         if len(recent_indices) > 1:
-            dt = max(0.001, (recent_timestamps[-1] - recent_timestamps[-2]).total_seconds())
+            dt = 0.05
             buy_acc = (recent_buy_vels[-1] - recent_buy_vels[-2]) / dt
             sell_acc = (recent_sell_vels[-1] - recent_sell_vels[-2]) / dt
 
@@ -151,6 +148,28 @@ class PeakDetector:
             opposing_vel = recent_buy_vels[-1]
             dom_vel = recent_sell_vels[-1]
 
+        # Logarithmic Scaling for Velocity Divergence
+        import math
+        log_divergence = math.log10(1.0 + abs(velocity_divergence)) if velocity_divergence > 0 else -math.log10(1.0 + abs(velocity_divergence))
+        self.log_divergences.append(log_divergence)
+
+        # Calculate Z-Score of Log Divergence
+        z_score = 0.0
+        if len(self.log_divergences) > 30:
+            log_divs = list(self.log_divergences)
+            mean_log_div = sum(log_divs) / len(log_divs)
+            var_log_div = sum((x - mean_log_div) ** 2 for x in log_divs) / len(log_divs)
+            std_log_div = var_log_div ** 0.5
+            if std_log_div > 0:
+                z_score = (log_divergence - mean_log_div) / std_log_div
+
+        # Calculate Relative Volume
+        relative_volume = 1.0
+        if len(self.tick_volumes) > 30:
+            avg_vol = sum(self.tick_volumes) / len(self.tick_volumes)
+            if avg_vol > 0:
+                relative_volume = volume / avg_vol
+
         # Detect backtest-interpolated ticks (60s apart)
         is_backtest = False
         if len(self.timestamps) > 1:
@@ -158,19 +177,20 @@ class PeakDetector:
                 is_backtest = True
 
         # Early-warning signals (dynamic backtest thresholding)
-        divergence_active = velocity_divergence > 0.6
+        # Using Z-Score for Dynamic Thresholds instead of hardcoded 0.6 / 0.8
+        divergence_active = z_score > 2.0 or (is_backtest and velocity_divergence > 0.6)
         efficiency_threshold = 0.35 if is_backtest else 0.10
         efficiency_collapsed = price_per_tick_efficiency < efficiency_threshold
         spread_inverted = opposing_vel > dom_vel
         
         # standalone early-warning signal
-        divergence_warning = velocity_divergence > 0.8
+        divergence_warning = z_score > 2.5 or (is_backtest and velocity_divergence > 0.8)
         
-        # Rule B Confirmation
-        peak_confirmed = (velocity_divergence > 0.8) and (price_per_tick_efficiency < efficiency_threshold)
+        # Rule B Confirmation: High divergence + Efficiency collapse OR massive relative volume spike
+        peak_confirmed = (z_score > 2.5 or (is_backtest and velocity_divergence > 0.8)) and (efficiency_collapsed or relative_volume > 3.0)
 
         # Store for dashboard live telemetry
-        self._last_divergence = velocity_divergence
+        self._last_divergence = log_divergence  # Use log_divergence for UI readability
         self._last_efficiency = price_per_tick_efficiency
         self._last_peak_confirmed = peak_confirmed
 
@@ -282,7 +302,7 @@ class PeakDetector:
                             direction=direction,
                             peak_price=pinpoint_a,
                             intensity="HIGH",
-                            velocity_divergence=velocity_divergence,
+                            velocity_divergence=log_divergence,
                             price_per_tick_efficiency=price_per_tick_efficiency,
                             divergence_warning=divergence_warning,
                             peak_confirmed=peak_confirmed,
@@ -295,14 +315,14 @@ class PeakDetector:
                 self.last_fired_peak_time = timestamp
                 direction = "bullish_reversal" if dominant_side == "sell" else "bearish_reversal"
                 
-                logger.info("PeakDetector: Advanced microstructure peak detected! Efficiency: %.4f, Divergence: %.2f", 
-                            price_per_tick_efficiency, velocity_divergence)
+                logger.info("PeakDetector: Advanced microstructure peak detected! Efficiency: %.4f, Log Divergence: %.2f (Z: %.2f)", 
+                            price_per_tick_efficiency, log_divergence, z_score)
                 return PeakSignal(
                     peak_type="microstructure_exhaustion",
                     direction=direction,
                     peak_price=pinpoint_price if self.use_pinpoint_price else price,
                     intensity="HIGH",
-                    velocity_divergence=velocity_divergence,
+                    velocity_divergence=log_divergence,
                     price_per_tick_efficiency=price_per_tick_efficiency,
                     divergence_warning=divergence_warning,
                     peak_confirmed=peak_confirmed,
@@ -337,7 +357,7 @@ class PeakDetector:
                             direction="bearish_reversal",
                             peak_price=mid_val,
                             intensity="MEDIUM",
-                            velocity_divergence=velocity_divergence,
+                            velocity_divergence=log_divergence,
                             price_per_tick_efficiency=price_per_tick_efficiency,
                             divergence_warning=divergence_warning,
                             peak_confirmed=peak_confirmed,
@@ -358,7 +378,7 @@ class PeakDetector:
                             direction="bullish_reversal",
                             peak_price=mid_val,
                             intensity="MEDIUM",
-                            velocity_divergence=velocity_divergence,
+                            velocity_divergence=log_divergence,
                             price_per_tick_efficiency=price_per_tick_efficiency,
                             divergence_warning=divergence_warning,
                             peak_confirmed=peak_confirmed,

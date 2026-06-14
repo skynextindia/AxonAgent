@@ -37,7 +37,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
 </style>
 </head>
 <body>
-<!-- ═══ HEADER ═══ -->
+<!-- ΓòÉΓòÉΓòÉ HEADER ΓòÉΓòÉΓòÉ -->
 <header style="display:flex;align-items:center;gap:16px;height:44px;flex-shrink:0;border-bottom:1px solid var(--border);padding:0 12px;margin-bottom:6px;">
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><span style="color:var(--cyan);font-size:16px;font-weight:900;letter-spacing:.05em;">AXON<span style="color:var(--text-secondary);">.AI</span></span><div style="display:flex;align-items:center;gap:5px;"><span id="socket-light" style="width:7px;height:7px;border-radius:50%;background:var(--red);flex-shrink:0;"></span><span id="socket-status" style="font-size:9px;color:var(--red);font-weight:700;letter-spacing:.1em;">OFFLINE</span></div></div>
   <div style="width:1px;height:28px;background:var(--border);flex-shrink:0;"></div>
@@ -61,7 +61,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
     <button id="settings-trigger-btn" style="border:1px solid var(--border);background:var(--bg-1);color:var(--text-secondary);font-family:inherit;font-size:10px;font-weight:700;padding:4px 10px;cursor:pointer;letter-spacing:.08em;">&#9881; SETTINGS</button>
   </div>
 </header>
-<!-- ═══ PAIR NAVIGATOR ═══ -->
+<!-- ΓòÉΓòÉΓòÉ PAIR NAVIGATOR ΓòÉΓòÉΓòÉ -->
 <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;border-bottom:1px solid var(--border);padding:5px 4px;margin-bottom:6px;">
   <span style="font-size:9px;color:var(--text-dim);font-weight:700;letter-spacing:.1em;white-space:nowrap;flex-shrink:0;">PAIRS &#8250;</span>
   <div id="pair-navigator">
@@ -80,16 +80,44 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
   <div style="flex:1;"></div>
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><span style="font-size:9px;color:var(--text-dim);">ACTIVE</span><span id="header-ticker" style="font-size:13px;font-weight:700;color:var(--cyan);letter-spacing:.05em;">EURUSD</span></div>
 </div>
-<!-- ═══ TAB BUTTONS ═══ -->
-<nav style="display:flex;gap:4px;flex-shrink:0;margin-bottom:2px;">
-  <button id="tab-cockpit-btn" class="tab-btn active">&#9654; COCKPIT</button>
-  <button id="tab-intel-btn" class="tab-btn">&#9674; INTELLIGENCE</button>
-  <button id="tab-journal-btn" class="tab-btn">&#128203; JOURNAL</button>
-  <button id="tab-system-btn" class="tab-btn">&#9881; SYSTEM</button>
+<!-- ΓòÉΓòÉΓòÉ TAB BUTTONS ΓòÉΓòÉΓòÉ -->
+<nav style="display:flex;gap:4px;flex-shrink:0;margin-bottom:2px;align-items:stretch;">
+  <div style="display:flex;gap:4px;">
+    <button id="tab-cockpit-btn" class="tab-btn active">&#9654; COCKPIT</button>
+    <button id="tab-intel-btn" class="tab-btn">&#9674; INTELLIGENCE</button>
+    <button id="tab-journal-btn" class="tab-btn">&#128203; JOURNAL</button>
+    <button id="tab-system-btn" class="tab-btn">&#9881; SYSTEM</button>
+    <button id="tab-calendar-btn" class="tab-btn">&#128197; CALENDAR</button>
+  </div>
+  <!-- MINI CALENDAR HUD -->
+  <div id="mini-cal-hud" style="display:none;align-items:center;background:#040406;border:1px solid var(--border);padding:0 12px;font-size:9px;color:var(--text-dim);font-family:'JetBrains Mono',monospace;">
+     <span id="mini-cal-impact" style="font-weight:900;text-transform:uppercase;margin-right:6px;">--</span>
+     <span id="mini-cal-title" style="color:#fff;font-weight:700;max-width:200px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-right:6px;">Awaiting feed...</span>
+     <span id="mini-cal-time" style="font-weight:700;letter-spacing:.04em;margin-right:12px;">--:--</span>
+     
+     <div style="width:1px;height:12px;background:rgba(255,255,255,0.2);margin-right:12px;" id="mini-cal-divider"></div>
+     
+     <span id="mini-cal-status" style="font-weight:900;letter-spacing:.1em;margin-right:6px;">CLEAR</span>
+     <span id="mini-cal-cd" style="font-weight:900;color:#fff;margin-right:12px;">--:--</span>
+
+     <div style="width:1px;height:12px;background:rgba(255,255,255,0.2);margin-right:12px;" id="mini-cal-divider2"></div>
+
+     <div style="display:flex;align-items:center;margin-right:12px;gap:8px;">
+       <div style="display:flex;align-items:center;gap:2px;"><span id="mini-cal-act-lbl" style="font-size:6.5px;font-weight:900;letter-spacing:.05em;">ACT:</span><span id="mini-cal-act" style="font-weight:700;">--</span></div>
+       <div style="display:flex;align-items:center;gap:2px;"><span id="mini-cal-fcst-lbl" style="font-size:6.5px;font-weight:900;letter-spacing:.05em;">FCST:</span><span id="mini-cal-fcst" style="font-weight:700;">--</span></div>
+       <div style="display:flex;align-items:center;gap:2px;"><span id="mini-cal-prev-lbl" style="font-size:6.5px;font-weight:900;letter-spacing:.05em;">PREV:</span><span id="mini-cal-prev" style="font-weight:700;">--</span></div>
+     </div>
+
+     <div style="width:1px;height:12px;background:rgba(255,255,255,0.2);margin-right:12px;" id="mini-cal-divider3"></div>
+
+     <span id="mini-cal-next-lbl" style="font-weight:900;letter-spacing:.08em;margin-right:6px;">NEXT:</span>
+     <span id="mini-cal-next-title" style="font-weight:700;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-right:6px;">--</span>
+     <span id="mini-cal-next-time" style="font-weight:700;">--:--</span>
+  </div>
 </nav>
-<!-- ═══ MAIN VIEWPORT ═══ -->
+<!-- ΓòÉΓòÉΓòÉ MAIN VIEWPORT ΓòÉΓòÉΓòÉ -->
 <main style="flex:1;min-height:0;position:relative;overflow:hidden;">
-<!-- ─── PANEL: COCKPIT ─── -->
+<!-- ΓöÇΓöÇΓöÇ PANEL: COCKPIT ΓöÇΓöÇΓöÇ -->
 <div id="panel-cockpit" style="position:absolute;inset:0;display:flex;gap:3px;min-height:0;overflow:hidden;">
 <!-- LEFT SIDEBAR -->
 <div style="width:260px;flex-shrink:0;display:flex;flex-direction:column;gap:3px;min-height:0;overflow-y:auto;padding-right:2px;">
@@ -205,7 +233,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
   </div>
 </div>
 </div><!-- end panel-cockpit -->
-<!-- ─── PANEL: INTELLIGENCE ─── -->
+<!-- ΓöÇΓöÇΓöÇ PANEL: INTELLIGENCE ΓöÇΓöÇΓöÇ -->
 <div id="panel-intel" style="position:absolute;inset:0;display:none;grid-template-columns:3fr 3fr 3fr;gap:3px;min-height:0;overflow:hidden;">
   <!-- Col 1: Pipeline -->
   <div style="display:flex;flex-direction:column;gap:3px;min-height:0;overflow:hidden;">
@@ -251,7 +279,42 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
     <div id="events-log-container" style="flex:1;overflow-y:auto;padding:4px;font-size:8px;display:flex;flex-direction:column;gap:4px;"><div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">Awaiting triggers...</div></div>
   </div>
 </div>
-<!-- ─── PANEL: SYSTEM ─── -->
+<!-- ——— PANEL: CALENDAR ——— -->
+<div id="panel-calendar" style="position:absolute;inset:0;display:none;flex-direction:column;gap:4px;min-height:0;overflow:hidden;padding:8px;">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-shrink:0;margin-bottom:2px;">
+    <div style="display:flex;align-items:center;gap:12px;">
+      <span style="font-size:9px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">ECONOMIC CALENDAR</span>
+      <span id="cal-guard-status" style="font-size:8px;color:var(--green);font-weight:700;letter-spacing:.06em;background:rgba(0,200,83,.08);border:1px solid rgba(0,200,83,.2);padding:2px 8px;">GUARD: CLEAR</span>
+      <span id="cal-event-count" style="font-size:7px;color:var(--text-dim);font-weight:700;">0 events</span>
+    </div>
+    <button id="refresh-calendar-btn" style="border:1px solid var(--border);background:var(--bg-1);color:var(--text-secondary);font-family:inherit;font-size:8px;font-weight:700;padding:3px 8px;cursor:pointer;letter-spacing:.06em;">&#8635; REFRESH</button>
+  </div>
+  <!-- TOP: Upcoming Events -->
+  <div class="cyber-panel" style="flex-shrink:0;max-height:45%;display:flex;flex-direction:column;padding:6px 8px;background:#040406;border-top:3px solid var(--amber);overflow:hidden;">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1f1f2e;padding-bottom:3px;flex-shrink:0;margin-bottom:3px;">
+      <span style="font-size:8px;color:var(--amber);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">UPCOMING &amp; ACTIVE EVENTS</span>
+      <span id="cal-next-event-timer" style="font-size:7px;color:var(--text-dim);font-weight:700;">--</span>
+    </div>
+    <!-- Event table header -->
+    <div style="display:grid;grid-template-columns:0.8fr 3fr 0.6fr 0.8fr 0.8fr 0.8fr 1.5fr;gap:4px;padding:4px 6px;font-size:7px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid rgba(31,31,46,.6);flex-shrink:0;text-transform:uppercase;letter-spacing:.04em;">
+      <span>TIME (UTC)</span><span style="text-align:left;">EVENT</span><span>CCY</span><span>IMPACT</span><span>FORECAST</span><span>PREVIOUS</span><span>COUNTDOWN</span>
+    </div>
+    <div id="cal-upcoming" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:0;font-size:8px;"></div>
+  </div>
+  <!-- BOTTOM: Event Outcomes with MTF data -->
+  <div class="cyber-panel" style="flex:1;display:flex;flex-direction:column;padding:6px 8px;background:#040406;border-top:3px solid var(--purple);min-height:0;overflow:hidden;">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1f1f2e;padding-bottom:3px;flex-shrink:0;margin-bottom:3px;">
+      <span style="font-size:8px;color:var(--purple);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">EVENT OUTCOMES — Expected vs Actual Market Move</span>
+      <span id="cal-outcome-count" style="font-size:7px;color:var(--text-dim);font-weight:700;">0 outcomes</span>
+    </div>
+    <!-- Outcome table header -->
+    <div style="display:grid;grid-template-columns:0.8fr 2.5fr 0.6fr 1.2fr 1fr 1.2fr 1.2fr 1.2fr;gap:3px;padding:4px 6px;font-size:7px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid rgba(31,31,46,.6);flex-shrink:0;text-transform:uppercase;letter-spacing:.04em;">
+      <span>TIME</span><span style="text-align:left;">EVENT</span><span>CCY</span><span>FORECAST &rarr; ACTUAL</span><span>EXPECTED</span><span style="color:var(--cyan);">5M OUTCOME</span><span style="color:var(--amber);">15M OUTCOME</span><span style="color:var(--purple);">30M OUTCOME</span>
+    </div>
+    <div id="cal-outcomes" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:0;font-size:8px;"></div>
+  </div>
+</div>
+<!-- ΓöÇΓöÇΓöÇ PANEL: SYSTEM ΓöÇΓöÇΓöÇ -->
 <div id="panel-system" style="position:absolute;inset:0;display:none;flex-direction:column;gap:3px;min-height:0;overflow:hidden;padding:8px;">
   <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;flex-shrink:0;">
     <div class="cyber-panel" style="padding:12px;background:#040406;border-top:3px solid var(--cyan);">
@@ -315,7 +378,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
   </div>
 </div>
 
-<!-- ─── PANEL: JOURNAL ─── -->
+<!-- ΓöÇΓöÇΓöÇ PANEL: JOURNAL ΓöÇΓöÇΓöÇ -->
 <div id="panel-journal" style="position:absolute;inset:0;display:none;flex-direction:column;gap:3px;min-height:0;overflow:hidden;padding:8px;">
   <!-- Log Sub-Tabs -->
   <div style="display:flex;gap:4px;flex-shrink:0;margin-bottom:4px;border-bottom:1px solid var(--border);padding-bottom:4px;">
@@ -331,8 +394,9 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
   <div class="cyber-panel" style="flex:1;min-height:0;display:flex;flex-direction:column;background:#040406;overflow:hidden;padding:8px;">
     <!-- Trade History View -->
     <div id="jview-trades" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;max-width:1200px;margin:0 auto;width:100%;">
-      <div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.6fr 1.2fr 0.4fr;gap:4px;padding:6px 12px;font-size:8px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid var(--border);flex-shrink:0;text-transform:uppercase;letter-spacing:.08em;">
+      <div style="display:grid;grid-template-columns:1.2fr 0.8fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.6fr 1.2fr 0.4fr;gap:4px;padding:6px 12px;font-size:8px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid var(--border);flex-shrink:0;text-transform:uppercase;letter-spacing:.08em;">
         <span>Timestamp</span>
+        <span>Trigger</span>
         <span>Symbol</span>
         <span>Type</span>
         <span>Vol</span>
@@ -366,7 +430,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
   </div>
 </div>
 </main>
-<!-- ═══ SETTINGS MODAL ═══ -->
+<!-- ΓòÉΓòÉΓòÉ SETTINGS MODAL ΓòÉΓòÉΓòÉ -->
 <div id="settings-modal" style="position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.75);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:all .3s;">
   <div class="cyber-panel" style="padding:16px;width:360px;background:rgba(0,0,0,.95);border-color:var(--purple);position:relative;display:flex;flex-direction:column;gap:12px;">
     <div style="position:absolute;top:0;left:0;right:0;height:1.5px;background:var(--purple);"></div>
@@ -567,7 +631,7 @@ class DashboardController {
       (async()=>{try{const r=await fetch("/config");const j=await r.json();if(j.status==="success"&&j.config){const c=j.config;if(c.tick_poll_interval_ms!==undefined)form.querySelector('[name="tick_poll_interval_ms"]').value=c.tick_poll_interval_ms;if(c.realtime_suppress_asian!==undefined)form.querySelector('[name="realtime_suppress_asian"]').checked=!!c.realtime_suppress_asian;if(c.realtime_level_reset_atr_multiple!==undefined)form.querySelector('[name="realtime_level_reset_atr_multiple"]').value=c.realtime_level_reset_atr_multiple;if(c.indicator_rsi_length!==undefined)form.querySelector('[name="indicator_rsi_length"]').value=c.indicator_rsi_length;if(c.indicator_ema_fast!==undefined)form.querySelector('[name="indicator_ema_fast"]').value=c.indicator_ema_fast;if(c.indicator_ema_slow!==undefined)form.querySelector('[name="indicator_ema_slow"]').value=c.indicator_ema_slow;if(c.realtime_use_pinpoint_price!==undefined)form.querySelector('[name="realtime_use_pinpoint_price"]').checked=!!c.realtime_use_pinpoint_price;if(c.realtime_correct_rule_a_direction!==undefined)form.querySelector('[name="realtime_correct_rule_a_direction"]').checked=!!c.realtime_correct_rule_a_direction;if(c.realtime_cooldown_bypass_better_peak!==undefined)form.querySelector('[name="realtime_cooldown_bypass_better_peak"]').checked=!!c.realtime_cooldown_bypass_better_peak;}}catch(e){}})();
     }
     // Tab buttons
-    ["cockpit","intel","journal","system"].forEach(t=>{const btn=g("tab-"+t+"-btn");if(btn)btn.onclick=()=>this.switchTab(t);});
+    ["cockpit","intel","journal","system","calendar"].forEach(t=>{const btn=g("tab-"+t+"-btn");if(btn)btn.onclick=()=>this.switchTab(t);});
     
     // Journal tab listeners
     ["trades","decisions","dryrun","system"].forEach(sub=>{
@@ -578,7 +642,11 @@ class DashboardController {
     if(refBtn) refBtn.onclick = () => this.loadJournalData();
 
     // Keyboard
-    window.addEventListener("keydown",e=>{const inp=e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA";if(!inp&&(e.key==="1"||e.key==="2"||e.key==="3"||e.key==="4")){e.preventDefault();this.switchTab({1:"cockpit",2:"intel",3:"journal",4:"system"}[e.key])}if(!inp&&(e.key==="ArrowLeft"||e.key==="ArrowRight")){e.preventDefault();const tabs=["cockpit","intel","journal","system"];let i=tabs.indexOf(this.activeTab);if(i===-1)i=0;i=(i+(e.key==="ArrowLeft"?-1:1)+tabs.length)%tabs.length;this.switchTab(tabs[i])}});
+    window.addEventListener("keydown",e=>{const inp=e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA";if(!inp&&(e.key==="1"||e.key==="2"||e.key==="3"||e.key==="4"||e.key==="5")){e.preventDefault();this.switchTab({1:"cockpit",2:"intel",3:"journal",4:"system",5:"calendar"}[e.key])}if(!inp&&(e.key==="ArrowLeft"||e.key==="ArrowRight")){e.preventDefault();const tabs=["cockpit","intel","journal","system","calendar"];let i=tabs.indexOf(this.activeTab);if(i===-1)i=0;i=(i+(e.key==="ArrowLeft"?-1:1)+tabs.length)%tabs.length;this.switchTab(tabs[i])}});
+    // Calendar refresh
+    const calRefBtn=g("refresh-calendar-btn");if(calRefBtn)calRefBtn.onclick=()=>this.loadCalendarData();
+    this.loadCalendarData();
+    setInterval(()=>this.updateMiniCalendarHud(), 1000);
   }
   selectTimeframe(tf) {
     this.currentTimeframe = tf;
@@ -602,6 +670,7 @@ class DashboardController {
       case"account":this.handleAccount(d);break;case"candle":this.handleSingleCandle(d);break;case"candles":this.handleCandles(d);break;
       case"event":this.handleEvent(d);break;case"agent":this.handleAgent(d);break;case"decision":this.handleDecision(d);break;
       case"news_data":this.handleNewsData(d);break;
+      case"calendar":this.handleCalendar(d);break;
     }
   }
   initChart() {
@@ -642,7 +711,7 @@ class DashboardController {
     const vel=e("tick-velocity");if(vel&&d.tick_velocity!==undefined){vel.textContent=this.sf(d.tick_velocity,2);this.latestVelocity=Number(d.tick_velocity);}
     const imb=(id,v)=>{const el=e(id);if(!el||v===undefined||v===null)return;const val=Math.max(-1,Math.min(1,v));let c="#888";if(val>=.5)c="#00ff66";else if(val<=-.5)c="#ff0055";else if(val>=.25)c="#66ff99";else if(val<=-.25)c="#ff6666";let l="NEUTRAL";if(val>=.5)l="STR BUY";else if(val<=-.5)l="STR SELL";else if(val>=.25)l="MOD BUY";else if(val<=-.25)l="MOD SELL";const f=(val>=0?"+":"")+this.sf(val,2);el.innerHTML='<span style="color:'+c+';font-weight:700;">'+f+'</span><span style="color:'+c+';font-size:7px;margin-left:4px;">'+l+'</span>';};
     imb("tick-imbalance-10s",d.tick_imbalance_10s);imb("tick-imbalance-60s",d.tick_imbalance_60s);imb("tick-imbalance-300s",d.tick_imbalance_300s);
-    const con=e("tick-imbalance-confluence");if(con&&d.tick_imbalance_10s!==undefined){const v10=d.tick_imbalance_10s,v60=d.tick_imbalance_60s,v300=d.tick_imbalance_300s;if(v10>=.25&&v60>=.25&&v300>=.25){con.textContent="CONFLUENCE: SUSTAINED BUY";con.style.color="#00ff66"}else if(v10<=-.25&&v60<=-.25&&v300<=-.25){con.textContent="CONFLUENCE: SUSTAINED SELL";con.style.color="#ff0055"}else{con.textContent="CONFLUENCE: MIXED — WAIT";con.style.color="var(--text-dim)"}}
+    const con=e("tick-imbalance-confluence");if(con&&d.tick_imbalance_10s!==undefined){const v10=d.tick_imbalance_10s,v60=d.tick_imbalance_60s,v300=d.tick_imbalance_300s;if(v10>=.25&&v60>=.25&&v300>=.25){con.textContent="CONFLUENCE: SUSTAINED BUY";con.style.color="#00ff66"}else if(v10<=-.25&&v60<=-.25&&v300<=-.25){con.textContent="CONFLUENCE: SUSTAINED SELL";con.style.color="#ff0055"}else{con.textContent="CONFLUENCE: MIXED ΓÇö WAIT";con.style.color="var(--text-dim)"}}
     const sd=e("tick-spread-delta");if(sd&&d.tick_spread_delta!==undefined)sd.textContent=this.sf(d.tick_spread_delta,5);
     [["tick-collapse","tick_collapse"],["tick-agg-shift","tick_agg_shift"],["tick-absorption","tick_absorption"]].forEach(([id,key])=>{const el=e(id);if(el&&d[key]!==undefined)el.textContent=d[key]?"TRUE":"FALSE";});
     const ra=e("tick-rule-a");if(ra&&d.rule_a_max_vel!==undefined){const maxV=Number(d.rule_a_max_vel),avgV=Number(d.rule_a_avg_vel);if(maxV>5*avgV&&maxV>5.0){ra.textContent="CLIMAX "+this.sf(maxV,1);ra.style.color="#ff0055"}else{ra.textContent="IDLE";ra.style.color="var(--text-dim)"}}
@@ -663,7 +732,7 @@ class DashboardController {
     if(this.priceBid)this.priceBid.textContent=this.sf(d.bid,5);if(this.priceAsk)this.priceAsk.textContent=this.sf(d.ask,5);
     if(this.spreadVal)this.spreadVal.textContent=this.sf(d.spread,1);
     this.updatePipDistances();
-    // Tick activity strip — raw tick bars
+    // Tick activity strip ΓÇö raw tick bars
     if(prevBid!==0&&this.tickActivityStrip){const col=d.bid>prevBid?"#00ff66":d.bid<prevBid?"#ff0055":"#252538";const b=document.createElement("span");b.style.cssText="width:6px;height:10px;flex-shrink:0;background:"+col+";border:1px solid rgba(255,255,255,.08);transition:background .15s;";this.tickActivityStrip.appendChild(b);if(this.tickActivityStrip.children.length>8)this.tickActivityStrip.removeChild(this.tickActivityStrip.firstChild)}
     // Live tick dot
     const dot=e("live-tick-dot");if(dot){dot.style.background="#00ff66";dot.style.boxShadow="0 0 8px #00ff66";setTimeout(()=>{dot.style.background="var(--text-dim)";dot.style.boxShadow="none"},80)}
@@ -839,7 +908,7 @@ class DashboardController {
   }
   handleNewsData(d) {
     const c=document.getElementById("news-log-container");if(!c)return;c.innerHTML="";
-    const fs=(title,items,bc,tc,bb)=>{if(!items||!Array.isArray(items)||items.length===0)return null;const s=document.createElement("div");s.style.cssText="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;";const h=document.createElement("div");h.style.cssText="font-size:7.5px;color:"+tc+";font-weight:900;letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid #1f1f2e;padding-bottom:4px;";h.innerHTML=title;h.innerHTML+=' <span style="color:var(--text-dim);font-weight:400;text-transform:none;">('+items.length+')</span>';s.appendChild(h);items.forEach(line=>{const cl=line.replace(/^[\s\-\*\•\d\.\)]+/,"").trim();if(!cl)return;const it=document.createElement("div");it.style.cssText="background:rgba(7,7,11,.9);border:1px solid "+bc+";padding:4px 6px;font-size:7.5px;font-family:monospace;";it.textContent=cl;s.appendChild(it)});return s};
+    const fs=(title,items,bc,tc,bb)=>{if(!items||!Array.isArray(items)||items.length===0)return null;const s=document.createElement("div");s.style.cssText="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;";const h=document.createElement("div");h.style.cssText="font-size:7.5px;color:"+tc+";font-weight:900;letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid #1f1f2e;padding-bottom:4px;";h.innerHTML=title;h.innerHTML+=' <span style="color:var(--text-dim);font-weight:400;text-transform:none;">('+items.length+')</span>';s.appendChild(h);items.forEach(line=>{const cl=line.replace(/^[\s\-\*\ΓÇó\d\.\)]+/,"").trim();if(!cl)return;const it=document.createElement("div");it.style.cssText="background:rgba(7,7,11,.9);border:1px solid "+bc+";padding:4px 6px;font-size:7.5px;font-family:monospace;";it.textContent=cl;s.appendChild(it)});return s};
     let added=false;[fs("ForexLive",d.forex_social,"var(--border)","#ff66b2",""),fs("Global News",d.news,"var(--border)","#00f0ff",""),fs("Reddit",d.reddit,"var(--border)","#00ff66","")].forEach(s=>{if(s){c.appendChild(s);added=true}});
     if(!added)c.innerHTML='<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;font-size:7px;text-transform:uppercase;letter-spacing:.08em;">Awaiting news stream...</div>';
   }
@@ -876,7 +945,7 @@ class DashboardController {
   }
   switchTab(tab) {
     this.activeTab=tab;
-    ["cockpit","intel","journal","system"].forEach(t=>{const btn=document.getElementById("tab-"+t+"-btn");const p=document.getElementById("panel-"+t);if(btn)btn.className=t===tab?"tab-btn active":"tab-btn";if(p)p.style.display=t===tab?"flex":"none";if(t==="intel"&&p)p.style.display=t===tab?"grid":"none"});
+    ["cockpit","intel","journal","system","calendar"].forEach(t=>{const btn=document.getElementById("tab-"+t+"-btn");const p=document.getElementById("panel-"+t);if(btn)btn.className=t===tab?"tab-btn active":"tab-btn";if(p)p.style.display=t===tab?"flex":"none";if(t==="intel"&&p)p.style.display=t===tab?"grid":"none"});
     // Update system panel
     if(tab==="system"){const p=document.getElementById("health-ws");if(p&&this.socketStatus)p.textContent=this.socketStatus.textContent;const d=document.getElementById("health-daemon");if(d)d.textContent=this.uptime?this.uptime.textContent:"--";const m=document.getElementById("health-mt5");if(m&&this.latestAccountData)m.textContent="CONNECTED";const lt=document.getElementById("health-last-tick");if(lt&&this.currentBid)lt.textContent=this.sf(this.currentBid,5);const hp=document.getElementById("health-pair");if(hp&&this.ticker)hp.textContent=this.ticker.textContent;const hc=document.getElementById("health-candles");if(hc){const tf=this.currentTimeframe==="M15"?this.m15Candles:this.currentTimeframe==="H1"?this.h1Candles:this.h4Candles;hc.textContent=(tf||[]).length}
       const su=document.getElementById("sys-uptime");if(su&&this.uptime)su.textContent=this.uptime.textContent;
@@ -887,6 +956,9 @@ class DashboardController {
     }
     if(tab==="journal"){
       this.loadJournalData();
+    }
+    if(tab==="calendar"){
+      this.loadCalendarData();
     }
   }
   switchJournalTab(sub) {
@@ -916,11 +988,37 @@ class DashboardController {
               const exitPriceDisplay = e.exit_price ? parseFloat(e.exit_price).toFixed(5) : "--";
               const profitDisplay = e.profit !== null && e.profit !== undefined ? (e.profit > 0 ? '+' : '') + parseFloat(e.profit).toFixed(2) : "--";
               const pipsDisplay = e.pips !== null && e.pips !== undefined ? (e.pips > 0 ? '+' : '') + parseFloat(e.pips).toFixed(1) : "--";
+              let triggerShort = "--";
+              if (e.event_type === "peak_detection") triggerShort = "PEAK";
+              else if (e.event_type === "level_breach") triggerShort = "SWEEP";
+              
+              let col2HTML = "";
+              if (e.event_type === "level_breach") {
+                col2HTML = `
+                  <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Liquidity Sweep Metrics</div>
+                  <div style="display:flex;justify-content:space-between;"><span>Trigger Event</span><span style="color:#fff;font-weight:700;text-transform:uppercase;">${e.event_type || '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Priority</span><span style="color:${e.event_priority === "CRITICAL" ? 'var(--red)' : 'var(--amber)'};font-weight:700;">${e.event_priority || '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Level Type</span><span style="color:#fff;font-weight:700;">${e.event_details && e.event_details.level_type ? e.event_details.level_type : '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Level Direction</span><span style="color:#fff;">${e.event_details && e.event_details.direction ? e.event_details.direction : '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Strength / Touches</span><span style="color:#fff;">${e.event_details && e.event_details.strength !== undefined ? (e.event_details.strength * 100).toFixed(0) + '%' : '--'} / ${e.event_details && e.event_details.touches !== undefined ? e.event_details.touches : '--'}x</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Distance</span><span style="color:var(--amber);font-weight:700;">${e.event_details && e.event_details.distance_pips !== undefined ? parseFloat(e.event_details.distance_pips).toFixed(1) + ' pips' : '--'}</span></div>
+                `;
+              } else {
+                col2HTML = `
+                  <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Rule A/B Peak Metrics</div>
+                  <div style="display:flex;justify-content:space-between;"><span>Trigger Event</span><span style="color:#fff;font-weight:700;text-transform:uppercase;">${e.event_type || '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>MTF Alignment</span><span style="color:${e.event_details && e.event_details.mtf_alignment === 'BEARISH' ? 'var(--red)' : e.event_details && e.event_details.mtf_alignment === 'BULLISH' ? 'var(--green)' : '#fff'};font-weight:700;">${e.event_details && e.event_details.mtf_alignment ? e.event_details.mtf_alignment : '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Velocity Divergence</span><span style="color:#fff;">${e.event_details && e.event_details.velocity_divergence !== undefined ? parseFloat(e.event_details.velocity_divergence).toFixed(2) : '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Tick Efficiency</span><span style="color:#fff;">${e.event_details && e.event_details.price_per_tick_efficiency !== undefined ? parseFloat(e.event_details.price_per_tick_efficiency).toFixed(4) : '--'}</span></div>
+                  <div style="display:flex;justify-content:space-between;"><span>Peak Confidence</span><span style="color:#fff;">${e.event_details && e.event_details.peak_confidence !== undefined ? (e.event_details.peak_confidence * 100).toFixed(0) + '%' : '--'}</span></div>
+                `;
+              }
               
               return `<div class="trade-row-container" style="border-bottom:1px solid var(--border-dim);display:flex;flex-direction:column;transition:all .15s;">
                 <!-- Main Grid Row -->
-                <div onclick="window.dashboardController.toggleTradeDetails('${e.ticket}')" style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.6fr 1.2fr 0.4fr;gap:4px;padding:8px 12px;cursor:pointer;align-items:center;background:#050507;transition:background 0.1s;" onmouseover="this.style.background='#0d0d14'" onmouseout="this.style.background='#050507'">
+                <div onclick="window.dashboardController.toggleTradeDetails('${e.ticket}')" style="display:grid;grid-template-columns:1.2fr 0.8fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.6fr 1.2fr 0.4fr;gap:4px;padding:8px 12px;cursor:pointer;align-items:center;background:#050507;transition:background 0.1s;" onmouseover="this.style.background='#0d0d14'" onmouseout="this.style.background='#050507'">
                   <span style="color:var(--text-secondary);">${e.entry_time || '--'}</span>
+                  <span style="color:var(--purple);font-weight:700;text-align:center;">${triggerShort}</span>
                   <span style="color:#fff;font-weight:700;text-align:center;">${e.symbol || '--'}</span>
                   <span style="color:${dirColor};font-weight:900;text-align:center;">${e.direction || '--'}</span>
                   <span style="color:#fff;text-align:center;">${e.volume || '--'}</span>
@@ -929,8 +1027,8 @@ class DashboardController {
                   <span style="color:${color};font-weight:700;text-align:center;">${pipsDisplay}</span>
                   <span style="color:${color};font-weight:700;text-align:center;">${profitDisplay}</span>
                   <span style="color:var(--text-secondary);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:4px;">${e.reason || '--'}</span>
-                  <span style="text-align:center;"><span style="background:${e.outcome === "WIN" ? 'rgba(0,200,83,0.1)' : e.outcome === "LOSS" ? 'rgba(255,61,61,0.1)' : 'rgba(156,39,176,0.1)'};color:${color};padding:2px 6px;font-weight:900;border-radius:2px;font-size:7px;">${e.outcome}</span></span>
-                  <span id="tarrow-${e.ticket}" style="color:var(--text-dim);font-weight:700;text-align:center;font-size:8px;">▼</span>
+                  <span style="text-align:center;"><span style="background:${e.outcome === 'WIN' ? 'rgba(0,200,83,0.1)' : e.outcome === 'LOSS' ? 'rgba(255,61,61,0.1)' : 'rgba(156,39,176,0.1)'};color:${color};padding:2px 6px;font-weight:900;border-radius:2px;font-size:7px;">${e.outcome}</span></span>
+                  <span id="tarrow-${e.ticket}" style="color:var(--text-dim);font-weight:700;text-align:center;font-size:8px;">&#9660;</span>
                 </div>
                 
                 <!-- Expanded Detail Section -->
@@ -948,12 +1046,7 @@ class DashboardController {
                     
                     <!-- Col 2: Rule A & B Detection Metrics -->
                     <div style="display:flex;flex-direction:column;gap:5px;">
-                      <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Rule A/B Peak Metrics</div>
-                      <div style="display:flex;justify-content:space-between;"><span>Trigger Event</span><span style="color:#fff;font-weight:700;text-transform:uppercase;">${e.event_type || '--'}</span></div>
-                      <div style="display:flex;justify-content:space-between;"><span>Priority</span><span style="color:${e.event_priority === "CRITICAL" ? 'var(--red)' : 'var(--amber)'};font-weight:700;">${e.event_priority || '--'}</span></div>
-                      <div style="display:flex;justify-content:space-between;"><span>Velocity Divergence</span><span style="color:#fff;">${e.event_details && e.event_details.velocity_divergence !== undefined ? parseFloat(e.event_details.velocity_divergence).toFixed(2) : '--'}</span></div>
-                      <div style="display:flex;justify-content:space-between;"><span>Tick Efficiency</span><span style="color:#fff;">${e.event_details && e.event_details.price_per_tick_efficiency !== undefined ? parseFloat(e.event_details.price_per_tick_efficiency).toFixed(4) : '--'}</span></div>
-                      <div style="display:flex;justify-content:space-between;"><span>Peak Confidence</span><span style="color:#fff;">${e.event_details && e.event_details.peak_confidence !== undefined ? (e.event_details.peak_confidence * 100).toFixed(0) + '%' : '--'}</span></div>
+                      ${col2HTML}
                     </div>
                     
                     <!-- Col 3: Market Context / Session -->
@@ -1058,6 +1151,307 @@ class DashboardController {
       } catch (err) { console.error(err); }
     }
   }
+  handleCalendar(d) {
+    // Guard status badge
+    const gs=document.getElementById("cal-guard-status");
+    if(gs&&d.guard_status){
+      const s=d.guard_status.toUpperCase();
+      gs.textContent="GUARD: "+s;
+      gs.style.color=s==="BLOCKED"?"var(--red)":s==="WARNING"?"var(--amber)":"var(--green)";
+      gs.style.background=s==="BLOCKED"?"rgba(255,61,61,.08)":s==="WARNING"?"rgba(255,171,0,.08)":"rgba(0,200,83,.08)";
+      gs.style.borderColor=s==="BLOCKED"?"rgba(255,61,61,.2)":s==="WARNING"?"rgba(255,171,0,.2)":"rgba(0,200,83,.2)";
+    }
+  }
+  renderCalendarEvents(events) {
+    const uc=document.getElementById("cal-upcoming");
+    const ec=document.getElementById("cal-event-count");
+    if(!uc)return;
+    const now=new Date();
+    events.sort((a,b)=>new Date(a.time)-new Date(b.time));
+    // Only future events in upcoming
+    const upcoming=events.filter(ev=>new Date(ev.time)>now);
+    this._expiredEvents=events.filter(ev=>new Date(ev.time)<=now);
+    if(ec)ec.textContent=upcoming.length+" upcoming / "+this._expiredEvents.length+" expired";
+    
+    // If no upcoming events, fallback to showing all events so the panel is not empty.
+    const displayEvents = upcoming.length > 0 ? upcoming : events;
+    if(displayEvents.length===0){
+      uc.innerHTML='<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No calendar events available.</div>';
+      const nt=document.getElementById("cal-next-event-timer");if(nt){nt.textContent="No events";nt.style.color="var(--text-dim)";}
+      return;
+    }
+    const renderRow=(ev)=>{
+      const t=new Date(ev.time);
+      const timeFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true });
+      const timeStr = timeFormatter.format(t).replace(" AM", "am").replace(" PM", "pm");
+      const imp=(ev.impact||"low").toLowerCase();
+      const ic=imp==="high"?"var(--red)":imp==="medium"?"var(--amber)":"var(--text-dim)";
+      const diffMin=Math.floor((t-now)/60000);
+      
+      const isExpired = t <= now;
+      let status, sc, cdStr;
+      if (isExpired) {
+        status = "EXPIRED";
+        sc = "var(--text-dim)";
+        const absDiffMin = Math.abs(diffMin);
+        cdStr = absDiffMin < 60 ? absDiffMin + "m ago" : Math.floor(absDiffMin / 60) + "h " + (absDiffMin % 60) + "m ago";
+      } else {
+        if(diffMin<=0){status="ACTIVE";sc="var(--red)";}
+        else if(diffMin<=15){status="BLOCKED";sc="var(--red)";}
+        else if(diffMin<=30){status="WARNING";sc="var(--amber)";}
+        else{status="CLEAR";sc="var(--green)";}
+        cdStr=diffMin<=0?"NOW":diffMin<60?diffMin+"m":Math.floor(diffMin/60)+"h "+diffMin%60+"m";
+      }
+      
+      const bgStyle = isExpired ? "rgba(255,255,255,.02)" : (sc==="var(--red)"?"rgba(255,61,61,.08)":sc==="var(--amber)"?"rgba(255,171,0,.08)":"rgba(0,200,83,.08)");
+      const borderStyle = isExpired ? "rgba(255,255,255,.05)" : `${sc}40`;
+      const countdownDisp=`<span style="font-size:6.5px;padding:1px 4px;background:${bgStyle};color:${sc};border:1px solid ${borderStyle};font-weight:900;letter-spacing:.04em;border-radius:2px;">${status} (${cdStr})</span>`;
+      
+      return `<div style="display:grid;grid-template-columns:0.8fr 3fr 0.6fr 0.8fr 0.8fr 0.8fr 1.5fr;gap:4px;padding:4px 6px;border-bottom:1px solid rgba(31,31,46,.4);align-items:center;background:#07070b;text-align:center;">
+        <span style="color:var(--text-secondary);">${timeStr}</span>
+        <span style="color:#fff;font-weight:700;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${ev.title||'--'}</span>
+        <span style="color:var(--cyan);font-weight:700;">${ev.country||'--'}</span>
+        <span style="color:${ic};font-weight:900;font-size:7px;text-transform:capitalize;">${imp}</span>
+        <span style="color:var(--text-secondary);">${ev.forecast||'--'}</span>
+        <span style="color:var(--text-secondary);">${ev.previous||'--'}</span>
+        <div style="display:flex;justify-content:center;">${countdownDisp}</div>
+      </div>`;
+    };
+    const nt=document.getElementById("cal-next-event-timer");
+    if(nt){
+      if (upcoming.length > 0) {
+        const next=new Date(upcoming[0].time);const dm=Math.floor((next-now)/60000);
+        nt.textContent="NEXT: "+upcoming[0].title+" in "+(dm<60?dm+"m":Math.floor(dm/60)+"h "+dm%60+"m");
+        nt.style.color=dm<=15?"var(--red)":dm<=30?"var(--amber)":"var(--text-secondary)";
+      } else {
+        nt.textContent="Market closed or all events passed";
+        nt.style.color="var(--text-dim)";
+      }
+    }
+    
+    let lastDateStr = "";
+    const htmlRows = [];
+    displayEvents.forEach(ev => {
+      const t = new Date(ev.time);
+      const dateParts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }).formatToParts(t);
+      const dp = {}; dateParts.forEach(p => dp[p.type] = p.value.toUpperCase());
+      const dateStr = `${dp.weekday}, ${dp.month} ${dp.day}, ${dp.year}`;
+      
+      if (dateStr !== lastDateStr) {
+        htmlRows.push(`<div style="background: rgba(0, 240, 255, 0.02); border: 1px solid rgba(0,240,255,0.08); border-left: 3px solid var(--cyan); padding: 5px 10px; font-weight: 800; color: var(--cyan); letter-spacing: .08em; font-size: 7.5px; text-transform: uppercase; text-align: left; margin-top: 5px; margin-bottom: 2px;">${dateStr}</div>`);
+        lastDateStr = dateStr;
+      }
+      
+      htmlRows.push(renderRow(ev));
+    });
+    uc.innerHTML=htmlRows.join("");
+  }
+  renderCalendarOutcomes(analyzedOutcomes, expiredEvents) {
+    const oc=document.getElementById("cal-outcomes");
+    const occ=document.getElementById("cal-outcome-count");
+    if(!oc)return;
+    // Build a lookup of analyzed outcomes by title+time key
+    const analyzed={};
+    (analyzedOutcomes||[]).forEach(o=>{
+      const k=(o.event_title||"")+"_"+(o.event_country||"")+"_"+(o.event_time||"");
+      analyzed[k]=o;
+    });
+    // Merge expired events with analysis data
+    const expired=expiredEvents||this._expiredEvents||[];
+    const rows=[];
+    // First add expired events (most recent first)
+    expired.slice().reverse().forEach(ev=>{
+      const t=new Date(ev.time);
+      const tStr=t.toISOString().replace("T"," ").substring(0,16);
+      const k=(ev.title||"")+"_"+(ev.country||"")+"_"+t.toISOString().substring(0,19).replace("T"," ");
+      const a=analyzed[k]||null;
+      rows.push({
+        raw_time: ev.time,
+        time:tStr.substring(5),
+        title:ev.title||"--",
+        country:ev.country||"--",
+        impact:(ev.impact||"low").toLowerCase(),
+        forecast:a&&a.forecast?a.forecast:ev.forecast||"--",
+        previous:a&&a.previous?a.previous:ev.previous||"--",
+        actual:a&&a.actual?a.actual:ev.actual||ev.actual_value||"--",
+        expected_direction:a?a.expected_direction:"--",
+        pips_moved:a?a.pips_moved:{},
+        alignments:a?a.alignments:{},
+        has_analysis:!!a
+      });
+    });
+    // Add any analyzed outcomes not in expired events
+    (analyzedOutcomes||[]).forEach(o=>{
+      const k=(o.event_title||"")+"_"+(o.event_country||"")+"_"+(o.event_time||"");
+      const already=rows.some(r=>r.title===o.event_title&&r.country===o.event_country);
+      if(!already){
+        rows.push({
+          raw_time: o.event_time,
+          time:(o.event_time||"--").substring(5,16),
+          title:o.event_title||"--",
+          country:o.event_country||"--",
+          impact:"--",
+          forecast:o.forecast||"--",
+          previous:o.previous||"--",
+          actual:o.actual||o.actual_value||"--",
+          expected_direction:o.expected_direction||"--",
+          pips_moved:o.pips_moved||{},
+          alignments:o.alignments||{},
+          has_analysis:true
+        });
+      }
+    });
+    // Filter to only show events that actually have outcomes/analysis
+    const analyzedRows = rows.filter(r => r.has_analysis);
+    if(occ)occ.textContent=analyzedRows.length+" outcomes";
+    if(analyzedRows.length===0){
+      oc.innerHTML='<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No analyzed event outcomes yet. Outcomes are processed 30 minutes post-event.</div>';
+      return;
+    }
+    const formatMtfOutcome = (pips, align) => {
+      if (pips === undefined || pips === null) return `<span style="color:var(--text-dim);">--</span>`;
+      const pipColor = pips > 0 ? "var(--green)" : pips < 0 ? "var(--red)" : "var(--text-dim)";
+      const pipText = (pips > 0 ? "+" : "") + Number(pips).toFixed(1) + " p";
+      let badge = "";
+      if (align === "ALIGNED") {
+        badge = `<span style="font-size:6px;padding:1px 3px;background:rgba(0,200,83,.08);color:var(--green);border:1px solid rgba(0,200,83,.2);font-weight:900;border-radius:2px;">ALIGNED</span>`;
+      } else if (align === "CONTRA") {
+        badge = `<span style="font-size:6px;padding:1px 3px;background:rgba(255,61,61,.08);color:var(--red);border:1px solid rgba(255,61,61,.2);font-weight:900;border-radius:2px;">CONTRA</span>`;
+      } else if (align === "NEUTRAL") {
+        badge = `<span style="font-size:6px;padding:1px 3px;background:rgba(255,255,255,.03);color:var(--text-dim);border:1px solid rgba(255,255,255,.08);font-weight:700;border-radius:2px;">NEUT</span>`;
+      }
+      return `<div style="display:flex;align-items:center;justify-content:center;gap:4px;"><span style="color:${pipColor};font-weight:700;">${pipText}</span>${badge}</div>`;
+    };
+    const dirColor=(d)=>d==="BUY"?"var(--green)":d==="SELL"?"var(--red)":"var(--text-dim)";
+    
+    let lastDateStr = "";
+    const htmlRows = [];
+    analyzedRows.forEach(ev => {
+      const t = ev.raw_time ? new Date(ev.raw_time) : new Date();
+      const dateParts = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', weekday: 'long', year: 'numeric', month: 'short', day: 'numeric' }).formatToParts(t);
+      const dp = {}; dateParts.forEach(p => dp[p.type] = p.value.toUpperCase());
+      const dateStr = `${dp.weekday}, ${dp.month} ${dp.day}, ${dp.year}`;
+      
+      if (dateStr !== lastDateStr) {
+        htmlRows.push(`<div style="background: rgba(156, 39, 176, 0.02); border: 1px solid rgba(156,39,176,0.08); border-left: 3px solid var(--purple); padding: 5px 10px; font-weight: 800; color: var(--purple); letter-spacing: .08em; font-size: 7.5px; text-transform: uppercase; text-align: left; margin-top: 5px; margin-bottom: 2px;">${dateStr}</div>`);
+        lastDateStr = dateStr;
+      }
+      
+      const timeFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true });
+      const timeStr = t.getDay() !== undefined ? timeFormatter.format(t).replace(" AM", "am").replace(" PM", "pm") : "--:--";
+      const pm=ev.pips_moved||{};const al=ev.alignments||{};
+      const expDirColor = dirColor(ev.expected_direction);
+      const expDirBadge = ev.expected_direction && ev.expected_direction !== "--" && ev.expected_direction !== "UNKNOWN"
+        ? `<span style="font-size:6.5px;padding:1px 4px;background:${expDirColor}15;color:${expDirColor};border:1px solid ${expDirColor}40;font-weight:900;border-radius:2px;letter-spacing:.04em;">${ev.expected_direction}</span>`
+        : `<span style="color:var(--text-dim); font-weight:700;">—</span>`;
+      
+      htmlRows.push(`<div style="display:grid;grid-template-columns:0.8fr 2.5fr 0.6fr 1.2fr 1fr 1.2fr 1.2fr 1.2fr;gap:3px;padding:6px;border-bottom:1px solid rgba(31,31,46,.4);align-items:center;background:#060610;text-align:center;border-left:2px solid var(--purple);">
+        <span style="color:var(--text-secondary);font-size:7.5px;">${timeStr}</span>
+        <span style="color:#fff;font-weight:700;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${ev.title}</span>
+        <span style="color:var(--cyan);font-weight:700;">${ev.country}</span>
+        <span style="color:var(--text-secondary);font-size:7.5px;">
+          <span style="color:var(--text-dim);">${ev.forecast}</span> <span style="color:var(--text-dim); font-size:7px;">&rarr;</span> <span style="color:#fff;font-weight:700;">${ev.actual}</span>
+        </span>
+        <div style="display:flex;justify-content:center;">${expDirBadge}</div>
+        ${formatMtfOutcome(pm.at_5m, al.at_5m)}
+        ${formatMtfOutcome(pm.at_15m, al.at_15m)}
+        ${formatMtfOutcome(pm.at_30m, al.at_30m)}
+      </div>`);
+    });
+    oc.innerHTML = htmlRows.join("");
+  }
+  updateMiniCalendarHud() {
+    if (!this._allEvents || this._allEvents.length === 0) return;
+    const hud = document.getElementById("mini-cal-hud");
+    if (hud) hud.style.display = "flex";
+    
+    const now = new Date();
+    const sorted = [...this._allEvents].sort((a,b)=>new Date(a.time)-new Date(b.time));
+    const upcoming = sorted.filter(ev => new Date(ev.time) > now);
+    
+    if (upcoming.length === 0) {
+      document.getElementById("mini-cal-title").textContent = "Market Closed / No Events";
+      document.getElementById("mini-cal-status").textContent = "CLEAR";
+      document.getElementById("mini-cal-status").style.color = "var(--green)";
+      document.getElementById("mini-cal-cd").textContent = "--:--";
+      return;
+    }
+    
+    const active = upcoming[0];
+    const next = upcoming.length > 1 ? upcoming[1] : null;
+    
+    const t = new Date(active.time);
+    const diffMin = Math.floor((t - now) / 60000);
+    
+    let status = "CLEAR", sc = "var(--green)";
+    if (diffMin <= 0) { status = "ACTIVE"; sc = "var(--red)"; }
+    else if (diffMin <= 15) { status = "BLOCKED"; sc = "var(--red)"; }
+    else if (diffMin <= 30) { status = "WARNING"; sc = "var(--amber)"; }
+    
+    const ic = (active.impact||"low").toLowerCase();
+    const isHigh = ic === "high";
+    const isMed = ic === "medium";
+    const isLow = ic === "low";
+    
+    const bgColor = isHigh ? "var(--red)" : isMed ? "var(--amber)" : isLow ? "#fbc02d" : "#90a4ae";
+    const textColor = "#000";
+    const dimColor = "rgba(0,0,0,0.6)";
+    const borderColor = "rgba(0,0,0,0.2)";
+
+    hud.style.background = bgColor;
+    hud.style.border = `1px solid ${borderColor}`;
+    
+    document.getElementById("mini-cal-divider").style.background = borderColor;
+    document.getElementById("mini-cal-divider2").style.background = borderColor;
+    
+    document.getElementById("mini-cal-status").textContent = status;
+    document.getElementById("mini-cal-status").style.color = diffMin <= 0 ? "#000" : dimColor;
+    document.getElementById("mini-cal-cd").textContent = diffMin <= 0 ? "NOW" : diffMin < 60 ? diffMin + "m" : Math.floor(diffMin/60) + "h " + (diffMin%60) + "m";
+    document.getElementById("mini-cal-cd").style.color = textColor;
+    
+    document.getElementById("mini-cal-title").textContent = active.title;
+    document.getElementById("mini-cal-title").style.color = textColor;
+    document.getElementById("mini-cal-impact").textContent = active.impact;
+    document.getElementById("mini-cal-impact").style.color = textColor;
+    document.getElementById("mini-cal-time").style.color = dimColor;
+    
+    document.getElementById("mini-cal-divider3").style.background = borderColor;
+    
+    ["act", "fcst", "prev"].forEach(k => {
+      document.getElementById("mini-cal-"+k+"-lbl").style.color = dimColor;
+      document.getElementById("mini-cal-"+k).style.color = textColor;
+    });
+    document.getElementById("mini-cal-act").textContent = active.actual && active.actual.trim() !== "" ? active.actual : "--";
+    document.getElementById("mini-cal-fcst").textContent = active.forecast && active.forecast.trim() !== "" ? active.forecast : "--";
+    document.getElementById("mini-cal-prev").textContent = active.previous && active.previous.trim() !== "" ? active.previous : "--";
+    
+    document.getElementById("mini-cal-next-lbl").style.color = dimColor;
+    document.getElementById("mini-cal-next-title").style.color = textColor;
+    document.getElementById("mini-cal-next-time").style.color = dimColor;
+    
+    const timeFormatter = new Intl.DateTimeFormat('en-US', { timeZone: 'America/New_York', hour: 'numeric', minute: '2-digit', hour12: true });
+    document.getElementById("mini-cal-time").textContent = timeFormatter.format(t).replace(" AM","am").replace(" PM","pm");
+    
+    if (next) {
+      const nt = new Date(next.time);
+      document.getElementById("mini-cal-next-title").textContent = next.title;
+      document.getElementById("mini-cal-next-time").textContent = timeFormatter.format(nt).replace(" AM","am").replace(" PM","pm");
+    } else {
+      document.getElementById("mini-cal-next-title").textContent = "--";
+      document.getElementById("mini-cal-next-time").textContent = "--:--";
+    }
+  }
+  async loadCalendarData() {
+    try{
+      const [evRes,outRes]=await Promise.all([
+        fetch("/api/calendar/events").then(r=>r.json()).catch(()=>[]),
+        fetch("/api/calendar/outcomes").then(r=>r.json()).catch(()=>[])
+      ]);
+      this._allEvents = evRes;
+      this.renderCalendarEvents(evRes);
+      this.renderCalendarOutcomes(outRes, this._expiredEvents);
+    }catch(e){console.error("Calendar load error:",e)}
+  }
   triggerBeep(freq,dur){try{if(!this.audioCtx)this.audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(this.audioCtx.state==="suspended")this.audioCtx.resume();const osc=this.audioCtx.createOscillator(),gain=this.audioCtx.createGain();osc.type="sine";osc.frequency.setValueAtTime(freq,this.audioCtx.currentTime);gain.gain.setValueAtTime(.003,this.audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(.00001,this.audioCtx.currentTime+dur);osc.connect(gain);gain.connect(this.audioCtx.destination);osc.start();osc.stop(this.audioCtx.currentTime+dur)}catch(e){}}
   toggleTradeDetails(ticket) {
     const el = document.getElementById("tdetails-" + ticket);
@@ -1065,7 +1459,7 @@ class DashboardController {
     if (el) {
       const isHidden = el.style.display === "none";
       el.style.display = isHidden ? "block" : "none";
-      if (arrow) arrow.textContent = isHidden ? "▲" : "▼";
+      if (arrow) arrow.textContent = isHidden ? "Γû▓" : "Γû╝";
     }
   }
 }

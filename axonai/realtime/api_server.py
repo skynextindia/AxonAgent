@@ -63,6 +63,7 @@ class DashboardServer:
             "events": [],        # List of last 30 detected events
             "agent_trace": [],   # List of last 50 agent steps
             "decision": None,    # Latest final decision
+            "calendar": None,    # News calendar events payload
         }
 
         # Setup routing
@@ -190,6 +191,55 @@ class DashboardServer:
                     state = "paused" if self.daemon.llm.paused else "resumed"
                     return {"status": "success", "message": f"LLM operations {state}"}
                 return {"status": "error", "message": "LLM bridge not available"}
+
+        @self.app.get("/api/calendar/events")
+        def get_calendar_events():
+            with self._lock:
+                guard = None
+                if self.daemon and hasattr(self.daemon, "calendar_guard") and self.daemon.calendar_guard:
+                    guard = self.daemon.calendar_guard
+                else:
+                    if not hasattr(self, "_local_calendar_guard") or not self._local_calendar_guard:
+                        from axonai.realtime.calendar_guard import CalendarGuard
+                        from axonai.default_config import DEFAULT_CONFIG
+                        self._local_calendar_guard = CalendarGuard("EURUSD", DEFAULT_CONFIG)
+                    guard = self._local_calendar_guard
+                
+                if guard:
+                    try:
+                        guard.update()
+                    except Exception as ue:
+                        logger.warning("Dashboard API: Failed to update local calendar guard: %s", ue)
+                    return [
+                        {
+                            "title": ev["title"],
+                            "country": ev["country"],
+                            "impact": ev["impact"],
+                            "time": ev["time"].isoformat(),
+                            "forecast": ev["forecast"],
+                            "previous": ev["previous"],
+                            "actual": ev["actual"]
+                        } for ev in guard.events
+                    ]
+                return []
+
+        @self.app.get("/api/calendar/outcomes")
+        def get_calendar_outcomes():
+            import os
+            import json
+            outcomes_path = os.path.join("reports", "calendar_outcomes.jsonl")
+            if not os.path.exists(outcomes_path):
+                return []
+            try:
+                outcomes = []
+                with open(outcomes_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        if line.strip():
+                            outcomes.append(json.loads(line))
+                return list(reversed(outcomes))
+            except Exception as e:
+                logger.error("Failed to read calendar outcomes: %s", e)
+                return []
 
         @self.app.get("/api/logs/decisions")
         def get_decisions_log():
@@ -623,6 +673,7 @@ class DashboardServer:
             trace_data = list(self.history["agent_trace"])
             decision_data = self.history["decision"]
             news_data = self.history["news_data"]
+            calendar_data = self.history.get("calendar")
 
         # 2. Perform all asynchronous sends safely OUTSIDE the lock block!
         # 1. Account details
@@ -652,6 +703,9 @@ class DashboardServer:
         # 9. Sentiment News Feed
         if news_data:
             await websocket.send_json(news_data)
+        # 10. Economic News Calendar
+        if calendar_data:
+            await websocket.send_json(calendar_data)
 
     def broadcast(self, message: Dict[str, Any]):
         """Thread-safe queueing of message broadcast across all websockets."""
@@ -663,9 +717,9 @@ class DashboardServer:
         with self._lock:
             # Update cache history
             save_needed = False
-            if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data"]:
+            if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data", "calendar"]:
                 self.history[msg_type] = message
-                if msg_type in ["decision", "news_data"]:
+                if msg_type in ["decision", "news_data", "calendar"]:
                     save_needed = True
             elif msg_type in ["candle", "candles"]:
                 tf = message.get("timeframe")

@@ -22,12 +22,14 @@ class TestDaemonE2E(unittest.TestCase):
             "realtime_log_events": False,
             "realtime_dry_run": True,  # skip dynamic sizing in tests
             "test_mode": True,
+            "realtime_calendar_enabled": False,
         }
 
     @patch("MetaTrader5.terminal_info")
     @patch("MetaTrader5.symbol_info")
     @patch("MetaTrader5.symbol_info_tick")
     @patch("MetaTrader5.order_send")
+    @patch("MetaTrader5.positions_get")
     @patch("MetaTrader5.account_info")
     @patch("axonai.realtime.daemon.get_broker_tz_offset")
     @patch("axonai.realtime.daemon.LiveWorldState")
@@ -35,9 +37,10 @@ class TestDaemonE2E(unittest.TestCase):
     @patch("axonai.realtime.daemon.GraphExecutor")
     def test_daemon_full_flow(
         self, mock_graph, mock_evidence, mock_state, mock_tz_offset,
-        mock_acc_info, mock_order_send, mock_tick_info, mock_sym_info, mock_term_info
+        mock_acc_info, mock_positions, mock_order_send, mock_tick_info, mock_sym_info, mock_term_info
     ):
         """Verify the full E2E flow from tick to event queue and signal execution."""
+        mock_positions.return_value = ()
         mock_tz_offset.return_value = 2.0
         mock_term_info.return_value = True
         
@@ -55,6 +58,7 @@ class TestDaemonE2E(unittest.TestCase):
         inner_state.spread_safe = True
         inner_state.belief_score = 0.90
         inner_state.should_run_graph = True
+        inner_state.session = "london"
         state_inst.snapshot.return_value = inner_state
 
         # Configure evidence mocks
