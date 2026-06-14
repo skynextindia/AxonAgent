@@ -37,7 +37,7 @@ class BacktestEngine:
         
         # Clean ticker suffix for pips
         ticker_clean = ticker.upper().replace("=X", "").replace("/", "")
-        self.is_jpy = "JPY" in ticker_clean
+        self.is_jpy = "JPY" in ticker_clean or "XAU" in ticker_clean or "GOLD" in ticker_clean
         self.pip_mult = 0.01 if self.is_jpy else 0.0001
         
         # Initialize Event Queue and state tracking

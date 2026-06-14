@@ -333,7 +333,7 @@ class DashboardServer:
                     return "Rollover"
 
             def compute_drawdown_peak(symbol, direction, entry_price, exit_price, entry_dt, exit_dt, outcome, reason, entry_signal=None):
-                is_jpy = "JPY" in symbol.upper()
+                is_jpy = "JPY" in symbol.upper() or "XAU" in symbol.upper() or "GOLD" in symbol.upper()
                 pip_multiplier = 0.01 if is_jpy else 0.0001
                 
                 if direction.upper() == "BUY":

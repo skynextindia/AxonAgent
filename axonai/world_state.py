@@ -121,8 +121,8 @@ def build_world_state(symbol: str = "EURUSD=X") -> WorldState:
         
         # In FX, pips depend on decimals (typically 5 decimals for major pairs -> 1 pip = 0.0001)
         # For EURUSD, 1 pip = 0.0001, so spread in pips = (ask - bid) / 0.0001
-        is_jpy = "JPY" in mt5_sym
-        pip_multiplier = 0.01 if is_jpy else 0.0001
+        is_jpy_or_gold = "JPY" in mt5_sym.upper() or "XAU" in mt5_sym.upper() or "GOLD" in mt5_sym.upper()
+        pip_multiplier = 0.01 if is_jpy_or_gold else 0.0001
         spread_pips = float((ask - bid) / pip_multiplier)
 
         # 2. Fetch H1 bars for indicators/regimes (last 20 days is approx 480 hours)

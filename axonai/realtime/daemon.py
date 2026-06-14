@@ -500,7 +500,7 @@ class AxonDaemon:
         self.live_evidence.initialize()
 
         # Set pip multiplier on event detector
-        is_jpy = "JPY" in self.mt5_symbol.upper()
+        is_jpy = "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() or "GOLD" in self.mt5_symbol.upper()
         self.event_detector.set_pip_multiplier(is_jpy)
         
         # Backfill historical events to populate GUI dashboard immediately

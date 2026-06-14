@@ -95,7 +95,7 @@ class LiveWorldState:
             self._base_currency = "EUR"
             self._quote_currency = "USD"
         
-        self._is_jpy = self._quote_currency == "JPY"
+        self._is_jpy = self._quote_currency == "JPY" or "XAU" in sym_clean or "GOLD" in sym_clean
         self._pip_mult = 0.01 if self._is_jpy else 0.0001
 
         # Config-driven lengths with defaults
@@ -588,8 +588,8 @@ class LiveMarketEvidence:
         
         # Parse quote dynamically for JPY pairs
         sym_clean = symbol.strip().upper().replace("/", "").replace("=X", "")
-        is_jpy = sym_clean.endswith("JPY") or (len(sym_clean) >= 6 and sym_clean[3:6] == "JPY")
-        self._pip_mult = 0.01 if is_jpy else 0.0001
+        is_jpy_or_gold = sym_clean.endswith("JPY") or (len(sym_clean) >= 6 and sym_clean[3:6] == "JPY") or "XAU" in sym_clean or "GOLD" in sym_clean
+        self._pip_mult = 0.01 if is_jpy_or_gold else 0.0001
 
         # Rolling candle history for structural detection
         candle_history_limit = self.config.get("realtime_candle_history", 500)
