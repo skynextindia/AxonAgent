@@ -93,7 +93,17 @@ Monitors the chart constantly and extracts structural patterns using pure mathem
 8. **SPREAD_CHANGE**: Tracking of broker spread levels (gating operations during spread spikes).
 9. **MOMENTUM_DIVERGENCE**: Classical RSI and price action divergences.
 
-### 3. Layer 3: LangGraph Multi-Agent Architecture
+### 3. CalendarGuard Economic Event Protection
+Protects trade execution by monitoring real-time economic calendars (NFS ForexFactory feed):
+- **News Event Block Window**: Blocks new trade entries during a configurable time before and after High, Medium, or Low-impact economic events (e.g. NFP, FOMC, CPI).
+- **Position Cut Protection**: Closes active positions if a high-impact news event is approaching within a configurable time window to protect the portfolio from extreme slippage or volatility.
+- **Outcome Analysis**: Measures the pip movement of the market at 5m, 15m, and 30m post-event, logs results to `reports/calendar_outcomes.jsonl`, and updates the dashboard.
+- **Settings**:
+  - `realtime_calendar_enabled`: Enable/disable news event checking.
+  - `realtime_calendar_impacts`: Event impact levels to check (`["High", "Medium", "Low"]`).
+  - `realtime_calendar_high_block_before`/`after`: Buffer time (minutes) to block trades.
+
+### 4. Layer 3: LangGraph Multi-Agent Architecture
 Compile-once, reuse-always LangGraph Directed Acyclic Graph (DAG):
 - **Trader Agent**: Establishes initial hypothesis.
 - **Analysts (x4 Parallel)**: Market, News, Fundamentals, and Sentiment/Social analysis.
@@ -102,13 +112,13 @@ Compile-once, reuse-always LangGraph Directed Acyclic Graph (DAG):
 - **Risk Team (x3 Parallel)**: Conservative, Neutral, and Aggressive risk assessments.
 - **Portfolio Manager**: Renders final BUY, SELL, or HOLD verdict.
 
-### 4. Enterprise-Grade LLM Integration
+### 5. Enterprise-Grade LLM Integration
 - Provider-agnostic factory supporting **OpenAI (GPT-4/5), Anthropic (Claude 3.5/3.7), Google (Gemini 1.5/2.0), Azure OpenAI**, and local models via **Ollama**.
 - Auto-resolves API keys and configuration dynamically.
 
-### 5. Advanced Monitoring Dashboard
+### 6. Advanced Monitoring Dashboard
 - Integrated FastAPI backend with a real-time, responsive glassmorphism web HUD.
-- Live-streams account equity, indicators, active regimes, events, agent conversation traces, and final trade decisions via WebSockets.
+- Live-streams economic events, calendar blocks, account equity, indicators, active regimes, events, agent conversation traces, and final trade decisions via WebSockets.
 - Session persistence: Saves and restores events across daemon restarts.
 
 ---
