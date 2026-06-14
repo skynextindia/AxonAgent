@@ -27,6 +27,7 @@ from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
 from axonai.realtime.event_detector import EventDetector
 from axonai.realtime.graph_executor import GraphExecutor
 from axonai.realtime.trade_executor import MT5TradeExecutor
+from axonai.realtime.decision_intelligence import ExecutionDecisionLayer
 from axonai.realtime.api_server import get_dashboard
 from cli.stats_handler import StatsCallbackHandler
 from axonai.realtime.calendar_guard import CalendarGuard
@@ -66,6 +67,7 @@ class AxonDaemon:
             self.live_state, self.live_evidence,
             self.event_queue, config,
         )
+        self.decision_layer = ExecutionDecisionLayer(config)
 
         # Layer 3: Graph Executor
         self.stats_handler = StatsCallbackHandler()
@@ -734,52 +736,17 @@ class AxonDaemon:
 
             self._events_detected += 1
 
-            # Filter: Only allow Advanced Microstructure Peak Reversals (Rule A & Rule B)
-            is_peak = event.event_type == EventType.PEAK_DETECTION
-            peak_type = event.details.get("peak_type", "") if is_peak else ""
-            is_exhaustion = peak_type in ("velocity_exhaustion", "microstructure_exhaustion")
-            
-            # S/R Proximity & Daily Trend Gate
-            is_gate_passed = True
-            gate_reason = ""
-            if is_peak and is_exhaustion:
-                dir_str = event.details.get("direction", "")
-                direction = None
-                if "bullish" in dir_str or "low" in peak_type:
-                    direction = "BUY"
-                elif "bearish" in dir_str or "high" in peak_type:
-                    direction = "SELL"
-                
-                if direction is not None:
-                    # 1. Proximity Check to ANY S/R Zone (5.0 pips)
-                    active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
-                    closest_dist = float("inf")
-                    closest_lvl = None
-                    pip_mult = self.live_evidence._pip_mult
-                    for lvl in active_levels:
-                        dist_pips = abs(event.price - lvl.price) / pip_mult
-                        if dist_pips < closest_dist:
-                            closest_dist = dist_pips
-                            closest_lvl = lvl
-                    
-                    if closest_lvl is None or closest_dist > 5.0:
-                        is_gate_passed = False
-                        gate_reason = f"not near any S/R zone (closest: {closest_dist:.2f} pips)"
-                    else:
-                        # 2. Daily Trend Alignment Check (H4 trend direction)
-                        daily_trend = getattr(self.live_evidence, "trend_direction_h4", "sideways")
-                        if daily_trend == "up" and direction != "BUY":
-                            is_gate_passed = False
-                            gate_reason = f"counter daily trend (trend: UP, trade: {direction})"
-                        elif daily_trend == "down" and direction != "SELL":
-                            is_gate_passed = False
-                            gate_reason = f"counter daily trend (trend: DOWN, trade: {direction})"
-                        else:
-                            logger.info("LIVE PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f is %.2f pips from %s level %.5f. Trend=%s, Trade=%s",
-                                        event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
+            # Call Decision Intelligence Layer
+            decision = self.decision_layer.evaluate(self.live_state, self.live_evidence, event)
+            is_gate_passed = decision["trade_allowed"]
+            gate_reason = decision["reason"]
+            explainability = decision["explainability"]
 
+            # Save explainability in event details so the front-end dashboard can display it
+            event.details["explainability"] = explainability
+            
             dashboard = get_dashboard()
-            if not self.config.get("test_mode", False) and not (is_peak and is_exhaustion and is_gate_passed):
+            if not self.config.get("test_mode", False) and not is_gate_passed:
                 self._events_skipped += 1
                 if dashboard:
                     dashboard.broadcast({
@@ -791,7 +758,7 @@ class AxonDaemon:
                         "details": event.details,
                         "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                         "status": "skipped",
-                        "reason": gate_reason if not is_gate_passed else "Strategy restricted to Microstructure Peaks",
+                        "reason": gate_reason,
                         "events_detected": self._events_detected,
                         "events_fired": self._events_fired,
                         "events_skipped": self._events_skipped,

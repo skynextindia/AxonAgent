@@ -1,7 +1,10 @@
 import pytest
 import queue
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
+
+BASE_TIME = datetime(2026, 6, 10, 12, 0, 0, tzinfo=timezone.utc)
+
 
 from axonai.realtime.event_types import LiveCandle, EventPriority, EventType
 from axonai.realtime.event_detector import EventDetector
@@ -31,7 +34,7 @@ def test_bullish_engulfing_high_intensity():
     # - current close (1.15035) is within 5 pips (0.0005) of 1.15000 (diff = 0.00035)
     prev_candle = LiveCandle(
         timeframe="M15",
-        open_time=datetime.now() - timedelta(minutes=15),
+        open_time=BASE_TIME - timedelta(minutes=15),
         open=1.15025,
         high=1.15030,
         low=1.15005,
@@ -42,7 +45,7 @@ def test_bullish_engulfing_high_intensity():
     
     curr_candle = LiveCandle(
         timeframe="M15",
-        open_time=datetime.now(),
+        open_time=BASE_TIME,
         open=1.15005,
         high=1.15040,
         low=1.14995,
@@ -60,7 +63,7 @@ def test_bullish_engulfing_high_intensity():
         m15_history.append(
             LiveCandle(
                 timeframe="M15",
-                open_time=datetime.now() - timedelta(minutes=15 * (12 - i)),
+                open_time=BASE_TIME - timedelta(minutes=15 * (12 - i)),
                 open=1.15000,
                 high=1.15010,
                 low=1.14990,
@@ -123,7 +126,7 @@ def test_bearish_engulfing_medium_intensity():
     # Body = 0.10
     prev_candle = LiveCandle(
         timeframe="M15",
-        open_time=datetime.now() - timedelta(minutes=15),
+        open_time=BASE_TIME - timedelta(minutes=15),
         open=150.02,
         high=150.10,
         low=149.95,
@@ -134,7 +137,7 @@ def test_bearish_engulfing_medium_intensity():
     
     curr_candle = LiveCandle(
         timeframe="M15",
-        open_time=datetime.now(),
+        open_time=BASE_TIME,
         open=150.08,
         high=150.15,
         low=149.90,
@@ -153,7 +156,7 @@ def test_bearish_engulfing_medium_intensity():
     m15_history.append(
         LiveCandle(
             timeframe="M15",
-            open_time=datetime.now() - timedelta(minutes=15 * 12),
+            open_time=BASE_TIME - timedelta(minutes=15 * 12),
             open=150.00,
             high=150.10,
             low=149.90,
@@ -168,7 +171,7 @@ def test_bearish_engulfing_medium_intensity():
         m15_history.append(
             LiveCandle(
                 timeframe="M15",
-                open_time=datetime.now() - timedelta(minutes=15 * (12 - i)),
+                open_time=BASE_TIME - timedelta(minutes=15 * (12 - i)),
                 open=151.00,
                 high=151.10,
                 low=150.90,
@@ -228,7 +231,7 @@ def test_pin_bar_body_color_enforcement():
     # But it is red (open = 1.15020, close = 1.15010)
     red_candle = LiveCandle(
         timeframe="M15",
-        open_time=datetime.now(),
+        open_time=BASE_TIME,
         open=1.15020,
         high=1.15025,
         low=1.14960,
@@ -242,7 +245,7 @@ def test_pin_bar_body_color_enforcement():
     # And it is green (open = 1.15010, close = 1.15020)
     green_candle = LiveCandle(
         timeframe="M15",
-        open_time=datetime.now(),
+        open_time=BASE_TIME,
         open=1.15010,
         high=1.15025,
         low=1.14960,
@@ -294,7 +297,7 @@ def test_backfill_historical_events():
     # Create a historical M15 valid bullish pin bar
     pin_candle = LiveCandle(
         timeframe="M15",
-        open_time=datetime.now() - timedelta(minutes=30),
+        open_time=BASE_TIME - timedelta(minutes=30),
         open=1.15010,
         high=1.15025,
         low=1.14960,
@@ -308,7 +311,7 @@ def test_backfill_historical_events():
         mock_evidence._m15_candles.append(
             LiveCandle(
                 timeframe="M15",
-                open_time=datetime.now() - timedelta(minutes=15 * (10 - i)),
+                open_time=BASE_TIME - timedelta(minutes=15 * (10 - i)),
                 open=1.15000,
                 high=1.15005,
                 low=1.14995,
@@ -380,7 +383,7 @@ def test_sweep_detection():
     # but closes at 1.14980 (closes back inside)
     candle = LiveCandle(
         timeframe="M15",
-        open_time=datetime.now(),
+        open_time=BASE_TIME,
         open=1.14950,
         high=1.15005,
         low=1.14940,

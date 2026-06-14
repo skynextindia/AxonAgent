@@ -234,6 +234,25 @@ json_report = {
     "net_profit_pips": report["net_profit_pips"],
     "profit_factor": report["profit_factor"],
     "event_breakdown": report.get("event_breakdown", {}),
+    "trades": [
+        {
+            "id": t["id"],
+            "direction": t["direction"],
+            "entry_time": t["entry_time"].isoformat(),
+            "entry_price": t["entry_price"],
+            "exit_time": t["exit_time"].isoformat() if t["exit_time"] else None,
+            "exit_price": t["exit_price"],
+            "sl": t["sl"],
+            "tp": t["tp"],
+            "pips": t["pips"],
+            "trigger": t["trigger"],
+            "signal_quality": t["signal_quality"],
+            "status": t["status"],
+            "close_reason": t["close_reason"],
+            "explainability": t.get("explainability", {})
+        }
+        for t in engine.simulated_trades
+    ]
 }
 with open(json_path, "w") as f:
     json.dump(json_report, f, indent=2)

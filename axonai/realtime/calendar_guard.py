@@ -205,6 +205,16 @@ class CalendarGuard:
                 "actual": actual
             })
             
+        # Rollover/clone expired events with actual values to next week
+        cloned_events = []
+        for ev in parsed_events:
+            if ev.get("actual") and ev["time"] < sim_now:
+                cloned = ev.copy()
+                cloned["actual"] = None
+                cloned["time"] = ev["time"] + timedelta(days=7)
+                cloned_events.append(cloned)
+        parsed_events.extend(cloned_events)
+
         parsed_events.sort(key=lambda x: x["time"])
         self.events = parsed_events
         self.last_fetch_time = datetime.now(timezone.utc)

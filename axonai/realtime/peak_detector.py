@@ -82,17 +82,15 @@ class PeakDetector:
         self.timestamps.append(timestamp)
         self.tick_volumes.append(volume)
 
-        # Compute instantaneous tick velocities
+        # Compute tick-count velocity using a constant virtual time step of 0.05s per tick.
+        # This completely decouples calculations from raw clock time, making it 100% broker-portable.
         velocity = 0.0
         buy_vel = 0.0
         sell_vel = 0.0
         
         if len(self.tick_prices) > 1:
             prev_price = self.tick_prices[-2]
-            prev_time = self.timestamps[-2]
-            dt_raw = (timestamp - prev_time).total_seconds()
-            # Scale dt if running on backtest-interpolated ticks (60s apart)
-            dt = 0.05 if dt_raw >= 5.0 else max(0.001, dt_raw)
+            dt = 0.05  # constant virtual time step per event step
             
             dp = price - prev_price
             velocity = (abs(dp) / dt) / self.pip_mult
@@ -109,21 +107,13 @@ class PeakDetector:
         if len(self.tick_prices) < 10:
             return None
 
-        # 1. Filter ticks within the last 60 seconds
-        recent_indices = [
-            i for i, ts in enumerate(self.timestamps)
-            if (timestamp - ts).total_seconds() <= 60.0
-        ]
-        
-        # Fallback to last 50 ticks if we have very few ticks in 60s window
-        if len(recent_indices) < 10:
-            recent_indices = list(range(max(0, len(self.timestamps) - 50), len(self.timestamps)))
+        # 1. Use a fixed rolling window of 50 ticks (completely broker-portable)
+        recent_indices = list(range(max(0, len(self.timestamps) - 50), len(self.timestamps)))
 
         recent_prices = [self.tick_prices[idx] for idx in recent_indices]
         recent_velocities = [self.tick_velocities[idx] for idx in recent_indices]
         recent_buy_vels = [self.buy_velocities[idx] for idx in recent_indices]
         recent_sell_vels = [self.sell_velocities[idx] for idx in recent_indices]
-        recent_timestamps = [self.timestamps[idx] for idx in recent_indices]
 
         # 2. Compute price-per-tick efficiency
         pip_movement = abs(recent_prices[-1] - recent_prices[0]) / self.pip_mult
@@ -135,11 +125,11 @@ class PeakDetector:
                 
         price_per_tick_efficiency = pip_movement / max(1, aggressive_ticks)
 
-        # 3. Compute velocity divergence
+        # 3. Compute velocity divergence with constant virtual time step dt = 0.05
         buy_acc = 0.0
         sell_acc = 0.0
         if len(recent_indices) > 1:
-            dt = max(0.001, (recent_timestamps[-1] - recent_timestamps[-2]).total_seconds())
+            dt = 0.05
             buy_acc = (recent_buy_vels[-1] - recent_buy_vels[-2]) / dt
             sell_acc = (recent_sell_vels[-1] - recent_sell_vels[-2]) / dt
 
