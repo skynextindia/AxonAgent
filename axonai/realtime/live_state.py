@@ -1102,11 +1102,18 @@ class LiveMarketEvidence:
             end_dt = datetime.now()
             df_d1 = _fetch_bars(mt5_sym, "D1", end_dt - timedelta(days=5), end_dt)
             if df_d1 is not None and len(df_d1) >= 2:
-                yesterday = df_d1.iloc[-2]
+                if hasattr(df_d1, "iloc"):
+                    yesterday = df_d1.iloc[-2]
+                    high_val = float(yesterday["High"])
+                    low_val = float(yesterday["Low"])
+                else:
+                    yesterday = df_d1[-2]
+                    high_val = float(yesterday.get("high", yesterday.get("High")))
+                    low_val = float(yesterday.get("low", yesterday.get("Low")))
                 self.price_levels = [l for l in self.price_levels if l.level_type not in ("PDH", "PDL")]
                 now_utc = datetime.now(timezone.utc)
                 self.price_levels.append(PriceLevel(
-                    price=float(yesterday["High"]),
+                    price=high_val,
                     level_type="PDH",
                     timeframe="D1",
                     touches=0,
@@ -1116,7 +1123,7 @@ class LiveMarketEvidence:
                     is_active=True
                 ))
                 self.price_levels.append(PriceLevel(
-                    price=float(yesterday["Low"]),
+                    price=low_val,
                     level_type="PDL",
                     timeframe="D1",
                     touches=0,
@@ -1139,11 +1146,18 @@ class LiveMarketEvidence:
             end_dt = datetime.now()
             df_w1 = _fetch_bars(mt5_sym, "W1", end_dt - timedelta(days=20), end_dt)
             if df_w1 is not None and len(df_w1) >= 2:
-                last_week = df_w1.iloc[-2]
+                if hasattr(df_w1, "iloc"):
+                    last_week = df_w1.iloc[-2]
+                    high_val = float(last_week["High"])
+                    low_val = float(last_week["Low"])
+                else:
+                    last_week = df_w1[-2]
+                    high_val = float(last_week.get("high", last_week.get("High")))
+                    low_val = float(last_week.get("low", last_week.get("Low")))
                 self.price_levels = [l for l in self.price_levels if l.level_type not in ("PWH", "PWL")]
                 now_utc = datetime.now(timezone.utc)
                 self.price_levels.append(PriceLevel(
-                    price=float(last_week["High"]),
+                    price=high_val,
                     level_type="PWH",
                     timeframe="W1",
                     touches=0,
@@ -1153,7 +1167,7 @@ class LiveMarketEvidence:
                     is_active=True
                 ))
                 self.price_levels.append(PriceLevel(
-                    price=float(last_week["Low"]),
+                    price=low_val,
                     level_type="PWL",
                     timeframe="W1",
                     touches=0,
