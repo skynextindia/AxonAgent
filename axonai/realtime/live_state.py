@@ -1218,6 +1218,128 @@ class LiveMarketEvidence:
             self._update_indicators()
             self._invalidate_price_levels(candle.close, "H4")
 
+    def get_empirical_metrics(self, timeframe: str, lookback: int = 14, exclude_last: bool = False) -> dict:
+        """Calculate dynamic statistical averages for candle parameters."""
+        candles = []
+        if timeframe == "M15":
+            candles = list(self._m15_candles)
+        elif timeframe == "H1":
+            candles = list(self._h1_candles)
+        elif timeframe == "H4":
+            candles = list(self._h4_candles)
+            
+        if not candles:
+            return {
+                "avg_body": 0.001, "avg_wick": 0.001, "avg_volume": 100.0, "std_wick": 0.0,
+                "avg_upper_wick": 0.0005, "std_upper_wick": 0.0, "avg_lower_wick": 0.0005, "std_lower_wick": 0.0
+            }
+            
+        recent = candles[:-1][-lookback:] if exclude_last else candles[-lookback:]
+        if not recent:
+            return {
+                "avg_body": 0.001, "avg_wick": 0.001, "avg_volume": 100.0, "std_wick": 0.0,
+                "avg_upper_wick": 0.0005, "std_upper_wick": 0.0, "avg_lower_wick": 0.0005, "std_lower_wick": 0.0
+            }
+            
+        bodies = [abs(c.close - c.open) for c in recent]
+        wicks = [(c.high - max(c.open, c.close)) + (min(c.open, c.close) - c.low) for c in recent]
+        upper_wicks = [c.high - max(c.open, c.close) for c in recent]
+        lower_wicks = [min(c.open, c.close) - c.low for c in recent]
+        volumes = [c.volume for c in recent]
+        
+        avg_body = float(np.mean(bodies)) if bodies else 0.001
+        avg_wick = float(np.mean(wicks)) if wicks else 0.001
+        avg_vol = float(np.mean(volumes)) if volumes else 100.0
+        std_wick = float(np.std(wicks)) if wicks else 0.0
+        
+        avg_upper_wick = float(np.mean(upper_wicks)) if upper_wicks else 0.0005
+        std_upper_wick = float(np.std(upper_wicks)) if upper_wicks else 0.0
+        avg_lower_wick = float(np.mean(lower_wicks)) if lower_wicks else 0.0005
+        std_lower_wick = float(np.std(lower_wicks)) if lower_wicks else 0.0
+        
+        return {
+            "avg_body": avg_body,
+            "avg_wick": avg_wick,
+            "avg_volume": avg_vol,
+            "std_wick": std_wick,
+            "avg_upper_wick": avg_upper_wick,
+            "std_upper_wick": std_upper_wick,
+            "avg_lower_wick": avg_lower_wick,
+            "std_lower_wick": std_lower_wick,
+        }
+
+    def detect_empirical_reversal_patterns(self, timeframe: str, direction: str = None) -> dict:
+        """Detect non-traditional/empirical reversal markers on the latest completed candle."""
+        candles = []
+        if timeframe == "M15":
+            candles = list(self._m15_candles)
+        elif timeframe == "H1":
+            candles = list(self._h1_candles)
+        elif timeframe == "H4":
+            candles = list(self._h4_candles)
+            
+        if len(candles) < 15:
+            return {"wick_climax": False, "volume_stall": False, "v_rebound": False}
+            
+        # Get the latest completed candle
+        c = candles[-1]
+        
+        # Calculate statistics excluding the latest one
+        stats = self.get_empirical_metrics(timeframe, lookback=14, exclude_last=True)
+        
+        # Current candle properties
+        c_body = abs(c.close - c.open)
+        c_vol = c.volume
+        
+        # 1. Wick Climax
+        if direction == "bullish_reversal":
+            c_wick = min(c.open, c.close) - c.low
+            wick_threshold = max(stats["avg_lower_wick"] + 1.5 * stats["std_lower_wick"], stats["avg_lower_wick"] * 1.8)
+        elif direction == "bearish_reversal":
+            c_wick = c.high - max(c.open, c.close)
+            wick_threshold = max(stats["avg_upper_wick"] + 1.5 * stats["std_upper_wick"], stats["avg_upper_wick"] * 1.8)
+        else:
+            c_wick = (c.high - max(c.open, c.close)) + (min(c.open, c.close) - c.low)
+            wick_threshold = max(stats["avg_wick"] + 1.5 * stats["std_wick"], stats["avg_wick"] * 1.8)
+            
+        wick_climax = c_wick >= wick_threshold
+        
+        # 2. Volume Stall (Absorption)
+        volume_stall = (c_vol > stats["avg_volume"] * 1.3) and (c_body < stats["avg_body"] * 0.6)
+        
+        # 3. V-Rebound
+        v_rebound = False
+        if c_body > stats["avg_body"] * 1.4 and len(candles) >= 4:
+            prior_direction = []
+            for pc in candles[-4:-1]:
+                if pc.close > pc.open:
+                    prior_direction.append(1)
+                elif pc.close < pc.open:
+                    prior_direction.append(-1)
+                else:
+                    prior_direction.append(0)
+            
+            is_curr_bullish = c.close > c.open
+            
+            if direction == "bullish_reversal":
+                if is_curr_bullish and sum(prior_direction) <= -2:
+                    v_rebound = True
+            elif direction == "bearish_reversal":
+                if not is_curr_bullish and sum(prior_direction) >= 2:
+                    v_rebound = True
+            else:
+                if is_curr_bullish and sum(prior_direction) <= -2:
+                    v_rebound = True
+                elif not is_curr_bullish and sum(prior_direction) >= 2:
+                    v_rebound = True
+                    
+        return {
+            "wick_climax": wick_climax,
+            "volume_stall": volume_stall,
+            "v_rebound": v_rebound
+        }
+
+
     def _update_m15_swings(self):
         """Scan self._m15_candles to find local swing highs and swing lows (window of 3) as micro S/R levels."""
         # Clean up existing M15_SWING levels

@@ -188,16 +188,17 @@ class ExecutionDecisionLayer:
 
         # ── S/R Proximity check ──
         pip_mult = getattr(evidence, "_pip_mult", 0.0001)
-        if direction is not None and self.config.get("require_sr_proximity", True):
-            active_levels = [l for l in evidence.price_levels if l.is_active]
-            closest_dist = float("inf")
-            closest_lvl = None
+        active_levels = getattr(evidence, "price_levels", [])
+        closest_dist = float("inf")
+        closest_lvl = None
+        if active_levels:
             for lvl in active_levels:
                 dist_pips = abs(event.price - lvl.price) / pip_mult
                 if dist_pips < closest_dist:
                     closest_dist = dist_pips
                     closest_lvl = lvl
-            
+
+        if direction is not None and self.config.get("require_sr_proximity", True):
             if closest_lvl is None or closest_dist > 5.0:
                 trade_allowed = False
                 reason = f"Trade price is outside S/R proximity window (closest: {closest_dist:.2f} pips)."
@@ -214,6 +215,40 @@ class ExecutionDecisionLayer:
                 risk_factors.append(f"Counter-trend trade against H4 Trend ({daily_trend})")
             else:
                 supporting_factors.append(f"Aligned with H4 Trend ({daily_trend})")
+
+        # ── Empirical Reversal Structure Check ──
+        if direction is not None and self.config.get("require_structural_alignment", False):
+            # If we are extremely close to S/R level (high proximity confidence), we don't strictly require structural alignment
+            if closest_lvl is not None and closest_dist <= 2.0:
+                supporting_factors.append(f"Empirical Reversal: Bypassed (S/R Proximity very high: {closest_dist:.2f} pips)")
+            else:
+                rev_dir = "bullish_reversal" if direction == "BUY" else "bearish_reversal"
+                detect_fn = getattr(evidence, "detect_empirical_reversal_patterns", None)
+                if detect_fn is not None:
+                    try:
+                        m15_pats = detect_fn("M15", direction=rev_dir)
+                        h1_pats = detect_fn("H1", direction=rev_dir)
+                    except TypeError:
+                        m15_pats = detect_fn("M15")
+                        h1_pats = detect_fn("H1")
+                else:
+                    m15_pats = {}
+                    h1_pats = {}
+                
+                has_m15_pattern = any(m15_pats.values())
+                has_h1_pattern = any(h1_pats.values())
+                
+                if not (has_m15_pattern or has_h1_pattern):
+                    trade_allowed = False
+                    reason = "Blocked: No empirical reversal structure (wick climax, volume stall, or V-rebound) detected on M15/H1."
+                    risk_factors.append("No empirical reversal structure on M15/H1")
+                else:
+                    active_pats = []
+                    for tf, pats in [("M15", m15_pats), ("H1", h1_pats)]:
+                        for name, active in pats.items():
+                            if active:
+                                active_pats.append(f"{tf} {name}")
+                    supporting_factors.append(f"Empirical Reversal: {', '.join(active_pats)}")
 
         # ── Spread check ──
         spread_pips = getattr(ws_state, "spread_pips", 1.0)
