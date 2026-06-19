@@ -49,10 +49,10 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
     <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">MARGIN LVL</span><span id="broker-marginlevel-val" style="font-size:13px;font-weight:700;color:var(--cyan);">0%</span></div>
   </div>
   <div style="display:flex;gap:20px;align-items:center;border-left:1px solid var(--border);padding-left:20px;margin-left:20px;">
-    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">TOTAL TOKENS</span><span id="token-total-val" style="font-size:13px;font-weight:700;color:var(--purple);">0</span></div>
-    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">INPUT TOKENS</span><span id="token-input-val" style="font-size:11px;font-weight:600;color:var(--cyan);">0</span></div>
-    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">OUTPUT TOKENS</span><span id="token-output-val" style="font-size:11px;font-weight:600;color:var(--amber);">0</span></div>
-    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">LLM / TOOL CALLS</span><span id="token-calls-val" style="font-size:11px;font-weight:600;color:var(--text-primary);">0 / 0</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">RULE A (MAX VEL)</span><span id="token-total-val" style="font-size:13px;font-weight:700;color:var(--purple);">0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">RULE B (DIV)</span><span id="token-input-val" style="font-size:11px;font-weight:600;color:var(--cyan);">0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">TICK EFFICIENCY</span><span id="token-output-val" style="font-size:11px;font-weight:600;color:var(--amber);">0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">ENGINE TRIGGER</span><span id="token-calls-val" style="font-size:11px;font-weight:600;color:var(--text-primary);">MONITOR</span></div>
   </div>
   <div style="flex:1;"></div>
   <div style="display:flex;align-items:center;gap:16px;">
@@ -175,7 +175,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
   </div>
   <!-- OVERRIDES + GATES -->
   <div style="display:grid;grid-template-columns:6fr 6fr;gap:3px;flex-shrink:0;">
-    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-top:3px solid var(--red);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">TACTICAL_OVERRIDES</span><div style="display:flex;gap:4px;margin-top:2px;"><button onclick="fetch('/api/emergency_stop',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(255,0,85,.15);color:var(--red);border-color:rgba(255,0,85,.5);">HALT</button><button onclick="fetch('/api/close_all',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(255,171,0,.15);color:var(--amber);border-color:rgba(255,171,0,.5);">CLOSE ALL</button><button onclick="fetch('/api/pause_llm',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(0,240,255,.1);color:var(--cyan);border-color:rgba(0,240,255,.5);">TOGGLE LLM</button></div></div>
+    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-top:3px solid var(--red);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">TACTICAL_OVERRIDES</span><div style="display:flex;gap:4px;margin-top:2px;"><button onclick="fetch('/api/emergency_stop',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(255,0,85,.15);color:var(--red);border-color:rgba(255,0,85,.5);">HALT</button><button onclick="fetch('/api/close_all',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(255,171,0,.15);color:var(--amber);border-color:rgba(255,171,0,.5);">CLOSE ALL</button><button id="pause-trading-btn" onclick="fetch('/api/pause_llm',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(0,240,255,.1);color:var(--cyan);border-color:rgba(0,240,255,.5);">PAUSE</button></div></div>
     <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-top:3px solid var(--cyan);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">SECURITY_GATES</span><div style="display:flex;gap:4px;font-size:7px;font-weight:700;color:var(--text-dim);letter-spacing:.02em;"><div style="display:flex;align-items:center;gap:2px;"><span id="gate-state" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>STATE</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-spread" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>SPREAD</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-convict" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>CONV</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-rate" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>RATE</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-context" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>CTX</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-paused" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>PAUSED</div></div></div>
   </div>
   <!-- PRICE CHART -->
@@ -210,27 +210,21 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
   <!-- Col 1: Pipeline -->
   <div style="display:flex;flex-direction:column;gap:3px;min-height:0;overflow:hidden;">
     <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;gap:4px;flex-shrink:0;border-top:3px solid var(--cyan);background:#040406;">
-      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #1f1f2e;padding-bottom:4px;"><span style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">AGENT_PIPELINE</span><div style="display:flex;align-items:center;gap:4px;"><span id="pipeline-led" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span><span id="pipeline-status" style="font-size:6.5px;color:var(--text-dim);font-weight:900;letter-spacing:.04em;text-transform:uppercase;">STANDBY</span></div></div>
+      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #1f1f2e;padding-bottom:4px;"><span style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">ENGINE_PIPELINE</span><div style="display:flex;align-items:center;gap:4px;"><span id="pipeline-led" style="width:5px;height:5px;border-radius:50%;background:#00ff66;box-shadow:0 0 6px #00ff66;display:inline-block;"></span><span id="pipeline-status" style="font-size:6.5px;color:var(--green);font-weight:900;letter-spacing:.04em;text-transform:uppercase;">ACTIVE</span></div></div>
       <div style="font-size:6.5px;display:flex;flex-direction:column;gap:6px;">
-        <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 1: ANALYSTS</span><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:3px;margin-top:2px;">
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-wyckoff"><span id="led-wyckoff" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">WYCKOFF</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-keynes"><span id="led-keynes" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">KEYNES</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-reuters"><span id="led-reuters" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">REUTERS</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-livermore"><span id="led-livermore" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">LIVERMORE</span></div>
+        <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 1: DATA NORMALIZATION</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-top:2px;">
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-wyckoff"><span id="led-wyckoff" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">VELOCITY</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-keynes"><span id="led-keynes" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">DISPLACEMENT</span></div>
         </div></div>
-        <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 2: RESEARCH</span><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-top:2px;">
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-buffett"><span id="led-buffett" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">BUFFETT</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-soros"><span id="led-soros" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">SOROS</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-munger"><span id="led-munger" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">MUNGER</span></div>
+        <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 2: STATE ANALYSIS</span><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-top:2px;">
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-buffett"><span id="led-buffett" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">REGIME</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-soros"><span id="led-soros" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">MTF BIAS</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-munger"><span id="led-munger" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">LIQUIDITY</span></div>
         </div></div>
-        <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 3: RISK</span><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:3px;margin-top:2px;">
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-simons"><span id="led-simons" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">SIMONS</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-dalio"><span id="led-dalio" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">DALIO</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-marks"><span id="led-marks" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">MARKS</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-druckenmiller"><span id="led-druckenmiller" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">DRUCKEN.</span></div>
-        </div></div>
-        <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 4: EXECUTION</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-top:2px;">
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded col-span-2" id="card-tudor"><span id="led-tudor" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">TUDOR</span></div>
+        <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 3: EXECUTION & HEALTH</span><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-top:2px;">
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-simons"><span id="led-simons" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">ENTRY SM</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-dalio"><span id="led-dalio" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">HEALTH</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-marks"><span id="led-marks" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">EXIT MGR</span></div>
         </div></div>
       </div>
     </div>
@@ -707,6 +701,117 @@ class DashboardController {
          if (log.children.length > 50) log.removeChild(log.lastChild);
       }
     }
+    this.updatePipelineLeds(d);
+  }
+  updatePipelineLeds(d) {
+    if(!d) return;
+    const updateLed = (id, state) => {
+      const led = document.getElementById(id);
+      if (!led) return;
+      if (state === "active" || state === "pass" || state === true) {
+        led.style.background = "#00ff66";
+        led.style.boxShadow = "0 0 6px #00ff66";
+      } else if (state === "warning" || state === "amber") {
+        led.style.background = "#ffab00";
+        led.style.boxShadow = "0 0 6px #ffab00";
+      } else if (state === "error" || state === "fail" || state === "blocked") {
+        led.style.background = "#ff3d3d";
+        led.style.boxShadow = "0 0 6px #ff3d3d";
+      } else if (state === "process" || state === "cyan") {
+        led.style.background = "#00b8d4";
+        led.style.boxShadow = "0 0 6px #00b8d4";
+      } else if (state === "purple") {
+        led.style.background = "#9c27b0";
+        led.style.boxShadow = "0 0 6px #9c27b0";
+      } else {
+        led.style.background = "var(--text-dim)";
+        led.style.boxShadow = "none";
+      }
+    };
+
+    if (d.tick_velocity !== undefined) {
+      const v = Number(d.tick_velocity);
+      if (v > 2.0) updateLed("led-wyckoff", "active");
+      else if (v > 1.0) updateLed("led-wyckoff", "cyan");
+      else updateLed("led-wyckoff", "idle");
+    }
+
+    if (d.rule_b_divergence !== undefined) {
+      const div = Number(d.rule_b_divergence);
+      if (div > 0.8) updateLed("led-keynes", "active");
+      else if (div > 0.6) updateLed("led-keynes", "amber");
+      else updateLed("led-keynes", "idle");
+    }
+
+    if (d.dominant !== undefined) {
+      const conf = Number(d.confidence) || 0;
+      if (conf > 0.65) updateLed("led-buffett", "active");
+      else if (conf > 0.3) updateLed("led-buffett", "cyan");
+      else updateLed("led-buffett", "idle");
+    }
+
+    if (d.trend_h4 !== undefined && d.trend_h1 !== undefined) {
+      const h4 = String(d.trend_h4).toLowerCase();
+      const h1 = String(d.trend_h1).toLowerCase();
+      if ((h4 === "up" || h4.includes("bull")) && (h1 === "up" || h1.includes("bull"))) {
+        updateLed("led-soros", "active");
+      } else if ((h4 === "down" || h4.includes("bear")) && (h1 === "down" || h1.includes("bear"))) {
+        updateLed("led-soros", "active");
+      } else if (h4 === "sideways" || h1 === "sideways") {
+        updateLed("led-soros", "amber");
+      } else {
+        updateLed("led-soros", "idle");
+      }
+    }
+
+    if (this.currentBid > 0 && this.currentRes > 0 && this.currentSup > 0) {
+      const distRes = (this.currentRes - this.currentBid) / this.pipMult;
+      const distSup = (this.currentBid - this.currentSup) / this.pipMult;
+      if (distRes <= 3.0 || distSup <= 3.0) {
+        updateLed("led-munger", "active");
+      } else if (distRes <= 7.0 || distSup <= 7.0) {
+        updateLed("led-munger", "cyan");
+      } else {
+        updateLed("led-munger", "idle");
+      }
+    }
+
+    if (d.entry_state !== undefined) {
+      const st = String(d.entry_state).toUpperCase();
+      if (st === "TRIGGERED") updateLed("led-simons", "active");
+      else if (st === "ARMING") updateLed("led-simons", "purple");
+      else if (st === "ANOMALY") updateLed("led-simons", "amber");
+      else if (st === "INVALIDATED") updateLed("led-simons", "fail");
+      else updateLed("led-simons", "idle");
+    }
+
+    if (d.health_active !== undefined) {
+      if (d.health_active) {
+        const sc = Number(d.health_score) || 0.0;
+        if (sc > 0.7) updateLed("led-dalio", "active");
+        else if (sc > 0.4) updateLed("led-dalio", "amber");
+        else updateLed("led-dalio", "fail");
+      } else {
+        updateLed("led-dalio", "idle");
+      }
+    }
+
+    if (d.health_active !== undefined) {
+      if (d.health_active) {
+        if (d.exit_should_exit) {
+          updateLed("led-marks", "fail");
+        } else {
+          const action = String(d.exit_action).toUpperCase();
+          if (action === "ADJUST_SL" || action === "ADJUST_TP") {
+            updateLed("led-marks", "amber");
+          } else {
+            updateLed("led-marks", "active");
+          }
+        }
+      } else {
+        updateLed("led-marks", "idle");
+      }
+    }
   }
   handleRegime(d) {
     if(d.symbol&&this.ticker)this.ticker.textContent=d.symbol;
@@ -720,7 +825,30 @@ class DashboardController {
         this.beliefBar.style.background=val>=0?"var(--green)":"var(--red)";
     }
     if(d.macro_bias){const mb=document.getElementById("macro-bias");if(mb){mb.textContent=d.macro_bias;mb.style.color=d.macro_bias==="BUY"?"var(--green)":d.macro_bias==="SELL"?"var(--red)":"var(--text-dim)";const ml=document.getElementById("macro-lvl");if(ml)ml.textContent="LVL: "+this.sf(d.macro_key_level,5);const mc=document.getElementById("macro-conf");if(mc)mc.textContent=this.sf((Number(d.macro_confidence)||0)*100,0)+"%"}}
-    if(d.gate_status){const ug=(id,p)=>{const el=document.getElementById(id);if(el)el.style.background=p?"#00ff66":"#ff0055"};ug("gate-state",d.gate_status.state_passed);ug("gate-spread",d.gate_status.spread_passed);ug("gate-convict",d.gate_status.conviction_passed);ug("gate-rate",d.gate_status.rate_limit_passed);ug("gate-context",d.gate_status.context_passed);ug("gate-paused",d.gate_status.llm_paused)}
+    if(d.gate_status){
+      const ug=(id,p)=>{const el=document.getElementById(id);if(el)el.style.background=p?"#00ff66":"#ff0055"};
+      ug("gate-state",d.gate_status.state_passed);
+      ug("gate-spread",d.gate_status.spread_passed);
+      ug("gate-convict",d.gate_status.conviction_passed);
+      ug("gate-rate",d.gate_status.rate_limit_passed);
+      ug("gate-context",d.gate_status.context_passed);
+      ug("gate-paused",d.gate_status.llm_paused);
+      
+      const pBtn = document.getElementById("pause-trading-btn");
+      if (pBtn) {
+        if (d.gate_status.llm_paused) {
+          pBtn.textContent = "RESUME";
+          pBtn.style.background = "rgba(0,200,83,.15)";
+          pBtn.style.color = "var(--green)";
+          pBtn.style.borderColor = "rgba(0,200,83,.5)";
+        } else {
+          pBtn.textContent = "PAUSE";
+          pBtn.style.background = "rgba(0,240,255,.1)";
+          pBtn.style.color = "var(--cyan)";
+          pBtn.style.borderColor = "rgba(0,240,255,.5)";
+        }
+      }
+    }
     if(this.regimeType)this.regimeType.textContent=d.dominant||"UNKNOWN";
     if(this.regimeVol)this.regimeVol.textContent="VOL: "+(d.volatility||"").toUpperCase()+" | ATR: "+this.sf(d.atr,5);
     if(d.cooldown_remaining!==undefined&&this.cooldownVal){if(d.cooldown_remaining>0){this.cooldownVal.textContent=d.cooldown_remaining+"s";this.cooldownVal.style.color="var(--amber)";if(this.cooldownBar)this.cooldownBar.style.width=Math.min(100,(d.cooldown_remaining/300)*100)+"%"}else{this.cooldownVal.textContent="READY";this.cooldownVal.style.color="var(--green)";if(this.cooldownBar)this.cooldownBar.style.width="0%"}}
@@ -728,6 +856,7 @@ class DashboardController {
     if(d.tokens_total!==undefined){["token-total-val","token-input-val","token-output-val","token-calls-val"].forEach((id,i)=>{const el=document.getElementById(id);if(el){const vals=[d.tokens_total,d.tokens_in||0,d.tokens_out||0,(d.llm_calls||0)+" / "+(d.tool_calls||0)];if(i<3)el.textContent=Number(vals[i]).toLocaleString();else el.textContent=vals[i]}})}
     if(this.latency&&d.processing_time!==undefined)this.latency.textContent=this.sf(d.processing_time,0)+"ms";
     this.updateMTFPanel(d);
+    this.updatePipelineLeds(d);
   }
   updateMTFPanel(d) {
     const cd=v=>{if(!v)return'<span style="color:var(--text-dim)">--</span>';const u=v.toUpperCase();return u.includes("BULL")||u==="UP"?'<span style="color:#00ff66">&#9650; '+u+'</span>':u.includes("BEAR")||u==="DOWN"?'<span style="color:#ff0055">&#9660; '+u+'</span>':'<span style="color:var(--text-secondary)">&#9654; '+u+'</span>'};

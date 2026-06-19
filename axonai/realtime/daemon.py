@@ -90,6 +90,9 @@ class AxonDaemon:
         self._events_fired: int = 0
         self._events_skipped: int = 0
         self._start_time: Optional[datetime] = None
+        self.paused: bool = False
+        self._last_snapshot = None
+
 
     @staticmethod
     def _get_session_details(now_utc: datetime) -> list:
@@ -201,6 +204,31 @@ class AxonDaemon:
     def _get_regime_payload(self) -> dict:
         ws = self.live_state.snapshot()
         me = self.live_evidence.snapshot()
+        
+        entry_state = "IDLE"
+        entry_direction = None
+        entry_reason = "Awaiting anomaly"
+        entry_quality = 0.0
+        health_score = 1.0
+        health_active = False
+        health_reason = "Healthy"
+        exit_action = "HOLD"
+        exit_reason = ""
+        exit_should_exit = False
+        
+        if getattr(self, "_last_snapshot", None) is not None:
+            snap = self._last_snapshot
+            entry_state = snap.entry_decision.state
+            entry_direction = snap.entry_decision.direction
+            entry_reason = snap.entry_decision.reason
+            entry_quality = snap.entry_decision.signal_quality
+            health_score = snap.trade_health.score
+            health_active = self.reversal_model.health._is_active
+            health_reason = snap.trade_health.reason
+            exit_action = snap.exit_decision.action
+            exit_reason = snap.exit_decision.reason
+            exit_should_exit = snap.exit_decision.should_exit
+
         
         # Calculate M15 trend dynamically
         trend_m15 = "sideways"
@@ -332,6 +360,26 @@ class AxonDaemon:
             "london_range_low": me.london_range_low,
             "ny_range_high": me.ny_range_high,
             "ny_range_low": me.ny_range_low,
+            # Pure-math gate metrics
+            "gate_status": {
+                "state_passed": ws.belief_score > 0.3,
+                "spread_passed": ws.spread_safe,
+                "conviction_passed": ws.belief_score >= 0.65,
+                "rate_limit_passed": self._seconds_until_ready() == 0,
+                "context_passed": ws.abort_reason is None or ws.abort_reason == "",
+                "llm_paused": getattr(self, "paused", False)
+            },
+            # Entry State Machine & Execution telemetry
+            "entry_state": entry_state,
+            "entry_direction": entry_direction,
+            "entry_reason": entry_reason,
+            "entry_quality": entry_quality,
+            "health_score": health_score,
+            "health_active": health_active,
+            "health_reason": health_reason,
+            "exit_action": exit_action,
+            "exit_reason": exit_reason,
+            "exit_should_exit": exit_should_exit,
             # No LLM token tracking
             "tokens_in": 0,
             "tokens_out": 0,
@@ -601,9 +649,9 @@ class AxonDaemon:
     def _on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Called by TickEngine on every new tick."""
         mid = (bid + ask) / 2.0
-        
         # 1. Update pure-math reversal engine
         snapshot = self.reversal_model.on_tick(mid, timestamp, volume)
+        self._last_snapshot = snapshot
         
         # 2. Check for entry triggers
         if snapshot.entry_decision.is_valid_entry:
@@ -680,8 +728,21 @@ class AxonDaemon:
                 "rule_b_efficiency": snapshot.velocity.tick_efficiency,
                 "rule_b_confirmed": snapshot.entry_decision.state == "TRIGGERED",
                 "rule_a_max_vel": snapshot.velocity.raw_velocity,
-                "rule_a_avg_vel": snapshot.velocity.abs_velocity
+                "rule_a_avg_vel": snapshot.velocity.abs_velocity,
+                
+                # Entry State Machine & Execution telemetry
+                "entry_state": snapshot.entry_decision.state,
+                "entry_direction": snapshot.entry_decision.direction,
+                "entry_reason": snapshot.entry_decision.reason,
+                "entry_quality": snapshot.entry_decision.signal_quality,
+                "health_score": snapshot.trade_health.score,
+                "health_active": self.reversal_model.health._is_active,
+                "health_reason": snapshot.trade_health.reason,
+                "exit_action": snapshot.exit_decision.action,
+                "exit_reason": snapshot.exit_decision.reason,
+                "exit_should_exit": snapshot.exit_decision.should_exit
             })
+
             
             # Throttle heavier updates to once every 5 ticks
             if self.tick_engine._tick_count % 5 == 1:
@@ -742,6 +803,12 @@ class AxonDaemon:
             # Throttle logging
             if event_type == "entry":
                 self._events_detected += 1
+                
+                # Check if trading is paused
+                if getattr(self, "paused", False):
+                    self._events_skipped += 1
+                    logger.info("SKIPPED (Trading operations PAUSED)")
+                    continue
                 
                 # Check cooldown
                 remaining = self._seconds_until_ready()

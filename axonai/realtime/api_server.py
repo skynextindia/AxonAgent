@@ -175,11 +175,17 @@ class DashboardServer:
         @self.app.post("/api/pause_llm")
         def pause_llm():
             with self._lock:
-                if self.daemon and hasattr(self.daemon, "llm"):
-                    self.daemon.llm.paused = not getattr(self.daemon.llm, "paused", False)
-                    state = "paused" if self.daemon.llm.paused else "resumed"
-                    return {"status": "success", "message": f"LLM operations {state}"}
-                return {"status": "error", "message": "LLM bridge not available"}
+                if self.daemon:
+                    if hasattr(self.daemon, "paused"):
+                        self.daemon.paused = not self.daemon.paused
+                        state = "paused" if self.daemon.paused else "resumed"
+                        return {"status": "success", "message": f"Trading operations {state}", "paused": self.daemon.paused}
+                    elif hasattr(self.daemon, "llm"):
+                        self.daemon.llm.paused = not getattr(self.daemon.llm, "paused", False)
+                        state = "paused" if self.daemon.llm.paused else "resumed"
+                        return {"status": "success", "message": f"LLM operations {state}"}
+                return {"status": "error", "message": "Daemon not registered or not pausable"}
+
 
         @self.app.get("/api/logs/decisions")
         def get_decisions_log():
