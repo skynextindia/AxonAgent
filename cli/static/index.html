@@ -39,7 +39,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
 <body>
 <!-- ═══ HEADER ═══ -->
 <header style="display:flex;align-items:center;gap:16px;height:44px;flex-shrink:0;border-bottom:1px solid var(--border);padding:0 12px;margin-bottom:6px;">
-  <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><span style="color:var(--cyan);font-size:16px;font-weight:900;letter-spacing:.05em;">AXON<span style="color:var(--text-secondary);">.AI</span></span><div style="display:flex;align-items:center;gap:5px;"><span id="socket-light" style="width:7px;height:7px;border-radius:50%;background:var(--red);flex-shrink:0;"></span><span id="socket-status" style="font-size:9px;color:var(--red);font-weight:700;letter-spacing:.1em;">OFFLINE</span></div></div>
+  <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><span style="color:var(--cyan);font-size:16px;font-weight:900;letter-spacing:.05em;">AXON<span style="color:var(--text-secondary);">.AI</span></span><div style="display:flex;align-items:center;gap:5px;"><span id="socket-light" style="width:7px;height:7px;border-radius:50%;background:var(--red);flex-shrink:0;"></span><span id="socket-status" style="font-size:9px;color:var(--red);font-weight:700;letter-spacing:.1em;">OFFLINE</span></div><span id="mode-badge" title="Execution mode" style="font-size:9px;font-weight:900;letter-spacing:.08em;padding:2px 8px;border-radius:3px;border:1px solid var(--text-dim);color:var(--text-dim);text-transform:uppercase;display:none;white-space:nowrap;">—</span></div>
   <div style="width:1px;height:28px;background:var(--border);flex-shrink:0;"></div>
   <div style="display:flex;gap:20px;align-items:center;">
     <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">BALANCE</span><span id="broker-balance-val" style="font-size:13px;font-weight:700;color:var(--text-primary);">$0.00</span></div>
@@ -602,7 +602,22 @@ class DashboardController {
       case"account":this.handleAccount(d);break;case"candle":this.handleSingleCandle(d);break;case"candles":this.handleCandles(d);break;
       case"event":this.handleEvent(d);break;case"agent":this.handleAgent(d);break;case"decision":this.handleDecision(d);break;
       case"news_data":this.handleNewsData(d);break;
+      case"mode":this.handleMode(d);break;
     }
+  }
+  handleMode(d) {
+    const el = document.getElementById("mode-badge");
+    if(!el) return;
+    const c = "var(--" + (d.color||"text-dim") + ")";
+    el.textContent = d.label || "—";
+    el.style.color = c;
+    el.style.borderColor = c;
+    el.style.display = "inline-block";
+    el.title = (d.label||"") + " — engine: " + (d.engine||"") +
+               (d.paper ? " (simulated fills, no orders sent)"
+                : d.dry_run ? " (real demo orders sent to MT5)"
+                : " (REAL account orders)");
+    this._mode = d;
   }
   initChart() {
     const el = document.getElementById("price-chart");
@@ -830,7 +845,7 @@ class DashboardController {
   handleDecision(d) {
     if(!this.decisionPanel)return;
     const a=(d.action||d.signal||"MONITOR").toUpperCase();
-    if(this.decisionStatus)this.decisionStatus.textContent=d.status||d.state||"--";
+    if(this.decisionStatus)this.decisionStatus.textContent=(d.status||d.state||"--")+(d.paper?" · PAPER":"");
     if(this.decisionAction)this.decisionAction.textContent=a;
     if(this.decisionTime)this.decisionTime.textContent=d.time||d.timestamp||new Date().toLocaleTimeString();
     this.decisionPanel.style.borderLeftColor=a==="BUY"?"var(--green)":a==="SELL"?"var(--red)":"var(--purple)";

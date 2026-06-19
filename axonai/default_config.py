@@ -143,10 +143,14 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_deviation": 20,
     "realtime_min_confluence_conditions": 1,
     "realtime_dry_run": True,
+    "disable_llm": False,           # True = pure-math mode: skip LangGraph/LLM, trade on Rule A+B signals only (no API key needed)
+    "paper_trade": False,           # True = simulate fills internally, never call mt5.order_send (safe for tests / funded accounts)
     "peak_detector_rule_c_enabled": False,
     "trade_risk_pct": 0.01,
     "realtime_use_pinpoint_price": False,
-    "realtime_correct_rule_a_direction": False,
+    "realtime_correct_rule_a_direction": True,   # corrected Rule-A reversal direction (buy-spike→SELL, sell-spike→BUY)
+    "realtime_max_spread_frac": 0.5,             # reject entry if spread > this fraction of the stop distance
+    "realtime_min_signal_quality": 0.65,         # confluence-score floor for entries (shared by backtester + live gate)
     "realtime_cooldown_bypass_better_peak": False,
     "indicator_rsi_length": 14,
     "indicator_ema_fast": 12,

@@ -63,6 +63,7 @@ class DashboardServer:
             "events": [],        # List of last 30 detected events
             "agent_trace": [],   # List of last 50 agent steps
             "decision": None,    # Latest final decision
+            "mode": None,        # Execution mode badge (paper / dry-run / live + LLM on/off)
         }
 
         # Setup routing
@@ -104,12 +105,11 @@ class DashboardServer:
                 if self.daemon:
                     # Update config in daemon and dependent modules!
                     self.daemon.config.update(new_config)
-                    # Expose configuration update to event_detector, tick_engine, live_state, etc.
+                    # Expose configuration update to tick_engine, live_state, etc.
                     if hasattr(self.daemon, "tick_engine") and self.daemon.tick_engine:
                         self.daemon.tick_engine.poll_interval_ms = int(self.daemon.config.get("tick_poll_interval_ms", 100))
-                    if hasattr(self.daemon, "event_detector") and self.daemon.event_detector:
-                        self.daemon.event_detector._suppress_asian = self.daemon.config.get("realtime_suppress_asian", True)
-                        self.daemon.event_detector._level_reset_atr_mult = float(self.daemon.config.get("realtime_level_reset_atr_multiple", 2.0))
+                    if hasattr(self.daemon, "reversal_model") and self.daemon.reversal_model:
+                        self.daemon.reversal_model.config.update(new_config)
                     if hasattr(self.daemon, "live_state") and self.daemon.live_state:
                         self.daemon.live_state.config.update(new_config)
                     if hasattr(self.daemon, "live_evidence") and self.daemon.live_evidence:
@@ -153,18 +153,8 @@ class DashboardServer:
                             "peak_confidence": 0.85
                         }
                     
-                    event = MarketEvent(
-                        event_type=ev_type,
-                        priority=EventPriority.CRITICAL,
-                        timestamp=datetime.now(),
-                        symbol=self.daemon.yf_symbol,
-                        price=price,
-                        details=details
-                    )
-                    # Bypass cooldown so it fires immediately
-                    self.daemon.event_detector._cooldown_until = datetime.min
-                    self.daemon.event_detector.event_queue.put_nowait(event)
-                    return {"status": "triggered", "event": str(event)}
+                    # Trigger endpoint currently unsupported without EventDetector
+                    return {"status": "error", "message": "Trigger via API disabled on pure-math engine"}
                 return {"status": "error", "message": "Daemon not registered"}
         @self.app.post("/api/emergency_stop")
         def emergency_stop():
@@ -623,8 +613,12 @@ class DashboardServer:
             trace_data = list(self.history["agent_trace"])
             decision_data = self.history["decision"]
             news_data = self.history["news_data"]
+            mode_data = self.history["mode"]
 
         # 2. Perform all asynchronous sends safely OUTSIDE the lock block!
+        # 0. Execution mode badge (send first so the header reflects mode immediately)
+        if mode_data:
+            await websocket.send_json(mode_data)
         # 1. Account details
         if account_data:
             await websocket.send_json(account_data)
@@ -663,7 +657,7 @@ class DashboardServer:
         with self._lock:
             # Update cache history
             save_needed = False
-            if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data"]:
+            if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data", "mode"]:
                 self.history[msg_type] = message
                 if msg_type in ["decision", "news_data"]:
                     save_needed = True

@@ -1,8 +1,8 @@
 """AxonAI real-time trading daemon.
 
 Always-alive process that monitors MT5 tick data, detects
-structural market events, and fires the multi-agent LLM graph
-only when conditions demand it.
+structural market events, and executes trades via pure-math
+rule-based signals (no LLM / third-party AI dependencies).
 """
 
 from __future__ import annotations
@@ -24,11 +24,10 @@ from axonai.dataflows.mt5_data import mt5_initialize, mt5_shutdown, _to_mt5_symb
 from axonai.realtime.event_types import EventPriority, LiveCandle, MarketEvent, EventType
 from axonai.realtime.tick_engine import TickEngine
 from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
-from axonai.realtime.event_detector import EventDetector
-from axonai.realtime.graph_executor import GraphExecutor
+from axonai.realtime.reversal_model import ReversalModel
+from axonai.realtime.trade_analytics import TradeAnalytics
 from axonai.realtime.trade_executor import MT5TradeExecutor
 from axonai.realtime.api_server import get_dashboard
-from cli.stats_handler import StatsCallbackHandler
 
 logger = logging.getLogger(__name__)
 
@@ -39,10 +38,9 @@ class AxonDaemon:
     Lifecycle:
     1. Initialize MT5 connection
     2. Cold-start LiveWorldState + LiveMarketEvidence from historical bars
-    3. Compile LangGraph once
-    4. Start TickEngine thread (Layer 1)
-    5. Main loop: consume events from queue, fire GraphExecutor (Layer 3)
-    6. On shutdown: gracefully stop threads, close MT5
+    3. Start TickEngine thread (Layer 1)
+    4. Main loop: consume events from queue, execute trades
+    5. On shutdown: gracefully stop threads, close MT5
     """
 
     def __init__(self, symbol: str, config: dict):
@@ -58,17 +56,18 @@ class AxonDaemon:
         # Layer 1: Tick Engine
         self.tick_engine = TickEngine(self.mt5_symbol, config)
 
-        # Layer 2: Live State + Event Detection
+        # Layer 2: Live State + Reversal Engine
         self.live_state = LiveWorldState(symbol, config)
         self.live_evidence = LiveMarketEvidence(symbol, config)
-        self.event_detector = EventDetector(
-            self.live_state, self.live_evidence,
-            self.event_queue, config,
+        self.reversal_model = ReversalModel(
+            pip_mult=0.0001 if "JPY" not in symbol.upper() else 0.01, 
+            config=config
         )
+        self.trade_analytics = TradeAnalytics()
 
-        # Layer 3: Graph Executor
-        self.stats_handler = StatsCallbackHandler()
-        self.graph_executor = GraphExecutor(symbol, config, callbacks=[self.stats_handler])
+        # Cooldown tracking (replaces graph_executor cooldown)
+        self._cooldown_seconds: int = config.get("realtime_cooldown_seconds", 300)
+        self._last_execution_time: datetime = datetime.min
 
         # Layer 4: Trade Executor
         config_base = config.copy()
@@ -163,6 +162,41 @@ class AxonDaemon:
                 "color": s["color"],
             })
         return result
+
+    @staticmethod
+    def _entry_direction(event) -> Optional[str]:
+        """Map a peak event to a trade side. Returns 'BUY', 'SELL', or None.
+
+        Single source of truth for entry direction (used by both the gate and
+        the execution path). None means the side is indeterminate — callers
+        MUST fail closed (skip the trade), never default to a side.
+        """
+        dir_str = (event.details.get("direction") or "").lower()
+        if "bullish" in dir_str:
+            return "BUY"
+        if "bearish" in dir_str:
+            return "SELL"
+        return None
+
+    def _get_mode_payload(self) -> dict:
+        """Describe the daemon's execution mode for the dashboard badge."""
+        paper = bool(self.config.get("paper_trade", False))
+        dry_run = bool(self.config.get("realtime_dry_run", False))
+        if paper:
+            label, color = "PAPER", "cyan"          # simulated fills, nothing sent
+        elif dry_run:
+            label, color = "DRY-RUN LIVE", "amber"   # real demo orders sent to MT5
+        else:
+            label, color = "LIVE", "red"             # real orders, real account
+        return {
+            "type": "mode",
+            "label": label,
+            "color": color,
+            "paper": paper,
+            "dry_run": dry_run,
+            "llm": False,
+            "engine": "Pure-Math (Rule A+B)",
+        }
 
     def _get_regime_payload(self) -> dict:
         ws = self.live_state.snapshot()
@@ -274,7 +308,7 @@ class AxonDaemon:
             "market_resume_timestamp": market_resume_timestamp,
             # --- Daemon Status and Stats ---
             "daemon_start_time": self._start_time.timestamp() * 1000 if self._start_time else None,
-            "cooldown_remaining": int(self.graph_executor.seconds_until_ready),
+            "cooldown_remaining": int(self._seconds_until_ready()),
             "events_detected": self._events_detected,
             "events_fired": self._events_fired,
             "events_skipped": self._events_skipped,
@@ -298,12 +332,12 @@ class AxonDaemon:
             "london_range_low": me.london_range_low,
             "ny_range_high": me.ny_range_high,
             "ny_range_low": me.ny_range_low,
-            # --- Token Consumption and Stats ---
-            "tokens_in": self.stats_handler.tokens_in,
-            "tokens_out": self.stats_handler.tokens_out,
-            "tokens_total": self.stats_handler.tokens_in + self.stats_handler.tokens_out,
-            "llm_calls": self.stats_handler.llm_calls,
-            "tool_calls": self.stats_handler.tool_calls
+            # No LLM token tracking
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "tokens_total": 0,
+            "llm_calls": 0,
+            "tool_calls": 0
         }
 
     def _get_levels_payload(self) -> dict:
@@ -457,8 +491,16 @@ class AxonDaemon:
         except Exception as pe:
             logger.warning("AxonDaemon: Failed to pre-populate active positions: %s", pe)
 
-        # Now that MT5 is connected, dynamically detect active broker offset!
-        from axonai.dataflows.mt5_data import _ensure_symbol_visible
+        # Now that MT5 is connected, re-resolve the broker symbol via live
+        # auto-detection. In __init__ MT5 wasn't initialized yet, so the suffix
+        # fell back to the configured default (e.g. "m") and could be wrong for
+        # this broker. Re-running now lets _to_mt5_symbol query symbol_info().
+        from axonai.dataflows.mt5_data import _ensure_symbol_visible, _to_mt5_symbol
+        resolved = _to_mt5_symbol(self.yf_symbol, self.config)
+        if resolved != self.mt5_symbol:
+            logger.info("AxonDaemon: re-resolved broker symbol %s -> %s after MT5 connect", self.mt5_symbol, resolved)
+            self.mt5_symbol = resolved
+            self.tick_engine.symbol = resolved
         _ensure_symbol_visible(self.mt5_symbol)
         self.offset_hours = get_broker_tz_offset(self.mt5_symbol)
         self.tz = timezone(timedelta(hours=self.offset_hours))
@@ -469,22 +511,12 @@ class AxonDaemon:
         self.live_state.initialize()
         self.live_evidence.initialize()
 
-        # Set pip multiplier on event detector
-        is_jpy = "JPY" in self.mt5_symbol.upper()
-        self.event_detector.set_pip_multiplier(is_jpy)
-        
-        # Backfill historical events to populate GUI dashboard immediately
-        try:
-            self.event_detector.backfill_historical_events()
-        except Exception as e:
-            logger.error("AxonDaemon: failed to backfill historical events: %s", e)
-            
+        # Sync initial detected levels into reversal model
+        self.reversal_model.sync_levels(self.live_evidence.price_levels)
         logger.info("Step 2/4: Live state initialized")
 
-        # 3. Compile graph
-        logger.info("Step 3/4: Compiling LangGraph...")
-        self.graph_executor.compile_graph()
-        logger.info("Step 3/4: Graph compiled")
+        # 3. Pure-math engine (no LLM graph)
+        logger.info("Step 3/4: Engine mode: Pure-Math Rule A+B signals (no LLM)")
 
         # 4. Wire tick engine callbacks
         self.tick_engine.on_tick_callback = self._on_tick
@@ -499,6 +531,9 @@ class AxonDaemon:
         dashboard = get_dashboard()
         if dashboard:
             logger.info("Broadcasting initial telemetry states to dashboard...")
+            # 0. Execution mode badge (paper / dry-run / live + LLM on/off)
+            dashboard.broadcast(self._get_mode_payload())
+
             # 1. Swing Levels
             dashboard.broadcast(self._get_levels_payload())
             
@@ -540,30 +575,43 @@ class AxonDaemon:
         logger.info("="*60)
 
         # 6. Enter main event loop
-        # TEST TRIGGER: Queue a mock event immediately to show the user how the debate works in real-time
-        from axonai.realtime.event_types import MarketEvent, EventType, EventPriority
-        self.event_queue.put(MarketEvent(
-            event_type=EventType.LEVEL_BREACH,
-            priority=EventPriority.HIGH,
-            timestamp=datetime.now(),
-            symbol=self.yf_symbol,
-            price=1.16282,
-            details={
-                "level_type": "PDH",
-                "level_price": 1.16282,
-                "strength": 0.7,
-                "touches": 2,
-                "direction": "resistance",
-                "distance_pips": 0.0
-            }
-        ))
+        # TEST TRIGGER: optionally queue a mock event immediately to demo the debate.
+        # Disabled by default — enable only for demos via realtime_inject_test_event.
+        if self.config.get("realtime_inject_test_event", False):
+            from axonai.realtime.event_types import MarketEvent, EventType, EventPriority
+            logger.warning("realtime_inject_test_event is ON — injecting a mock LEVEL_BREACH event")
+            self.event_queue.put(MarketEvent(
+                event_type=EventType.LEVEL_BREACH,
+                priority=EventPriority.HIGH,
+                timestamp=datetime.now(),
+                symbol=self.yf_symbol,
+                price=1.16282,
+                details={
+                    "level_type": "PDH",
+                    "level_price": 1.16282,
+                    "strength": 0.7,
+                    "touches": 2,
+                    "direction": "resistance",
+                    "distance_pips": 0.0
+                }
+            ))
 
         self._event_loop()
 
     def _on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Called by TickEngine on every new tick."""
-        self.event_detector.is_in_trade = len(self._tracked_positions) > 0
-        self.event_detector.on_tick(bid, ask, timestamp)
+        mid = (bid + ask) / 2.0
+        
+        # 1. Update pure-math reversal engine
+        snapshot = self.reversal_model.on_tick(mid, timestamp, volume)
+        
+        # 2. Check for entry triggers
+        if snapshot.entry_decision.is_valid_entry:
+            self.event_queue.put({"type": "entry", "snapshot": snapshot})
+            
+        # 3. Check for exit triggers
+        if snapshot.exit_decision.should_exit or snapshot.exit_decision.action == "ADJUST_SL":
+            self.event_queue.put({"type": "exit", "snapshot": snapshot})
 
         # Handle trailing stops and closed position logging for dryrun
         if self.config.get("realtime_dry_run", False):
@@ -597,7 +645,7 @@ class AxonDaemon:
                 # Calculate spread delta
                 spread_delta = ticks[-1]['ask'] - ticks[-1]['bid'] - (ticks[-2]['ask'] - ticks[-2]['bid'])
                 # 1. Check for tick efficiency collapse (Price is moving fast but not going anywhere)
-                eff = getattr(self.event_detector.peak_detector, "_last_efficiency", 1.0)
+                eff = snapshot.velocity.tick_efficiency if 'snapshot' in locals() else 1.0
                 collapse = (eff < 0.15) and (velocity > 1.5)
 
                 # 2. Check for aggression shift (Sudden reversal in order flow dominance)
@@ -627,12 +675,12 @@ class AxonDaemon:
                 "tick_agg_shift": agg_shift,
                 "tick_absorption": absorption,
                 
-                # Rule A & B Live Stats
-                "rule_b_divergence": getattr(self.event_detector.peak_detector, "_last_divergence", 0.0),
-                "rule_b_efficiency": getattr(self.event_detector.peak_detector, "_last_efficiency", 1.0),
-                "rule_b_confirmed": getattr(self.event_detector.peak_detector, "_last_peak_confirmed", False),
-                "rule_a_max_vel": getattr(self.event_detector.peak_detector, "_last_max_vel", 0.0),
-                "rule_a_avg_vel": getattr(self.event_detector.peak_detector, "_last_avg_vel", 0.0)
+                # Rule A & B Live Stats from Tier 1
+                "rule_b_divergence": snapshot.displacement.displacement_ratio,
+                "rule_b_efficiency": snapshot.velocity.tick_efficiency,
+                "rule_b_confirmed": snapshot.entry_decision.state == "TRIGGERED",
+                "rule_a_max_vel": snapshot.velocity.raw_velocity,
+                "rule_a_avg_vel": snapshot.velocity.abs_velocity
             })
             
             # Throttle heavier updates to once every 5 ticks
@@ -646,7 +694,7 @@ class AxonDaemon:
 
     def _on_candle_close(self, candle: LiveCandle):
         """Called by TickEngine when any timeframe candle closes."""
-        self.event_detector.on_candle_close(candle)
+        self.reversal_model.on_candle_close(candle)
         logger.debug("Candle closed: %s @ %.5f (H=%.5f L=%.5f)",
                      candle.timeframe, candle.close, candle.high, candle.low)
                      
@@ -684,343 +732,131 @@ class AxonDaemon:
                     last_stats_time = pytime.time()
                 continue
 
-            self._events_detected += 1
+            # Determine event type
+            if not isinstance(event, dict) or "type" not in event or "snapshot" not in event:
+                continue
 
-            # Filter: Only allow Advanced Microstructure Peak Reversals (Rule A & Rule B)
-            is_peak = event.event_type == EventType.PEAK_DETECTION
-            peak_type = event.details.get("peak_type", "") if is_peak else ""
-            is_exhaustion = peak_type in ("velocity_exhaustion", "microstructure_exhaustion")
+            event_type = event["type"]
+            snapshot = event["snapshot"]
             
-            # S/R Proximity & Daily Trend Gate
-            is_gate_passed = True
-            gate_reason = ""
-            if is_peak and is_exhaustion:
-                dir_str = event.details.get("direction", "")
-                direction = None
-                if "bullish" in dir_str or "low" in peak_type:
-                    direction = "BUY"
-                elif "bearish" in dir_str or "high" in peak_type:
-                    direction = "SELL"
+            # Throttle logging
+            if event_type == "entry":
+                self._events_detected += 1
                 
-                if direction is not None:
-                    # 1. Proximity Check to ANY S/R Zone (5.0 pips)
-                    active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
-                    closest_dist = float("inf")
-                    closest_lvl = None
-                    pip_mult = self.live_evidence._pip_mult
-                    for lvl in active_levels:
-                        dist_pips = abs(event.price - lvl.price) / pip_mult
-                        if dist_pips < closest_dist:
-                            closest_dist = dist_pips
-                            closest_lvl = lvl
-                    
-                    if closest_lvl is None or closest_dist > 5.0:
-                        is_gate_passed = False
-                        gate_reason = f"not near any S/R zone (closest: {closest_dist:.2f} pips)"
-                    else:
-                        # 2. Daily Trend Alignment Check (H4 trend direction)
-                        daily_trend = getattr(self.live_evidence, "trend_direction_h4", "sideways")
-                        if daily_trend == "up" and direction != "BUY":
-                            is_gate_passed = False
-                            gate_reason = f"counter daily trend (trend: UP, trade: {direction})"
-                        elif daily_trend == "down" and direction != "SELL":
-                            is_gate_passed = False
-                            gate_reason = f"counter daily trend (trend: DOWN, trade: {direction})"
-                        else:
-                            logger.info("LIVE PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f is %.2f pips from %s level %.5f. Trend=%s, Trade=%s",
-                                        event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
+                # Check cooldown
+                remaining = self._seconds_until_ready()
+                if remaining > 0:
+                    self._events_skipped += 1
+                    logger.info("SKIPPED (cooldown=%.0fs remaining)", remaining)
+                    continue
 
-            dashboard = get_dashboard()
-            if not self.config.get("test_mode", False) and not (is_peak and is_exhaustion and is_gate_passed):
-                self._events_skipped += 1
-                if dashboard:
-                    dashboard.broadcast({
-                        "type": "event",
-                        "id": self._events_detected,
-                        "event_type": event.event_type.value,
-                        "priority": event.priority.name,
-                        "price": event.price,
-                        "details": event.details,
-                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                        "status": "skipped",
-                        "reason": gate_reason if not is_gate_passed else "Strategy restricted to Microstructure Peaks",
-                        "events_detected": self._events_detected,
-                        "events_fired": self._events_fired,
-                        "events_skipped": self._events_skipped,
-                    })
-                continue
+                signal = "Buy" if snapshot.entry_decision.direction == "BUY" else "Sell"
+                system_name = "reversal_model"
+                logger.info("EXECUTING: ReversalModel Triggered → signal: %s", signal)
 
-            logger.info("\n" + "="*50)
-            logger.info("EVENT #%d: %s", self._events_detected, event)
-            logger.info("="*50)
-            if hasattr(self, '_log_dry_run_event'):
-                self._log_dry_run_event('event_detected', {'event_type': event.event_type.value, 'price': event.price, 'details': event.details})
-
-            dashboard = get_dashboard()
-            if dashboard:
-                dashboard.broadcast({
-                    "type": "event",
-                    "id": self._events_detected,
-                    "event_type": event.event_type.value,
-                    "priority": event.priority.name,
-                    "price": event.price,
-                    "details": event.details,
-                    "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                    "status": "detected",
-                    "events_detected": self._events_detected,
-                    "events_fired": self._events_fired,
-                    "events_skipped": self._events_skipped,
-                })
-
-            is_dry_run = self.config.get("realtime_dry_run", False)
-
-            if not is_dry_run and not self.graph_executor.should_execute(event):
-                self._events_skipped += 1
-                remaining = self.graph_executor.seconds_until_ready
-                logger.info("SKIPPED (cooldown=%.0fs remaining | priority=%s)",
-                            remaining, event.priority.name)
-                
-                if dashboard:
-                    dashboard.broadcast({
-                        "type": "event",
-                        "id": self._events_detected,
-                        "event_type": event.event_type.value,
-                        "priority": event.priority.name,
-                        "price": event.price,
-                        "details": event.details,
-                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                        "status": "skipped",
-                        "reason": f"cooldown={remaining:.0f}s remaining" if remaining > 0 else "priority threshold",
-                        "events_detected": self._events_detected,
-                        "events_fired": self._events_fired,
-                        "events_skipped": self._events_skipped,
-                    })
-                continue
-
-            # Snapshot current state
-            ws = self.live_state.snapshot()
-            me = self.live_evidence.snapshot()
-
-            # Enforce Session Gate: only trade London and NY sessions
-            if ws and ws.session not in ("london", "overlap", "newyork"):
-                self._events_skipped += 1
-                logger.info("SKIPPED (session gate: current=%s not in london/overlap/newyork)", ws.session)
-                if dashboard:
-                    dashboard.broadcast({
-                        "type": "event",
-                        "id": self._events_detected,
-                        "event_type": event.event_type.value,
-                        "priority": event.priority.name,
-                        "price": event.price,
-                        "details": event.details,
-                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                        "status": "skipped",
-                        "reason": f"outside London/NY session ({ws.session})",
-                        "events_detected": self._events_detected,
-                        "events_fired": self._events_fired,
-                        "events_skipped": self._events_skipped,
-                    })
-                continue
-
-            # Check WorldState gate
-            if not is_dry_run and not ws.should_run_graph:
-                self._events_skipped += 1
-                logger.info("SKIPPED (WorldState gate: belief=%.2f reason=%s)",
-                            ws.belief_score, ws.abort_reason)
-                
-                if dashboard:
-                    dashboard.broadcast({
-                        "type": "event",
-                        "id": self._events_detected,
-                        "event_type": event.event_type.value,
-                        "priority": event.priority.name,
-                        "price": event.price,
-                        "details": event.details,
-                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                        "status": "skipped",
-                        "reason": f"WorldState gate: {ws.abort_reason}",
-                        "events_detected": self._events_detected,
-                        "events_fired": self._events_fired,
-                        "events_skipped": self._events_skipped,
-                    })
-                continue
-
-            # Fire graph or execute directly for dryrun
-            if is_dry_run and not self.config.get("test_mode", False):
-                self._events_fired += 1
-                dir_str = event.details.get("direction", "")
-                if "bullish" in dir_str or "low" in peak_type:
-                    signal = "Buy"
-                else:
-                    signal = "Sell"
-                
-                system_name = event.details.get("system", "optimized")
-                logger.info("DRYRUN (%s): Bypassing LLM Graph debate. Pure Rule A+B trigger direct signal: %s", system_name, signal)
-                
                 # Broadcast decision status
+                dashboard = get_dashboard()
                 if dashboard:
                     dashboard.broadcast({
                         "type": "decision",
                         "signal": signal,
                         "system": system_name,
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    })
-                
-                # Execute order on MT5 terminal using the correct trade executor
-                trade_result = None
-                executor = self.trade_executor_opt if system_name == "optimized" else self.trade_executor_base
-                try:
-                    trade_result = executor.execute_signal(self.mt5_symbol, signal, self.live_state)
-                    if trade_result:
-                        logger.info("AxonDaemon: Order execution complete for %s system: %s", system_name, trade_result)
-                        ticket = trade_result.get("order")
-                        if ticket:
-                            self._tracked_positions.add(ticket)
-                            self._active_trade_initial_sl[ticket] = trade_result.get("sl")
-                            self._active_trade_system[ticket] = system_name
-                except Exception as ex_err:
-                    logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
-                
-                # Persistently log signal to file
-                self._log_signal(event, ws, signal, trade_result)
-                
-                # Set cooldown on event detector
-                cooldown = self.config.get("realtime_cooldown_seconds", 300)
-                self.event_detector.set_cooldown(cooldown)
-                
-                # Print stats
-                self._log_stats()
-                continue
-
-            self._events_fired += 1
-            logger.info("FIRING GRAPH #%d for event: %s",
-                        self._events_fired, event.event_type.value)
-            if hasattr(self, '_log_dry_run_event'):
-                self._log_dry_run_event('graph_fire', {'event_type': event.event_type.value})
-
-            # Broadcast firing event status
-            if dashboard:
-                dashboard.broadcast({
-                    "type": "event",
-                    "id": self._events_detected,
-                    "event_type": event.event_type.value,
-                    "priority": event.priority.name,
-                    "price": event.price,
-                    "details": event.details,
-                    "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                    "status": "firing",
-                    "events_detected": self._events_detected,
-                    "events_fired": self._events_fired,
-                    "events_skipped": self._events_skipped,
-                })
-            logger.info("WorldState: regime=%s(%.2f) session=%s belief=%.2f spread=%.1f",
-                        ws.dominant_regime, ws.regime_confidence,
-                        ws.session, ws.belief_score, ws.spread_pips)
-
-            try:
-                # Define local dynamic LangGraph chunk streaming callback
-                def chunk_callback(chunk):
-                    dash = get_dashboard()
-                    if not dash:
-                        return
-                    AGENT_NAME_MAP = {
-                        "Market Analyst": "WYCKOFF",
-                        "Fundamentals Analyst": "KEYNES",
-                        "News Analyst": "REUTERS",
-                        "Sentiment Analyst": "LIVERMORE",
-                        "Bull Researcher": "BUFFETT",
-                        "Bear Researcher": "SOROS",
-                        "Research Manager": "MUNGER",
-                        "Trader": "TUDOR",
-                        "Aggressive Analyst": "SIMONS",
-                        "Conservative Analyst": "DALIO",
-                        "Neutral Analyst": "MARKS",
-                        "Portfolio Manager": "DRUCKENMILLER"
-                    }
-                    
-                    for node, content in chunk.items():
-                        if node in ["__pregel_loop__", "checkpointer"]:
-                            continue
-                        
-                        messages = []
-                        if isinstance(content, dict) and "messages" in content:
-                            messages = content["messages"]
-                        elif isinstance(content, list):
-                            messages = content
-                        elif hasattr(content, "messages"):
-                            messages = content.messages
-                        
-                        for message in messages:
-                            from cli.main import classify_message_type, format_tool_args
-                            msg_type, txt_content = classify_message_type(message)
-                            
-                            tool_calls_list = []
-                            if hasattr(message, "tool_calls") and message.tool_calls:
-                                for tc in message.tool_calls:
-                                    name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
-                                    args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
-                                    tool_calls_list.append(f"{name}({format_tool_args(args, 60)})")
-                            
-                            if (txt_content and txt_content.strip()) or tool_calls_list:
-                                dash.broadcast({
-                                    "type": "agent",
-                                    "agent_name": AGENT_NAME_MAP.get(node, node),
-                                    "status": "active",
-                                    "message": txt_content or "",
-                                    "tool_calls": tool_calls_list,
-                                    "timestamp": datetime.now().strftime("%H:%M:%S")
-                                })
-
-                self.config["realtime_chunk_callback"] = chunk_callback
-
-                final_state, signal = self.graph_executor.execute(event, ws, me)
-
-                logger.info("\n" + "*"*50)
-                logger.info("DECISION: %s", signal)
-                logger.info("*"*50 + "\n")
-                if hasattr(self, '_log_dry_run_event'):
-                    decision_obj = final_state.get('final_trade_decision', {}) if isinstance(final_state, dict) else getattr(final_state, 'final_trade_decision', {})
-                    if not isinstance(decision_obj, dict) and hasattr(decision_obj, 'dict'):
-                        decision_obj = decision_obj.dict()
-                    elif not isinstance(decision_obj, dict) and hasattr(decision_obj, '__dict__'):
-                        decision_obj = decision_obj.__dict__
-                    elif not isinstance(decision_obj, dict):
-                        decision_obj = {}
-                    self._log_dry_run_event('decision', {
-                        'execute': decision_obj.get('execute', signal in ['Buy', 'Sell', 'Overweight', 'Underweight']),
-                        'direction': decision_obj.get('direction', signal),
-                        'confidence': decision_obj.get('confidence', 0),
-                        'reason': decision_obj.get('reason', ''),
-                        'abort_reason': decision_obj.get('abort_reason', None)
-                    })
-
-                if dashboard:
-                    dashboard.broadcast({
-                        "type": "decision",
-                        "signal": signal,
+                        "paper": bool(self.config.get("paper_trade", False)),
+                        "engine": "pure-math",
+                        "quality": snapshot.entry_decision.signal_quality,
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     })
 
                 # Execute order on MT5 terminal
                 trade_result = None
                 try:
-                    trade_result = self.trade_executor.execute_signal(self.mt5_symbol, signal, self.live_state)
-                    if trade_result:
+                    trade_result = self.trade_executor_opt.execute_signal(self.mt5_symbol, signal, self.live_state)
+                    if trade_result and trade_result.get("success", True) and trade_result.get("order"):
                         logger.info("AxonDaemon: Order execution complete: %s", trade_result)
+                        ticket = trade_result.get("order")
+                        self._tracked_positions.add(ticket)
+                        self._active_trade_initial_sl[ticket] = trade_result.get("sl")
+                        self._active_trade_system[ticket] = system_name
+                        
+                        # Register trade with models
+                        self.reversal_model.register_trade(
+                            ticket, snapshot.entry_decision.direction, snapshot.price,
+                            trade_result.get("sl"), trade_result.get("tp")
+                        )
+                        self.trade_analytics.record_entry(
+                            ticket, self.mt5_symbol, snapshot.entry_decision.direction,
+                            snapshot.price, trade_result.get("sl"), trade_result.get("tp"), snapshot
+                        )
                 except Exception as ex_err:
                     logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
 
-                # Persistently log signal to file
-                self._log_signal(event, ws, signal, trade_result)
-
-                # Set cooldown on event detector
-                cooldown = self.config.get("realtime_cooldown_seconds", 300)
-                self.event_detector.set_cooldown(cooldown)
-
-            except Exception as e:
-                logger.error("Graph execution failed: %s", e, exc_info=True)
+                self._last_execution_time = datetime.now()
+                self._events_fired += 1
+                
+                # We can mock a log here if needed
                 if hasattr(self, '_log_dry_run_event'):
-                    self._log_dry_run_event('error', {'error': str(e)})
+                    self._log_dry_run_event('event_detected', {'event_type': 'REVERSAL', 'price': snapshot.price, 'details': {}})
+
+            elif event_type == "exit":
+                # The exit action could be ADJUST_SL or CLOSE_NOW
+                decision = snapshot.exit_decision
+                logger.info("EXIT DECISION: %s - %s", decision.action, decision.reason)
+                
+                if decision.action == "ADJUST_SL" and decision.suggested_sl:
+                    # Trailing stop update logic
+                    import MetaTrader5 as mt5
+                    if mt5 and mt5.terminal_info():
+                        positions = mt5.positions_get(symbol=self.mt5_symbol)
+                        if positions:
+                            for p in positions:
+                                if p.magic == self.trade_executor_opt.magic:
+                                    request = {
+                                        "action": mt5.TRADE_ACTION_SLTP,
+                                        "position": p.ticket,
+                                        "symbol": p.symbol,
+                                        "sl": decision.suggested_sl,
+                                        "tp": p.tp
+                                    }
+                                    mt5.order_send(request)
+                                    logger.info("Adjusted SL for ticket %d to %.5f", p.ticket, decision.suggested_sl)
+                                    
+                elif decision.action == "CLOSE_NOW":
+                    import MetaTrader5 as mt5
+                    if mt5 and mt5.terminal_info():
+                        positions = mt5.positions_get(symbol=self.mt5_symbol)
+                        if positions:
+                            for p in positions:
+                                if p.magic == self.trade_executor_opt.magic:
+                                    # Create market order to close
+                                    tick = mt5.symbol_info_tick(self.mt5_symbol)
+                                    price = tick.ask if p.type == mt5.POSITION_TYPE_SELL else tick.bid
+                                    order_type = mt5.ORDER_TYPE_BUY if p.type == mt5.POSITION_TYPE_SELL else mt5.ORDER_TYPE_SELL
+                                    request = {
+                                        "action": mt5.TRADE_ACTION_DEAL,
+                                        "symbol": p.symbol,
+                                        "volume": p.volume,
+                                        "type": order_type,
+                                        "position": p.ticket,
+                                        "price": price,
+                                        "deviation": 20,
+                                        "magic": p.magic,
+                                        "comment": f"Adaptive Exit: {decision.reason}",
+                                        "type_time": mt5.ORDER_TIME_GTC,
+                                        "type_filling": mt5.ORDER_FILLING_IOC,
+                                    }
+                                    res = mt5.order_send(request)
+                                    if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                                        profit_pips = (price - p.price_open) / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001)
+                                        if p.type == mt5.POSITION_TYPE_SELL: profit_pips = -profit_pips
+                                        
+                                        self.trade_analytics.record_exit(
+                                            p.ticket, price, profit_pips, decision.reason, snapshot
+                                        )
+                                        self.reversal_model.clear_trade()
+                                        if p.ticket in self._tracked_positions:
+                                            self._tracked_positions.remove(p.ticket)
+                                            
+                                        logger.info("Successfully closed position %d: %s", p.ticket, decision.reason)
 
             # Print stats
             self._log_stats()
@@ -1069,6 +905,11 @@ class AxonDaemon:
         except Exception as e:
             logger.error("Failed to append to signals.log: %s", e)
 
+    def _seconds_until_ready(self) -> float:
+        """Seconds remaining in execution cooldown."""
+        elapsed = (datetime.now() - self._last_execution_time).total_seconds()
+        return max(0.0, self._cooldown_seconds - elapsed)
+
     def _log_stats(self):
         """Log daemon statistics."""
         if self._start_time:
@@ -1081,7 +922,7 @@ class AxonDaemon:
                 self._events_detected,
                 self._events_fired,
                 self._events_skipped,
-                self.graph_executor.seconds_until_ready,
+                self._seconds_until_ready(),
             )
 
     def _signal_handler(self, signum, frame):
@@ -1339,7 +1180,7 @@ class AxonDaemon:
             # caused by our own TP/SL orders hitting the market and causing a tick climax
             cooldown_minutes = 45 if profit < 0 else 15
             logger.info("Trade closed (Profit: %.2f). Applying %d minute post-trade cooldown.", profit, cooldown_minutes)
-            self.event_detector.set_cooldown(cooldown_minutes * 60)
+            self._cooldown_seconds = cooldown_minutes * 60
             
         # Update tracked positions with active ones
         self._tracked_positions = active_tickets.copy()
@@ -1356,11 +1197,9 @@ def generate_session_summary():
         return
 
     first_time = last_time = None
-    ticks = 0
-    events_detected = confluence_passes = confluence_fails = graph_fires = 0
-    decisions_approved = decisions_rejected = errors = sr_breaches = 0
-    rejection_reasons = {}
-    level_counts = {}
+    events_detected = 0
+    decisions = 0
+    errors = 0
 
     with open(log_path, 'r', encoding='utf-8') as f:
         for line in f:
@@ -1371,31 +1210,12 @@ def generate_session_summary():
                 last_time = dt
 
                 etype = entry['event_type']
-                details = entry.get('details', {})
-
                 if etype == 'error':
                     errors += 1
-                elif etype == 'confluence_pass':
-                    confluence_passes += 1
-                elif etype == 'confluence_fail':
-                    confluence_fails += 1
-                elif etype == 'graph_fire':
-                    graph_fires += 1
                 elif etype == 'decision':
-                    if details.get('execute'):
-                        decisions_approved += 1
-                    else:
-                        decisions_rejected += 1
-                        reason = details.get('abort_reason') or details.get('reason') or 'Unknown'
-                        rejection_reasons[reason] = rejection_reasons.get(reason, 0) + 1
+                    decisions += 1
                 elif etype == 'event_detected':
                     events_detected += 1
-                    if details.get('event_type') == 'LEVEL_BREACH':
-                        sr_breaches += 1
-                        lvl_type = details.get('details', {}).get('level_type', 'UNKNOWN')
-                        price = details.get('price', 0.0)
-                        key = f"{lvl_type} at {price}"
-                        level_counts[key] = level_counts.get(key, 0) + 1
             except Exception:
                 continue
 
@@ -1406,21 +1226,9 @@ def generate_session_summary():
         minutes, _ = divmod(rem, 60)
         duration_str = f"{int(hours)} hours {int(minutes)} minutes"
 
-    most_active = max(level_counts.items(), key=lambda x: x[1])[0] if level_counts else 'None'
-
-    print('\nDRY RUN SESSION SUMMARY')
-    print('========================')
+    print('\nSESSION SUMMARY')
+    print('================')
     print(f'Duration: {duration_str}')
-    print(f'Ticks processed: {ticks} (Not tracked in this log)')
     print(f'Events detected: {events_detected}')
-    print(f'Confluence gate: {confluence_passes} passed / {confluence_fails} failed')
-    print(f'Graph fires: {graph_fires}')
-    print('DRUCKENMILLER decisions:')
-    print(f'  - APPROVED: {decisions_approved}')
-    print(f'  - REJECTED: {decisions_rejected}')
-    print(f'  - Top rejection reasons:')
-    for reason, count in sorted(rejection_reasons.items(), key=lambda x: x[1], reverse=True)[:5]:
-        print(f'      {count}x: {reason}')
-    print(f'Errors: {errors}')
-    print(f'SR level breaches: {sr_breaches}')
-    print(f'Most active level: {most_active}\n')
+    print(f'Decisions executed: {decisions}')
+    print(f'Errors: {errors}\n')

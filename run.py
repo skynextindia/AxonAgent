@@ -72,6 +72,12 @@ def main():
                         help="Dashboard port")
     parser.add_argument("--symbol", type=str, default="EURUSDm",
                         help="Symbol to trade")
+    parser.add_argument("--enable-llm", action="store_true",
+                        help="Enable the LLM/LangGraph agent layer (requires DEEPSEEK_API_KEY). "
+                             "Default is pure-math mode: Rule A+B signals only, no LLM.")
+    parser.add_argument("--paper", action="store_true",
+                        help="Paper-trade mode: simulate fills internally, never send orders to MT5. "
+                             "Safe for testing; dry-run (default) still places real demo orders.")
     args = parser.parse_args()
 
     env = "wsl" if is_wsl() else "windows" if is_windows() else "linux"
@@ -140,6 +146,10 @@ def main():
         config = DEFAULT_CONFIG.copy()
         config["symbol"] = args.symbol
         config["realtime_dry_run"] = True
+        # Pure-math mode by default (Rule A+B signals, no LLM/API key). Pass --enable-llm to turn the agent layer on.
+        config["disable_llm"] = not args.enable_llm
+        # Paper-trade: simulate fills (no MT5 send). Default dry-run still sends real demo orders.
+        config["paper_trade"] = args.paper
         daemon = AxonDaemon(symbol=args.symbol, config=config)
         daemon.start()
 

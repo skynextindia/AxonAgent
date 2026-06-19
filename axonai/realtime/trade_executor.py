@@ -24,6 +24,9 @@ class MT5TradeExecutor:
         self.default_lot_size = config.get("realtime_default_lot_size", 0.01)
         self.risk_guard = RiskGuard(config)
         self.circuit_breaker = self.risk_guard
+        # Paper-trade mode: simulated fills, never sent to the broker.
+        self.paper_trade = config.get("paper_trade", False)
+        self._paper_ticket_seq = 0
 
     def execute_signal(self, symbol: str, signal: str, live_state: Optional[Any] = None) -> Optional[dict]:
         """Convert a 5-tier signal into an MT5 order action.
@@ -111,6 +114,18 @@ class MT5TradeExecutor:
         
         sl_distance = max(atr * 1.0, 8 * pip)
         tp_distance = max(atr * 2.0, 16 * pip)
+
+        # Spread guard: refuse entry when the live spread would eat too much of
+        # the stop. Compared in price units (not pips) so it is symbol-agnostic.
+        spread = tick.ask - tick.bid
+        max_spread_frac = self.config.get("realtime_max_spread_frac", 0.5)
+        if sl_distance > 0 and spread > max_spread_frac * sl_distance:
+            logger.warning(
+                "TradeExecutor: spread %.5f exceeds %.0f%% of stop %.5f — entry skipped for %s",
+                spread, max_spread_frac * 100, sl_distance, symbol,
+            )
+            return {"success": False, "reason": "spread_too_wide",
+                    "spread": round(spread, 5), "sl_distance": round(sl_distance, 5)}
         
         sl = entry - sl_distance if direction == "BUY" else entry + sl_distance
         tp = entry + tp_distance if direction == "BUY" else entry - tp_distance
@@ -134,7 +149,8 @@ class MT5TradeExecutor:
             account_equity = acc.equity if acc else 10000.0
             risk_pct = self.config.get("realtime_risk_pct", 0.01)  # risk_pct from config default 0.01
             risk_amount = account_equity * risk_pct
-            sl_pips = atr_pips * 2
+            # SL distance (price units) converted to pips for sizing.
+            sl_pips = sl_distance / pip
             lot_size = round(risk_amount / (sl_pips * 0.10), 2)
             lot_size = max(0.01, min(lot_size, 0.10))  # hard limits
             lot = lot_size
@@ -163,6 +179,12 @@ class MT5TradeExecutor:
             "type_time": mt5.ORDER_TIME_GTC,
             "type_filling": mt5.ORDER_FILLING_FOK,
         }
+
+        # Paper-trade mode: simulate the fill and return WITHOUT touching the
+        # live order API. Keeps signal→order logic fully exercised for tests
+        # and is safe even against a funded account.
+        if self.paper_trade or self.config.get("paper_trade", False):
+            return self._simulate_fill(mt5, symbol, order_type, lot, price, sl, tp)
 
         # Send request
         logger.info("TradeExecutor: Sending order request with SL/TP: %s", request)
@@ -205,6 +227,39 @@ class MT5TradeExecutor:
             self.config
         )
         return self._result_to_dict(result, sl)
+
+    def _simulate_fill(self, mt5, symbol: str, order_type, lot: float,
+                       price: float, sl: float, tp: float) -> dict:
+        """Simulate an instant fill at the requested price (paper-trade mode).
+
+        Returns the same dict shape as a real fill so the daemon's position
+        tracking, PnL logging and dashboard payloads work unchanged.
+        """
+        self._paper_ticket_seq += 1
+        ticket = 900_000_000 + self._paper_ticket_seq  # synthetic, won't collide with broker tickets
+        side = "BUY" if order_type == mt5.ORDER_TYPE_BUY else "SELL"
+        logger.info(
+            "TradeExecutor[PAPER]: Simulated %s fill | %s | vol=%.2f price=%.5f SL=%.5f TP=%.5f ticket=%d",
+            side, symbol, lot, price, sl, tp, ticket,
+        )
+        send_alert(
+            f"PAPER Trade: {symbol} | Type: {side} | Volume: {lot:.2f} | "
+            f"Price: {price:.5f} | SL: {sl:.5f} | TP: {tp:.5f} | Ticket: {ticket}",
+            self.config,
+        )
+        return {
+            "retcode": mt5.TRADE_RETCODE_DONE,
+            "comment": "PAPER",
+            "volume": lot,
+            "price": price,
+            "bid": price,
+            "ask": price,
+            "order": ticket,
+            "request_id": 0,
+            "sl": sl,
+            "tp": tp,
+            "paper": True,
+        }
 
     def _result_to_dict(self, result, sl: float = 0.0) -> dict:
         """Helper to convert OrderSendResult to a dictionary."""
