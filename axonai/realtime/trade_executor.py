@@ -134,7 +134,7 @@ class MT5TradeExecutor:
             account_equity = acc.equity if acc else 10000.0
             risk_pct = self.config.get("realtime_risk_pct", 0.01)  # risk_pct from config default 0.01
             risk_amount = account_equity * risk_pct
-            sl_pips = atr_pips * 2
+            sl_pips = sl_distance / pip
             lot_size = round(risk_amount / (sl_pips * 0.10), 2)
             lot_size = max(0.01, min(lot_size, 0.10))  # hard limits
             lot = lot_size

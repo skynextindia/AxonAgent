@@ -27,8 +27,10 @@ from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
 from axonai.realtime.event_detector import EventDetector
 from axonai.realtime.graph_executor import GraphExecutor
 from axonai.realtime.trade_executor import MT5TradeExecutor
+from axonai.realtime.decision_intelligence import ExecutionDecisionLayer
 from axonai.realtime.api_server import get_dashboard
 from cli.stats_handler import StatsCallbackHandler
+from axonai.realtime.calendar_guard import CalendarGuard
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +67,7 @@ class AxonDaemon:
             self.live_state, self.live_evidence,
             self.event_queue, config,
         )
+        self.decision_layer = ExecutionDecisionLayer(config)
 
         # Layer 3: Graph Executor
         self.stats_handler = StatsCallbackHandler()
@@ -81,10 +84,16 @@ class AxonDaemon:
 
         self.trade_executor = self.trade_executor_opt  # Default fallback reference
 
+        # Layer 3b: Calendar Guard
+        self.calendar_guard = CalendarGuard(symbol, config)
+
         # Trailing stop and trade outcome tracking
         self._tracked_positions: set[int] = set()
         self._active_trade_initial_sl: dict[int, float] = {}
         self._active_trade_system: dict[int, str] = {}
+        self._active_trade_peak_profit: dict[int, float] = {}
+        self._active_trade_peak_efficiency: dict[int, float] = {}
+        self._active_trade_stage: dict[int, int] = {}
 
         # Stats
         self._events_detected: int = 0
@@ -255,6 +264,9 @@ class AxonDaemon:
                         resume_dt += timedelta(days=1)
                     market_resume_timestamp = int(resume_dt.timestamp())
 
+        # Check economic calendar block status
+        is_cal_blocked, cal_ev, cal_reason = self.calendar_guard.check_block_status()
+
         return {
             "type": "regime",
             "symbol": self.mt5_symbol,
@@ -272,6 +284,8 @@ class AxonDaemon:
             "session_details": session_details,
             "market_closed": market_closed,
             "market_resume_timestamp": market_resume_timestamp,
+            "calendar_blocked": is_cal_blocked,
+            "calendar_reason": cal_reason,
             # --- Daemon Status and Stats ---
             "daemon_start_time": self._start_time.timestamp() * 1000 if self._start_time else None,
             "cooldown_remaining": int(self.graph_executor.seconds_until_ready),
@@ -419,6 +433,22 @@ class AxonDaemon:
             logger.warning("Failed to retrieve MT5 account info: %s", e)
             return None
 
+    def _get_calendar_payload(self) -> dict:
+        return {
+            "type": "calendar",
+            "events": [
+                {
+                    "title": ev["title"],
+                    "country": ev["country"],
+                    "impact": ev["impact"],
+                    "time": ev["time"].isoformat(),
+                    "forecast": ev["forecast"],
+                    "previous": ev["previous"],
+                    "actual": ev["actual"]
+                } for ev in self.calendar_guard.events
+            ]
+        }
+
     def start(self):
         """Cold start and enter main event loop."""
         self._start_time = datetime.now()
@@ -470,7 +500,7 @@ class AxonDaemon:
         self.live_evidence.initialize()
 
         # Set pip multiplier on event detector
-        is_jpy = "JPY" in self.mt5_symbol.upper()
+        is_jpy = "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() or "GOLD" in self.mt5_symbol.upper()
         self.event_detector.set_pip_multiplier(is_jpy)
         
         # Backfill historical events to populate GUI dashboard immediately
@@ -480,6 +510,13 @@ class AxonDaemon:
             logger.error("AxonDaemon: failed to backfill historical events: %s", e)
             
         logger.info("Step 2/4: Live state initialized")
+
+        # Initialize economic calendar
+        try:
+            logger.info("AxonDaemon: Initializing economic calendar feed...")
+            self.calendar_guard.update()
+        except Exception as ce:
+            logger.error("AxonDaemon: failed to initialize economic calendar: %s", ce)
 
         # 3. Compile graph
         logger.info("Step 3/4: Compiling LangGraph...")
@@ -513,6 +550,12 @@ class AxonDaemon:
             acc_payload = self._get_account_payload()
             if acc_payload:
                 dashboard.broadcast(acc_payload)
+            
+            # 4b. Economic Calendar
+            try:
+                dashboard.broadcast(self._get_calendar_payload())
+            except Exception as ce:
+                logger.error("AxonDaemon: failed to broadcast calendar payload: %s", ce)
             
             # 5. Latest Tick
             tick = mt5.symbol_info_tick(self.mt5_symbol) if mt5 else None
@@ -563,7 +606,7 @@ class AxonDaemon:
     def _on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Called by TickEngine on every new tick."""
         self.event_detector.is_in_trade = len(self._tracked_positions) > 0
-        self.event_detector.on_tick(bid, ask, timestamp)
+        self.event_detector.on_tick(bid, ask, timestamp, volume)
 
         # Handle trailing stops and closed position logging for dryrun
         if self.config.get("realtime_dry_run", False):
@@ -572,6 +615,12 @@ class AxonDaemon:
                 self._check_for_closed_positions(bid, ask)
             except Exception as e:
                 logger.error("Error managing trailing stops / closed positions: %s", e, exc_info=True)
+        
+        # Check calendar cuts
+        try:
+            self._check_calendar_cuts()
+        except Exception as e:
+            logger.error("Error checking calendar cuts on tick: %s", e)
         
         # Broadcast tick to dashboard WebSocket
         dashboard = get_dashboard()
@@ -682,56 +731,25 @@ class AxonDaemon:
                 if pytime.time() - last_stats_time > 10.0:
                     self._log_stats()
                     last_stats_time = pytime.time()
+                try:
+                    self._check_calendar_cuts()
+                except Exception as e:
+                    logger.error("Error checking calendar cuts in event loop: %s", e)
                 continue
 
             self._events_detected += 1
 
-            # Filter: Only allow Advanced Microstructure Peak Reversals (Rule A & Rule B)
-            is_peak = event.event_type == EventType.PEAK_DETECTION
-            peak_type = event.details.get("peak_type", "") if is_peak else ""
-            is_exhaustion = peak_type in ("velocity_exhaustion", "microstructure_exhaustion")
-            
-            # S/R Proximity & Daily Trend Gate
-            is_gate_passed = True
-            gate_reason = ""
-            if is_peak and is_exhaustion:
-                dir_str = event.details.get("direction", "")
-                direction = None
-                if "bullish" in dir_str or "low" in peak_type:
-                    direction = "BUY"
-                elif "bearish" in dir_str or "high" in peak_type:
-                    direction = "SELL"
-                
-                if direction is not None:
-                    # 1. Proximity Check to ANY S/R Zone (5.0 pips)
-                    active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
-                    closest_dist = float("inf")
-                    closest_lvl = None
-                    pip_mult = self.live_evidence._pip_mult
-                    for lvl in active_levels:
-                        dist_pips = abs(event.price - lvl.price) / pip_mult
-                        if dist_pips < closest_dist:
-                            closest_dist = dist_pips
-                            closest_lvl = lvl
-                    
-                    if closest_lvl is None or closest_dist > 5.0:
-                        is_gate_passed = False
-                        gate_reason = f"not near any S/R zone (closest: {closest_dist:.2f} pips)"
-                    else:
-                        # 2. Daily Trend Alignment Check (H4 trend direction)
-                        daily_trend = getattr(self.live_evidence, "trend_direction_h4", "sideways")
-                        if daily_trend == "up" and direction != "BUY":
-                            is_gate_passed = False
-                            gate_reason = f"counter daily trend (trend: UP, trade: {direction})"
-                        elif daily_trend == "down" and direction != "SELL":
-                            is_gate_passed = False
-                            gate_reason = f"counter daily trend (trend: DOWN, trade: {direction})"
-                        else:
-                            logger.info("LIVE PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f is %.2f pips from %s level %.5f. Trend=%s, Trade=%s",
-                                        event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
+            # Call Decision Intelligence Layer
+            decision = self.decision_layer.evaluate(self.live_state, self.live_evidence, event)
+            is_gate_passed = decision["trade_allowed"]
+            gate_reason = decision["reason"]
+            explainability = decision["explainability"]
 
+            # Save explainability in event details so the front-end dashboard can display it
+            event.details["explainability"] = explainability
+            
             dashboard = get_dashboard()
-            if not self.config.get("test_mode", False) and not (is_peak and is_exhaustion and is_gate_passed):
+            if not self.config.get("test_mode", False) and not is_gate_passed:
                 self._events_skipped += 1
                 if dashboard:
                     dashboard.broadcast({
@@ -743,7 +761,7 @@ class AxonDaemon:
                         "details": event.details,
                         "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                         "status": "skipped",
-                        "reason": gate_reason if not is_gate_passed else "Strategy restricted to Microstructure Peaks",
+                        "reason": gate_reason,
                         "events_detected": self._events_detected,
                         "events_fired": self._events_fired,
                         "events_skipped": self._events_skipped,
@@ -771,6 +789,28 @@ class AxonDaemon:
                     "events_fired": self._events_fired,
                     "events_skipped": self._events_skipped,
                 })
+
+            # Check calendar block status
+            is_blocked, ev, block_reason = self.calendar_guard.check_block_status()
+            if is_blocked:
+                self._events_skipped += 1
+                logger.info("SKIPPED (calendar block: %s)", block_reason)
+                if dashboard:
+                    dashboard.broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": block_reason,
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
 
             is_dry_run = self.config.get("realtime_dry_run", False)
 
@@ -1142,6 +1182,9 @@ class AxonDaemon:
         pip = 0.01 if "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() else 0.0001
         digits = 3 if "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() else 5
         
+        pd = self.event_detector.peak_detector
+        curr_eff = float(getattr(pd, "last_efficiency", 1.0))
+        
         for pos in positions:
             ticket = pos.ticket
             # If we don't have the initial SL recorded, initialize it from pos.sl
@@ -1153,11 +1196,102 @@ class AxonDaemon:
             if initial_sl <= 0.0:
                 continue
                 
+            # Initialize dynamic metrics if not present
+            if ticket not in self._active_trade_peak_profit:
+                self._active_trade_peak_profit[ticket] = 0.0
+            if ticket not in self._active_trade_peak_efficiency:
+                self._active_trade_peak_efficiency[ticket] = curr_eff
+            if ticket not in self._active_trade_stage:
+                self._active_trade_stage[ticket] = 1
+                
+            # 1. Update profit metrics
             if pos.type == mt5.POSITION_TYPE_BUY:
-                # BUY: profit is (bid - price_open). SL distance is (price_open - initial_sl)
+                current_profit = (bid - pos.price_open) / pip
+            else:
+                current_profit = (pos.price_open - ask) / pip
+                
+            self._active_trade_peak_profit[ticket] = max(self._active_trade_peak_profit[ticket], current_profit)
+            
+            # 2. Update efficiency metric
+            self._active_trade_peak_efficiency[ticket] = max(self._active_trade_peak_efficiency[ticket], curr_eff)
+            
+            # 3. Stage 3: Exhaustion Exit (Close Trade)
+            entry_t = datetime.fromtimestamp(pos.time)
+            is_entry_aware = entry_t.tzinfo is not None
+            recent_indices = []
+            for idx, t in enumerate(pd.timestamps):
+                is_t_aware = t.tzinfo is not None
+                if is_entry_aware == is_t_aware:
+                    if t >= entry_t:
+                        recent_indices.append(idx)
+                else:
+                    if t.replace(tzinfo=None) >= entry_t.replace(tzinfo=None):
+                        recent_indices.append(idx)
+                        
+            recent_len = len(recent_indices)
+            if recent_len >= 20:
+                buy_vels = [pd.buy_velocities[idx] for idx in recent_indices]
+                sell_vels = [pd.sell_velocities[idx] for idx in recent_indices]
+                prices = [pd.tick_prices[idx] for idx in recent_indices]
+                
+                avg_buy_vel = sum(buy_vels) / recent_len
+                avg_sell_vel = sum(sell_vels) / recent_len
+                
+                if pos.type == mt5.POSITION_TYPE_BUY:
+                    max_idx = prices.index(max(prices))
+                    stalled = max_idx < (recent_len - 15)
+                    velocity_flip = (avg_sell_vel > 1.5 * max(0.1, avg_buy_vel)) and (avg_sell_vel > 2.0)
+                    if stalled and velocity_flip:
+                        self._close_mt5_position(pos, "Exhaustion Exit (Stage 3 Close)")
+                        continue
+                elif pos.type == mt5.POSITION_TYPE_SELL:
+                    min_idx = prices.index(min(prices))
+                    stalled = min_idx < (recent_len - 15)
+                    velocity_flip = (avg_buy_vel > 1.5 * max(0.1, avg_sell_vel)) and (avg_buy_vel > 2.0)
+                    if stalled and velocity_flip:
+                        self._close_mt5_position(pos, "Exhaustion Exit (Stage 3 Close)")
+                        continue
+                        
+            # 4. Stage 2: Slowdown Phase (Reduce Risk / Tighten SL)
+            if self._active_trade_stage[ticket] == 1 and current_profit > 0 and curr_eff < 0.6 * self._active_trade_peak_efficiency[ticket]:
+                self._active_trade_stage[ticket] = 2
+                peak_p = self._active_trade_peak_profit[ticket]
+                if peak_p >= 5.0:
+                    new_sl_val = pos.price_open + (peak_p * 0.5) * pip if pos.type == mt5.POSITION_TYPE_BUY else pos.price_open - (peak_p * 0.5) * pip
+                else:
+                    new_sl_val = pos.price_open + 1 * pip if pos.type == mt5.POSITION_TYPE_BUY else pos.price_open - 1 * pip
+                
+                new_sl = round(new_sl_val, digits)
+                
+                # Check if this new SL actually tightens our risk
+                should_modify = False
+                if pos.type == mt5.POSITION_TYPE_BUY:
+                    if new_sl > pos.sl:
+                        should_modify = True
+                else:
+                    if new_sl < pos.sl or pos.sl == 0.0:
+                        should_modify = True
+                        
+                if should_modify:
+                    logger.info("AxonDaemon: Slowdown Stage 2 triggered for ticket %d. Modifying SL: %.5f -> %.5f",
+                                ticket, pos.sl, new_sl)
+                    request = {
+                        "action": mt5.TRADE_ACTION_SLTP,
+                        "position": ticket,
+                        "symbol": self.mt5_symbol,
+                        "sl": new_sl,
+                        "tp": pos.tp,
+                    }
+                    res = mt5.order_send(request)
+                    if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                        logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
+                    continue
+            
+            # 5. Standard Trailing Stop (1:1 Risk-Reward breakeven fallback)
+            if pos.type == mt5.POSITION_TYPE_BUY:
                 sl_dist = pos.price_open - initial_sl
-                current_profit = bid - pos.price_open
-                if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
+                current_profit_val = bid - pos.price_open
+                if sl_dist > 0 and current_profit_val >= 1.0 * sl_dist:
                     breakeven_sl = round(pos.price_open + 1 * pip, digits)
                     if pos.sl < breakeven_sl:
                         logger.info("AxonDaemon: Trailing SL triggered for BUY ticket %d. Modifying SL: %.5f -> %.5f",
@@ -1174,10 +1308,9 @@ class AxonDaemon:
                             logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
                             
             elif pos.type == mt5.POSITION_TYPE_SELL:
-                # SELL: profit is (price_open - ask). SL distance is (initial_sl - price_open)
                 sl_dist = initial_sl - pos.price_open
-                current_profit = pos.price_open - ask
-                if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
+                current_profit_val = pos.price_open - ask
+                if sl_dist > 0 and current_profit_val >= 1.0 * sl_dist:
                     breakeven_sl = round(pos.price_open - 1 * pip, digits)
                     if pos.sl > breakeven_sl or pos.sl == 0.0:
                         logger.info("AxonDaemon: Trailing SL triggered for SELL ticket %d. Modifying SL: %.5f -> %.5f",
@@ -1192,6 +1325,58 @@ class AxonDaemon:
                         res = mt5.order_send(request)
                         if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                             logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
+
+    def _close_mt5_position(self, pos, reason: str):
+        """Close an active MT5 position."""
+        import MetaTrader5 as mt5
+        ticket = pos.ticket
+        symbol = pos.symbol
+        volume = pos.volume
+        
+        # Determine opposite order type
+        order_type = mt5.ORDER_TYPE_SELL if pos.type == mt5.POSITION_TYPE_BUY else mt5.ORDER_TYPE_BUY
+        
+        # Get current tick
+        tick = mt5.symbol_info_tick(symbol)
+        if not tick:
+            logger.error("AxonDaemon: Failed to get tick to close position %d", ticket)
+            return False
+            
+        price = tick.bid if order_type == mt5.ORDER_TYPE_SELL else tick.ask
+        
+        request = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": symbol,
+            "volume": volume,
+            "type": order_type,
+            "position": ticket,
+            "price": price,
+            "deviation": self.config.get("realtime_deviation", 20),
+            "magic": pos.magic,
+            "comment": f"AxonDaemon Close: {reason}",
+            "type_time": mt5.ORDER_TIME_GTC,
+            "type_filling": mt5.ORDER_FILLING_FOK,
+        }
+        
+        logger.info("AxonDaemon: Sending close order request for ticket %d. Reason: %s", ticket, reason)
+        res = mt5.order_send(request)
+        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+            logger.info("AxonDaemon: Close order successful for ticket %d", ticket)
+            return True
+        else:
+            ret = res.retcode if res else -1
+            comm = res.comment if res else "No response"
+            logger.error("AxonDaemon: Close order failed for ticket %d. Retcode: %s, Comment: %s", ticket, ret, comm)
+            
+            # Retry with IOC
+            if res and res.retcode in [mt5.TRADE_RETCODE_INVALID_FILL, mt5.TRADE_RETCODE_LIMIT_VOLUME]:
+                logger.info("AxonDaemon: Retrying close with ORDER_FILLING_IOC...")
+                request["type_filling"] = mt5.ORDER_FILLING_IOC
+                res = mt5.order_send(request)
+                if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                    logger.info("AxonDaemon: Close order successful on retry for ticket %d", ticket)
+                    return True
+            return False
 
     def _check_for_closed_positions(self, bid: float, ask: float):
         """Detect closed positions and log outcomes."""
@@ -1334,6 +1519,9 @@ class AxonDaemon:
             # Remove from tracking cache
             self._tracked_positions.discard(ticket)
             self._active_trade_initial_sl.pop(ticket, None)
+            self._active_trade_peak_profit.pop(ticket, None)
+            self._active_trade_peak_efficiency.pop(ticket, None)
+            self._active_trade_stage.pop(ticket, None)
             
             # Apply post-trade global cooldown to prevent immediate reversal trades
             # caused by our own TP/SL orders hitting the market and causing a tick climax
@@ -1343,6 +1531,76 @@ class AxonDaemon:
             
         # Update tracked positions with active ones
         self._tracked_positions = active_tickets.copy()
+
+    def _check_calendar_cuts(self):
+        """Check if active positions must be closed due to an upcoming calendar event."""
+        if not self.calendar_guard.enabled:
+            return
+            
+        # Check if a new fetch occurred and broadcast updates to the dashboard
+        if self.calendar_guard.update():
+            dashboard = get_dashboard()
+            if dashboard:
+                try:
+                    dashboard.broadcast(self._get_calendar_payload())
+                except Exception as e:
+                    logger.error("Error broadcasting calendar update: %s", e)
+
+        # Analyze completed economic event outcomes
+        try:
+            self.check_event_outcomes()
+        except Exception as oe:
+            logger.error("Error analyzing event outcomes: %s", oe)
+            
+        import MetaTrader5 as mt5
+        if not mt5 or not mt5.terminal_info():
+            return
+            
+        positions = mt5.positions_get(symbol=self.mt5_symbol)
+        if not positions:
+            return
+            
+        # Determine if current market price is close to any crucial S/R level (5.0 pips)
+        is_near_level = False
+        active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
+        if active_levels and hasattr(self, "tick_engine") and self.tick_engine.latest_bid > 0:
+            current_price = self.tick_engine.latest_bid
+            pip_mult = self.live_evidence._pip_mult
+            for lvl in active_levels:
+                dist_pips = abs(current_price - lvl.price) / pip_mult
+                if dist_pips <= 5.0:
+                    is_near_level = True
+                    break
+                    
+        for pos in positions:
+            ticket = pos.ticket
+            # Only manage positions belonging to our daemon's magic numbers
+            if pos.magic in (self.trade_executor_base.magic, self.trade_executor_opt.magic):
+                is_in_profit = pos.profit > 0
+                
+                # Check cut status using position-specific metrics
+                should_cut, ev, reason = self.calendar_guard.check_cut_status(
+                    is_in_profit=is_in_profit, 
+                    is_near_level=is_near_level
+                )
+                
+                if should_cut:
+                    logger.warning("CalendarGuard: Cutting position ticket %d before economic event: %s", ticket, reason)
+                    # Close the position using the correct trade executor
+                    executor = self.trade_executor_opt if pos.magic == self.trade_executor_opt.magic else self.trade_executor_base
+                    success = executor.close_position(ticket)
+                    if success:
+                        from axonai.realtime.alerts import send_alert
+                        msg = f"CALENDAR CUT SUCCESS: Closed ticket {ticket} due to upcoming event: {ev['title']} ({ev['country']})"
+                        logger.info(msg)
+                        send_alert(msg, self.config)
+
+    def check_event_outcomes(self):
+        """Analyze completed events to measure price outcome against expectations."""
+        try:
+            self.calendar_guard.analyze_completed_events(self.mt5_symbol, self.offset_hours)
+        except Exception as e:
+            logger.error("Error analyzing event outcomes: %s", e)
 
 
 def generate_session_summary():

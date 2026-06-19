@@ -45,11 +45,11 @@ class TestPeakDetector:
         assert result.intensity == "MEDIUM"
 
     def test_velocity_exhaustion_climax_detection(self):
-        detector = PeakDetector(window_size=50, pip_mult=0.0001)
+        detector = PeakDetector(window_size=200, pip_mult=0.0001)
         base_time = datetime(2026, 5, 28, 12, 0, 0)
         
-        # Phase 1: Calm baseline
-        prices = [1.1600 + i * 0.00001 for i in range(15)]
+        # Phase 1: Calm baseline (150 ticks to populate Z-score history and baseline std_dev)
+        prices = [1.1600 + i * 0.00001 for i in range(150)]
         
         # Phase 2: Extreme spike (climax)
         last_price = prices[-1]

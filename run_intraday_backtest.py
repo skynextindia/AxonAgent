@@ -163,6 +163,7 @@ bt_mod.BacktestEngine.load_historical_data = patched_load_historical_data
 engine = BacktestEngine(
     ticker="EURUSD=X",
     days=29,
+    config={"require_sr_proximity": False}
 )
 
 logger.info("Starting INTRADAY backtest on real EURUSD M15 data (%d bars, 29 days)...", len(candle_rows))
@@ -233,6 +234,25 @@ json_report = {
     "net_profit_pips": report["net_profit_pips"],
     "profit_factor": report["profit_factor"],
     "event_breakdown": report.get("event_breakdown", {}),
+    "trades": [
+        {
+            "id": t["id"],
+            "direction": t["direction"],
+            "entry_time": t["entry_time"].isoformat(),
+            "entry_price": t["entry_price"],
+            "exit_time": t["exit_time"].isoformat() if t["exit_time"] else None,
+            "exit_price": t["exit_price"],
+            "sl": t["sl"],
+            "tp": t["tp"],
+            "pips": t["pips"],
+            "trigger": t["trigger"],
+            "signal_quality": t["signal_quality"],
+            "status": t["status"],
+            "close_reason": t["close_reason"],
+            "explainability": t.get("explainability", {})
+        }
+        for t in engine.simulated_trades
+    ]
 }
 with open(json_path, "w") as f:
     json.dump(json_report, f, indent=2)

@@ -12,9 +12,14 @@ from axonai.realtime.api_server import start_dashboard, get_dashboard
 from axonai.realtime.mt5_bridge_client import BridgeClient
 from axonai.realtime.tick_behavior import TickBehaviorAnalyzer
 
-# Start dashboard on localhost:8000
-server = start_dashboard(host='127.0.0.1', port=8000)
-print('Dashboard started on http://127.0.0.1:8000', flush=True)
+# Load ports from environment variables for multi-instance compatibility
+import os
+dashboard_port = int(os.environ.get("AXONAI_DASHBOARD_PORT", 8000))
+bridge_port = int(os.environ.get("AXONAI_BRIDGE_PORT", 8765))
+
+# Start dashboard
+server = start_dashboard(host='127.0.0.1', port=dashboard_port)
+print(f'Dashboard started on http://127.0.0.1:{dashboard_port}', flush=True)
 
 # Determine Windows host IP from WSL default gateway
 import os
@@ -92,7 +97,7 @@ def request_historical_candles(client):
 # Create bridge client and wire it to the dashboard
 client = BridgeClient(
     host=bridge_host,
-    port=8765,
+    port=bridge_port,
     dashboard_server=server,
     auto_reconnect=True,
     reconnect_delay=3.0,
@@ -100,7 +105,7 @@ client = BridgeClient(
     on_tick=on_tick_from_bridge,
 )
 client.start()
-print(f'BridgeClient started, connecting to ws://{bridge_host}:8765', flush=True)
+print(f'BridgeClient started, connecting to ws://{bridge_host}:{bridge_port}', flush=True)
 
 try:
     while True:

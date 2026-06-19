@@ -639,6 +639,25 @@ async def main():
         "profit_factor": report["profit_factor"],
         "monthly_breakdown": monthly,
         "event_breakdown": report.get("event_breakdown", {}),
+        "trades": [
+            {
+                "id": t["id"],
+                "direction": t["direction"],
+                "entry_time": t["entry_time"].isoformat() if hasattr(t["entry_time"], "isoformat") else str(t["entry_time"]),
+                "entry_price": t["entry_price"],
+                "exit_time": t["exit_time"].isoformat() if t["exit_time"] and hasattr(t["exit_time"], "isoformat") else str(t["exit_time"]) if t["exit_time"] else None,
+                "exit_price": t["exit_price"],
+                "sl": t["sl"],
+                "tp": t["tp"],
+                "pips": t["pips"],
+                "trigger": t["trigger"],
+                "signal_quality": t["signal_quality"],
+                "status": t["status"],
+                "close_reason": t["close_reason"],
+                "explainability": t.get("explainability", {})
+            }
+            for t in trades
+        ]
     }
     with open(json_path, "w") as f:
         json.dump(json_report, f, indent=2, default=str)

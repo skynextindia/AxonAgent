@@ -145,7 +145,7 @@ class EventDetector:
         self.peak_detector_opt.pip_mult = self._pip_mult
         self.peak_detector.pip_mult = self._pip_mult
 
-    def on_tick(self, bid: float, ask: float, timestamp: datetime):
+    def on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Lightweight per-tick checks."""
         if not self.live_state.is_initialized:
             return
@@ -197,12 +197,12 @@ class EventDetector:
         self._check_level_breach(bid, ask, timestamp)
 
         # 5. Microstructure Peak/Valley & Climax exhaustion detection
-        self._check_peak_detection(mid, timestamp)
+        self._check_peak_detection(mid, timestamp, volume)
 
-    def _check_peak_detection(self, mid: float, timestamp: datetime):
+    def _check_peak_detection(self, mid: float, timestamp: datetime, volume: int = 1):
         """Invoke microstructure peak and climax exhaustion detector for both systems."""
         # 1. Base Peak Detector
-        peak_res_base = self.peak_detector_base.update(mid, timestamp)
+        peak_res_base = self.peak_detector_base.update(mid, timestamp, volume)
         if peak_res_base:
             details = peak_res_base.to_dict()
             details["system"] = "base"
@@ -216,7 +216,7 @@ class EventDetector:
             ))
 
         # 2. Optimized Peak Detector
-        peak_res_opt = self.peak_detector_opt.update(mid, timestamp)
+        peak_res_opt = self.peak_detector_opt.update(mid, timestamp, volume)
         if peak_res_opt:
             details = peak_res_opt.to_dict()
             details["system"] = "optimized"

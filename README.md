@@ -92,8 +92,19 @@ Monitors the chart constantly and extracts structural patterns using pure mathem
 7. **SESSION_TRANSITION**: Shift across Asian, London, and New York trading sessions.
 8. **SPREAD_CHANGE**: Tracking of broker spread levels (gating operations during spread spikes).
 9. **MOMENTUM_DIVERGENCE**: Classical RSI and price action divergences.
+10. **EMPIRICAL_REVERSAL_STRUCTURES**: Non-traditional structural filters (Wick Climaxes, Absorption Volume Stalls, V-Rebounds) tracked statistically across M15, H1, and H4 timeframes.
 
-### 3. Layer 3: LangGraph Multi-Agent Architecture
+### 3. Execution Decision Intelligence & Proximity-Confluence Hybrid Rule
+Dynamically validates events using context-aware filters before execution:
+- **Proximity-Confluence Bypass**:
+  - **High Proximity (≤ 2.0 pips)**: Automatically bypasses structural confirmation checks to capture high-reward entries immediately at S/R zones.
+  - **Moderate Proximity (2.0 to 5.0 pips)**: Strictly requires empirical structural confluences (outlier shadows or absorption stalls) to prevent execution on unconfirmed breakouts.
+- **Empirical Reversal Patterns (Direction-Specific & Pure Baseline)**:
+  - **Wick Climax**: Statistical outlier shadow rejection (lower shadows for `BUY`, upper shadows for `SELL`) relative to a pure lookback period (excluding the current candle).
+  - **Volume Stall (Absorption)**: Compressed body size (<20% of ATR) under heavy relative volume (>1.3× average) indicating order block absorption.
+  - **V-Rebound**: Dynamic momentum sequence deceleration followed by a strong impulse candle opposing the prior sequence.
+
+### 4. Layer 3: LangGraph Multi-Agent Architecture
 Compile-once, reuse-always LangGraph Directed Acyclic Graph (DAG):
 - **Trader Agent**: Establishes initial hypothesis.
 - **Analysts (x4 Parallel)**: Market, News, Fundamentals, and Sentiment/Social analysis.
@@ -102,11 +113,11 @@ Compile-once, reuse-always LangGraph Directed Acyclic Graph (DAG):
 - **Risk Team (x3 Parallel)**: Conservative, Neutral, and Aggressive risk assessments.
 - **Portfolio Manager**: Renders final BUY, SELL, or HOLD verdict.
 
-### 4. Enterprise-Grade LLM Integration
+### 5. Enterprise-Grade LLM Integration
 - Provider-agnostic factory supporting **OpenAI (GPT-4/5), Anthropic (Claude 3.5/3.7), Google (Gemini 1.5/2.0), Azure OpenAI**, and local models via **Ollama**.
 - Auto-resolves API keys and configuration dynamically.
 
-### 5. Advanced Monitoring Dashboard
+### 6. Advanced Monitoring Dashboard
 - Integrated FastAPI backend with a real-time, responsive glassmorphism web HUD.
 - Live-streams account equity, indicators, active regimes, events, agent conversation traces, and final trade decisions via WebSockets.
 - Session persistence: Saves and restores events across daemon restarts.
