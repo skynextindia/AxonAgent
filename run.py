@@ -70,7 +70,7 @@ def main():
                         help="Dashboard host")
     parser.add_argument("--port", type=int, default=8000,
                         help="Dashboard port")
-    parser.add_argument("--symbol", type=str, default="EURUSDm",
+    parser.add_argument("--symbol", type=str, default="EURUSD",
                         help="Symbol to trade")
     parser.add_argument("--enable-llm", action="store_true",
                         help="Enable the LLM/LangGraph agent layer (requires DEEPSEEK_API_KEY). "

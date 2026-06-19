@@ -126,7 +126,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     },
     # MetaTrader 5 integration
     "mt5_terminal_path": None,      # None = auto-detect; or full path to terminal64.exe
-    "mt5_symbol_suffix": "m",       # Broker symbol suffix: EURUSD → EURUSDm
+    "mt5_symbol_suffix": "",       # Broker symbol suffix: EURUSD
     "mt5_timeframes": ["M15", "H1", "H4", "D1"],  # Multi-TF analysis order
     # ── Real-time daemon settings ────────────────────────────────────────
     "realtime_enabled": False,

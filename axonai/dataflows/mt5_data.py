@@ -344,7 +344,7 @@ def get_mt5_atr(yf_symbol: str, period: int = 14,
     return float(atr) if pd.notna(atr) else None
 
 
-def get_broker_tz_offset(symbol: str = "EURUSDm") -> int:
+def get_broker_tz_offset(symbol: str = "EURUSD") -> int:
     """Get broker timezone offset from UTC in hours. Cached to prevent repeated MT5 calls.
     
     If the market is open, computes it dynamically by comparing the latest tick time
