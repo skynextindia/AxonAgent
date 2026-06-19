@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-from axonai.dataflows.evidence_extractor import PriceLevel
+from axonai.realtime.live_state import PriceLevel
 from axonai.realtime.event_types import LiveCandle
 
 # Tier 1: Data
