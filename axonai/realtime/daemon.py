@@ -68,6 +68,7 @@ class AxonDaemon:
         # Cooldown tracking (replaces graph_executor cooldown)
         self._cooldown_seconds: int = config.get("realtime_cooldown_seconds", 300)
         self._last_execution_time: datetime = datetime.min
+        self._last_loss_time: Optional[datetime] = None
 
         # Layer 4: Trade Executor
         config_base = config.copy()
@@ -649,6 +650,9 @@ class AxonDaemon:
     def _on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Called by TickEngine on every new tick."""
         mid = (bid + ask) / 2.0
+        self.live_state.on_tick(bid, ask, timestamp)
+        self.live_evidence.on_tick(bid, ask, timestamp, volume)
+        self.reversal_model.sync_levels(self.live_evidence.price_levels)
         # 1. Update pure-math reversal engine
         snapshot = self.reversal_model.on_tick(mid, timestamp, volume)
         self._last_snapshot = snapshot
@@ -755,6 +759,9 @@ class AxonDaemon:
 
     def _on_candle_close(self, candle: LiveCandle):
         """Called by TickEngine when any timeframe candle closes."""
+        self.live_state.on_candle_close(candle)
+        self.live_evidence.on_candle_close(candle)
+        self.reversal_model.sync_levels(self.live_evidence.price_levels)
         self.reversal_model.on_candle_close(candle)
         logger.debug("Candle closed: %s @ %.5f (H=%.5f L=%.5f)",
                      candle.timeframe, candle.close, candle.high, candle.low)
@@ -848,7 +855,8 @@ class AxonDaemon:
                         # Register trade with models
                         self.reversal_model.register_trade(
                             ticket, snapshot.entry_decision.direction, snapshot.price,
-                            trade_result.get("sl"), trade_result.get("tp")
+                            trade_result.get("sl"), trade_result.get("tp"),
+                            reason=snapshot.entry_decision.reason
                         )
                         self.trade_analytics.record_entry(
                             ticket, self.mt5_symbol, snapshot.entry_decision.direction,
@@ -974,8 +982,18 @@ class AxonDaemon:
 
     def _seconds_until_ready(self) -> float:
         """Seconds remaining in execution cooldown."""
-        elapsed = (datetime.now() - self._last_execution_time).total_seconds()
-        return max(0.0, self._cooldown_seconds - elapsed)
+        now = datetime.now()
+        elapsed = (now - self._last_execution_time).total_seconds()
+        cooldown_rem = max(0.0, self._cooldown_seconds - elapsed)
+        
+        # Loss cooldown check
+        loss_cooldown_rem = 0.0
+        if getattr(self, "_last_loss_time", None) is not None:
+            elapsed_loss = (now - self._last_loss_time).total_seconds()
+            loss_cooldown_minutes = self.config.get("realtime_loss_cooldown_minutes", self.config.get("loss_cooldown_minutes", 30))
+            loss_cooldown_rem = max(0.0, (loss_cooldown_minutes * 60) - elapsed_loss)
+            
+        return max(cooldown_rem, loss_cooldown_rem)
 
     def _log_stats(self):
         """Log daemon statistics."""
@@ -1182,6 +1200,8 @@ class AxonDaemon:
                 entry_price = bid  # fallback
                 
             outcome = "WIN" if pips > 0 else "LOSS" if pips < 0 else "BREAKEVEN"
+            if outcome == "LOSS":
+                self._last_loss_time = datetime.now()
             
             system_name = self._active_trade_system.pop(ticket, "optimized")
             

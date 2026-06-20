@@ -11,9 +11,32 @@ from dataclasses import dataclass
 from typing import Optional
 
 from axonai.realtime.velocity_normalizer import NormalizedVelocity
-from axonai.realtime.displacement_engine import DisplacementState, DISPLACEMENT_IMPULSE
+from axonai.realtime.displacement_engine import (
+    DisplacementState,
+    DISPLACEMENT_IMPULSE,
+    DISPLACEMENT_EXHAUSTION,
+    DISPLACEMENT_TRAP,
+    DISPLACEMENT_ABSORPTION,
+    DISPLACEMENT_NEUTRAL,
+)
 from axonai.realtime.mtf_context import MTFState
 from axonai.realtime.regime_engine import RegimeState
+from axonai.realtime.trade_phase import TradePhase
+
+
+ENERGY_PHASE_PENALTIES = {
+    # (energy_state, phase) → score penalty
+    ("ADVERSE_IMPULSE", "ENTRY_TRIGGERED"): 0.0,   # Grace period: no exit on immediate tick noise
+    ("ADVERSE_IMPULSE", "EXPANSION"):       0.3,
+    ("ADVERSE_IMPULSE", "CONTINUATION"):    0.2,
+    ("ADVERSE_IMPULSE", "COMPRESSION"):     0.3,
+    ("ADVERSE_IMPULSE", "EXHAUSTION"):      0.4,
+    ("ADVERSE_IMPULSE", "REVERSAL_RISK"):   0.5,
+    ("EXHAUSTING",      "CONTINUATION"):    0.1,
+    ("EXHAUSTING",      "EXPANSION"):       0.0,   # could be a pause
+    ("EXHAUSTING",      "EXHAUSTION"):      0.0,   # already in exhaustion — expected
+    ("NOISE",           "*"):               0.0,   # never penalise for noise
+}
 
 
 @dataclass
@@ -43,6 +66,7 @@ class TradeHealthMonitor:
         self._time_in_drawdown_sec = 0.0
         self._max_favorable_excursion = 0.0
         self._last_tick_time = 0.0
+        self._consecutive_adverse = 0
         
         # Expected conditions (recorded at entry)
         self._entry_regime = ""
@@ -59,6 +83,7 @@ class TradeHealthMonitor:
         self._time_in_drawdown_sec = 0.0
         self._max_favorable_excursion = 0.0
         self._last_tick_time = ts
+        self._consecutive_adverse = 0
         
         self._entry_regime = regime
         self._entry_mtf_bias = mtf_bias
@@ -66,6 +91,41 @@ class TradeHealthMonitor:
     def clear(self) -> None:
         """Clear active trade state."""
         self._is_active = False
+        self._consecutive_adverse = 0
+
+    def _market_energy(
+        self,
+        vel: NormalizedVelocity,
+        disp: DisplacementState,
+    ) -> str:
+        """
+        Returns one of:
+            HEALTHY_IMPULSE   — strong move in our direction
+            ADVERSE_IMPULSE   — strong move against us
+            EXHAUSTING        — move is dying
+            NOISE             — high vel but no net displacement (trap/absorption)
+        """
+        cls = disp.classification
+
+        if cls == DISPLACEMENT_IMPULSE:
+            favour = (
+                (self._direction == "BUY"  and disp.net_displacement_pips > 0) or
+                (self._direction == "SELL" and disp.net_displacement_pips < 0)
+            )
+            if favour:
+                self._consecutive_adverse = 0
+                return "HEALTHY_IMPULSE"
+            else:
+                self._consecutive_adverse += 1
+                return "ADVERSE_IMPULSE" if self._consecutive_adverse >= 5 else "NOISE"
+
+        if cls == DISPLACEMENT_EXHAUSTION:
+            self._consecutive_adverse = 0
+            return "EXHAUSTING"
+
+        # TRAP and ABSORPTION: high velocity but no net move — liquidity fight, not directional
+        self._consecutive_adverse = 0
+        return "NOISE"
 
     def evaluate(
         self,
@@ -75,12 +135,16 @@ class TradeHealthMonitor:
         displacement: DisplacementState,
         regime: RegimeState,
         mtf: MTFState,
+        phase: TradePhase,
     ) -> TradeHealth:
         """Evaluate trade health based on current conditions."""
         if not self._is_active:
             return TradeHealth()
             
         dt = ts - self._last_tick_time
+        # Under squeezed ticks backtesting, there's a 15-minute gap between candles
+        if dt > 5.0 and self._last_tick_time > 0.0:
+            dt = 1.0
         self._last_tick_time = ts
         
         # Calculate PnL in pips
@@ -113,16 +177,18 @@ class TradeHealthMonitor:
             score -= 0.3
             reason = "Extended Drawdown"
             
-        # 3. Adverse Displacement
-        # If the market is printing strong impulses AGAINST us
-        if displacement.classification == DISPLACEMENT_IMPULSE:
-            if self._direction == "BUY" and displacement.sell_displacement > displacement.buy_displacement * 2:
-                score -= 0.5
-                reason = "Adverse Impulse (Selling)"
-            elif self._direction == "SELL" and displacement.buy_displacement > displacement.sell_displacement * 2:
-                score -= 0.5
-                reason = "Adverse Impulse (Buying)"
-                
+        # 3. Energy/Phase-based health evaluation
+        energy = self._market_energy(velocity, displacement)
+        phase_val = phase.value if hasattr(phase, "value") else str(phase)
+        penalty_key = (energy, phase_val)
+        if penalty_key not in ENERGY_PHASE_PENALTIES:
+            penalty_key = (energy, "*")
+        penalty = ENERGY_PHASE_PENALTIES.get(penalty_key, 0.0)
+        
+        if penalty > 0.0:
+            score -= penalty
+            reason = f"{energy} in {phase_val}"
+            
         # 4. Failed Breakout / Fakeout Return
         # If we had a nice run (+10 pips) and it fully retraced to negative
         if self._max_favorable_excursion > 10.0 and pips_profit < -2.0:
@@ -149,4 +215,6 @@ class TradeHealthMonitor:
             reason=reason if score < 1.0 else "Healthy"
         )
 
+
 __all__ = ["TradeHealthMonitor", "TradeHealth"]
+

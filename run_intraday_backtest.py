@@ -53,7 +53,18 @@ logger.info("Loaded %d M15 bars from %s to %s", len(df), df.index[0], df.index[-
 import numpy as np
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
-from axonai.realtime.backtester import BacktestEngine
+
+# Monkey-patch the MT5 module methods FIRST before importing BacktestEngine
+import axonai.dataflows.mt5_data as mt5_mod
+
+def patched_init(*args, **kwargs):
+    logger.info("MT5 monkey-patch: mt5_initialize() → True (using yFinance data)")
+    return True
+
+mt5_mod.mt5_initialize = patched_init
+mt5_mod.get_broker_tz_offset = lambda *a, **kw: 2
+mt5_mod._to_mt5_symbol = lambda ticker, config=None: ticker.replace("=X", "").replace("/", "")
+mt5_mod._ensure_symbol_visible = lambda sym: None
 
 # Convert DataFrame candles to the format BacktestEngine expects
 candle_rows = []
@@ -66,6 +77,25 @@ for idx, row in df.iterrows():
         "close": row["Close"],
         "volume": int(row["Volume"]) if pd.notna(row["Volume"]) else 100,
     })
+
+def patched_fetch_bars(symbol: str, timeframe: str, from_date, to_date):
+    """Return our pre-built candles instead of calling MT5."""
+    logger.info("MT5 monkey-patch: fetch_bars(%s, %s, %s → %s) returning %d bars",
+                symbol, timeframe, from_date, to_date, len(candle_rows))
+    return candle_rows
+
+mt5_mod._fetch_bars = patched_fetch_bars
+
+# Now import BacktestEngine
+from axonai.realtime.backtester import BacktestEngine
+import axonai.realtime.backtester as bt_mod
+
+# Also patch the local names in backtester module (imported at module level)
+bt_mod.mt5_initialize = patched_init
+bt_mod.get_broker_tz_offset = lambda *a, **kw: 2
+bt_mod._fetch_bars = patched_fetch_bars
+bt_mod._ensure_symbol_visible = lambda sym: None
+bt_mod._to_mt5_symbol = lambda ticker, config=None: ticker.replace("=X", "").replace("/", "")
 
 # Build ticks: path-based interpolation (Open→Low→High→Close) matching
 # the backtester's own tick generation so trade prices align with chart.
@@ -95,41 +125,13 @@ for c in candle_rows:
     # Spread jitter (±0.1 pip around the 0.5-pip half-spread)
     spread_jitter = rng.uniform(-0.00001, 0.00001, n_ticks)
 
+    candle_close_time = t + timedelta(minutes=15)
     for i, price in enumerate(tick_prices):
-        tick_time = t + timedelta(
-            seconds=int((i + 1) * 900 / n_ticks)  # evenly spaced within 15-min candle
-        )
+        tick_time = candle_close_time - timedelta(seconds=(n_ticks - 1 - i) * 0.05)
         hs = half_spread + spread_jitter[i]
         bid = round(price - hs, 5)
         ask = round(price + hs, 5)
         ticks_list.append((bid, ask, tick_time))
-
-# Monkey-patch the MT5 module methods that BacktestEngine.load_data() calls
-import axonai.dataflows.mt5_data as mt5_mod
-
-_real_fetch_bars = mt5_mod._fetch_bars  # keep for reference
-
-def patched_fetch_bars(symbol: str, timeframe: str, from_date, to_date):
-    """Return our pre-built candles instead of calling MT5."""
-    logger.info("MT5 monkey-patch: fetch_bars(%s, %s, %s → %s) returning %d bars",
-                symbol, timeframe, from_date, to_date, len(candle_rows))
-    return candle_rows
-
-def patched_init(*args, **kwargs):
-    logger.info("MT5 monkey-patch: mt5_initialize() → True (using yFinance data)")
-    return True
-
-import axonai.realtime.backtester as bt_mod
-mt5_mod.mt5_initialize = patched_init
-mt5_mod._fetch_bars = patched_fetch_bars
-mt5_mod._to_mt5_symbol = lambda ticker, config=None: ticker.replace("=X", "").replace("/", "")
-mt5_mod._ensure_symbol_visible = lambda sym: None
-
-# Also patch the local names in backtester module (imported at module level)
-bt_mod.mt5_initialize = patched_init
-bt_mod._fetch_bars = patched_fetch_bars
-bt_mod._ensure_symbol_visible = lambda sym: None
-bt_mod._to_mt5_symbol = lambda ticker, config=None: ticker.replace("=X", "").replace("/", "")
 
 # ---------------------------------------------------------------------------
 # 3. Run intraday backtest - patch load_historical_data to use our data
@@ -163,6 +165,14 @@ bt_mod.BacktestEngine.load_historical_data = patched_load_historical_data
 engine = BacktestEngine(
     ticker="EURUSD=X",
     days=29,
+    config={
+        "min_signal_quality": 0.60,
+        "sl_atr_multiple": 1.0,
+        "tp_atr_multiple": 2.5,
+        "cooldown_seconds": 300,
+        "loss_cooldown_minutes": 30,
+        "realtime_velocity_decay_profit_factor": 0.25,
+    }
 )
 
 logger.info("Starting INTRADAY backtest on real EURUSD M15 data (%d bars, 29 days)...", len(candle_rows))

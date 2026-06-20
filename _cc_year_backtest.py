@@ -10,7 +10,7 @@ import logging
 from datetime import datetime
 
 sys.path.insert(0, ".")
-logging.basicConfig(level=logging.WARNING, format="%(asctime)s %(levelname)s %(message)s")
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
 from axonai.realtime.backtester import BacktestEngine
 from axonai.dataflows.mt5_data import mt5_initialize

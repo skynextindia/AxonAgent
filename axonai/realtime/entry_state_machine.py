@@ -16,9 +16,12 @@ Only State 3 returns a valid "BUY"/"SELL" signal.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from axonai.realtime.velocity_normalizer import NormalizedVelocity
 from axonai.realtime.displacement_engine import DisplacementState, DISPLACEMENT_IMPULSE, DISPLACEMENT_TRAP, DISPLACEMENT_ABSORPTION
@@ -57,7 +60,9 @@ class EntryStateMachine:
         self._anomaly_time: float = 0.0
         self._anomaly_price: float = 0.0
         self._anomaly_direction: str = ""   # Direction we expect the reversal
+        self._anomaly_type: str = ""        # "sweep" or "climax"
         self._max_adverse_excursion: float = 0.0
+        self._last_tick_time: float = 0.0
         
         # Diagnostic
         self._last_reason = "Initialized"
@@ -68,7 +73,9 @@ class EntryStateMachine:
         self._anomaly_time = 0.0
         self._anomaly_price = 0.0
         self._anomaly_direction = ""
+        self._anomaly_type = ""
         self._max_adverse_excursion = 0.0
+        self._last_tick_time = 0.0
         self._last_reason = "Reset"
 
     def evaluate(
@@ -83,6 +90,15 @@ class EntryStateMachine:
     ) -> EntryDecision:
         """Evaluate conditions and transition states."""
         ts = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
+        
+        # Adjust anomaly time if there was a large gap between ticks (e.g. candle gap in backtest)
+        if self._last_tick_time > 0.0 and self._anomaly_time > 0.0:
+            gap = ts - self._last_tick_time
+            if gap > 5.0:
+                self._anomaly_time += gap
+                logger.debug("EntryStateMachine: Adjusted anomaly_time by %.1f seconds due to tick gap", gap)
+                
+        self._last_tick_time = ts
         
         # 1. Timeout Check
         if self._current_state not in (STATE_IDLE, STATE_INVALIDATED):
@@ -108,19 +124,23 @@ class EntryStateMachine:
         is_trigger = self._current_state == STATE_TRIGGERED
         quality = self._calculate_quality(regime, mtf) if is_trigger else 0.0
         
+        reason = self._last_reason
+        if is_trigger:
+            reason = f"Displacement away from trap confirmed ({self._anomaly_type})"
+            
         return EntryDecision(
             state=self._current_state,
             is_valid_entry=is_trigger,
             direction=self._anomaly_direction if is_trigger else None,
             signal_quality=round(quality, 2),
-            reason=self._last_reason
+            reason=reason
         )
 
-    # ── State transition logic ──────────────────────────────────────────
-
     def _transition(self, new_state: str, reason: str) -> None:
+        old_state = self._current_state
         self._current_state = new_state
         self._last_reason = reason
+        logger.info("EntryStateMachine: Transition %s -> %s | Reason: %s", old_state, new_state, reason)
 
     def _evaluate_idle(
         self, price: float, ts: float, vel: NormalizedVelocity,
@@ -135,15 +155,26 @@ class EntryStateMachine:
         
         # Infer expected reversal direction
         direction = ""
-        if disp.volume_imbalance > 0.5 or disp.buy_volume > disp.sell_volume * 2:
-            direction = "SELL" # Buyers climaxing -> Sell reversal
-        elif disp.volume_imbalance < -0.5 or disp.sell_volume > disp.buy_volume * 2:
-            direction = "BUY"  # Sellers climaxing -> Buy reversal
+        if is_sweep:
+            # Sweeping support -> expect BUY; sweeping resistance -> expect SELL
+            sweep_lvl = liq.active_sweeps[0]
+            if price > sweep_lvl.price:
+                direction = "BUY"
+            else:
+                direction = "SELL"
+        elif is_climax:
+            # Bullish climax (net displacement positive) -> expect SELL reversal
+            if disp.net_displacement_pips > 0:
+                direction = "SELL"
+            # Bearish climax (net displacement negative) -> expect BUY reversal
+            elif disp.net_displacement_pips < 0:
+                direction = "BUY"
             
         if (is_climax or is_sweep) and direction:
             self._anomaly_time = ts
             self._anomaly_price = price
             self._anomaly_direction = direction
+            self._anomaly_type = "sweep" if is_sweep else "climax"
             self._max_adverse_excursion = 0.0
             
             reason = "Sweep detected" if is_sweep else "Microstructure climax"
@@ -178,8 +209,8 @@ class EntryStateMachine:
         """Wait for the price to break away from the trap in our direction."""
         dist = (price - self._anomaly_price) / self._pip
         
-        # Trigger criteria: Genuine displacement impulse in our direction
-        is_impulse = disp.classification == DISPLACEMENT_IMPULSE
+        # Trigger criteria: Genuine displacement impulse in our direction, or high displacement ratio
+        is_impulse = (disp.classification == DISPLACEMENT_IMPULSE) or (disp.displacement_ratio > 0.5)
         
         is_trigger = False
         if self._anomaly_direction == "SELL" and dist < -1.5 and is_impulse:

@@ -7,6 +7,7 @@ primary entry point for `daemon.py` and `backtester.py`.
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
@@ -27,6 +28,8 @@ from axonai.realtime.liquidity_engine import LiquidityEngine, LiquidityState
 from axonai.realtime.entry_state_machine import EntryStateMachine, EntryDecision
 from axonai.realtime.trade_health_monitor import TradeHealthMonitor, TradeHealth
 from axonai.realtime.adaptive_exit import AdaptiveExitManager, ExitDecision
+from axonai.realtime.trade_phase import TradePhaseTracker
+from axonai.realtime.exit_stats import ExitStats
 
 
 @dataclass
@@ -63,12 +66,20 @@ class ReversalModel:
         # Instantiate Tier 3
         self.entry = EntryStateMachine(pip_mult=self._pip)
         self.health = TradeHealthMonitor(pip_mult=self._pip)
-        self.exit = AdaptiveExitManager(pip_mult=self._pip)
+        self.exit = AdaptiveExitManager(pip_mult=self._pip, config=self._config)
+        self.phase_tracker = TradePhaseTracker(pip_mult=self._pip)
+        stats_csv = None if self._config.get("backtest_mode", False) else "reports/exit_stats.csv"
+        self.exit_stats = ExitStats(csv_path=stats_csv)
         
         # Latest cached states to avoid recalculating unnecessarily
         self._last_regime_state = RegimeState()
         self._last_mtf_state = MTFState()
         self._last_liquidity_state = LiquidityState()
+        
+        # H1 ATR tracking
+        self._h1_tr_window = deque(maxlen=14)
+        self._h1_atr = 0.0012
+        self._prev_h1_close = None
 
     def sync_levels(self, price_levels: List[PriceLevel]) -> None:
         """Update structural support/resistance levels."""
@@ -79,7 +90,17 @@ class ReversalModel:
         # 1. Update MTF context (accepts all timeframes)
         self._last_mtf_state = self.mtf.update_candle(candle)
         
-        # 2. Update Regime engine (M15 only to reduce noise)
+        # 2. Track H1 ATR
+        if candle.timeframe.upper() == "H1":
+            tr = candle.high - candle.low
+            if getattr(self, "_prev_h1_close", None) is not None:
+                tr = max(tr, abs(candle.high - self._prev_h1_close), abs(candle.low - self._prev_h1_close))
+            self._prev_h1_close = candle.close
+            self._h1_tr_window.append(tr)
+            if len(self._h1_tr_window) >= 14:
+                self._h1_atr = sum(self._h1_tr_window) / 14
+        
+        # 3. Update Regime engine (M15 only to reduce noise)
         if candle.timeframe.upper() == "M15":
             vel_snap = NormalizedVelocity() # Dummy pass for candle update, uses latest
             disp_snap = DisplacementState()
@@ -106,14 +127,27 @@ class ReversalModel:
         )
         
         # 2. Evaluate Active Trade Health
+        phase_snap = self.phase_tracker.update(price, vel_state, disp_state, liq_state)
+        
         health_state = self.health.evaluate(
             price, ts_float, vel_state, disp_state, 
-            self._last_regime_state, self._last_mtf_state
+            self._last_regime_state, self._last_mtf_state,
+            phase_snap.phase
         )
         
         # 3. Evaluate Exit Options
         exit_decision = self.exit.evaluate(
-            price, health_state, self._last_regime_state, self._last_liquidity_state
+            current_price=price,
+            health=health_state,
+            regime=self._last_regime_state,
+            liquidity=self._last_liquidity_state,
+            velocity=vel_state,
+            displacement=disp_state,
+            phase=phase_snap.phase,
+            phase_confidence=phase_snap.confidence,
+            exit_stats=self.exit_stats,
+            mtf=self._last_mtf_state,
+            atr=self._h1_atr
         )
         
         return EngineSnapshot(
@@ -129,7 +163,7 @@ class ReversalModel:
             exit_decision=exit_decision
         )
 
-    def register_trade(self, ticket: int, direction: str, entry_price: float, sl: float, tp: float) -> None:
+    def register_trade(self, ticket: int, direction: str, entry_price: float, sl: float, tp: float, reason: str = "") -> None:
         """Tell the engine a trade was executed so it can manage it."""
         ts = datetime.now().timestamp()
         
@@ -137,7 +171,13 @@ class ReversalModel:
             ticket, direction, entry_price, ts, 
             self._last_regime_state.regime, self._last_mtf_state.alignment_score
         )
-        self.exit.register_trade(ticket, direction, entry_price, sl, tp)
+        is_sweep = "Sweep" in reason
+        self.exit.register_trade(ticket, direction, entry_price, sl, tp, is_sweep=is_sweep)
+        self.phase_tracker.register_trade(
+            direction=direction,
+            entry_price=entry_price,
+            initial_confidence=80.0
+        )
         
         # Reset entry machine to prevent rapid re-entries
         self.entry.reset()
@@ -146,6 +186,7 @@ class ReversalModel:
         """Tell the engine a trade was closed."""
         self.health.clear()
         self.exit.clear()
+        self.phase_tracker.clear()
 
 
 __all__ = ["ReversalModel", "EngineSnapshot"]

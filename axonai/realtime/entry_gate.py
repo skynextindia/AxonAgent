@@ -17,7 +17,7 @@ from typing import Optional, Iterable
 
 EXHAUSTION_PEAKS = ("velocity_exhaustion", "microstructure_exhaustion")
 SR_PROXIMITY_PIPS = 5.0
-DEFAULT_MIN_QUALITY = 0.65
+DEFAULT_MIN_QUALITY = 0.55
 
 
 @dataclass

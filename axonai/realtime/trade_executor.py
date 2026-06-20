@@ -10,6 +10,8 @@ from typing import Dict, Any, Optional
 
 from axonai.realtime.risk_guard import RiskGuard
 from axonai.realtime.alerts import send_alert
+from axonai.realtime.trade_phase import TradePhaseTracker
+from axonai.realtime.exit_stats import ExitStats
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,10 @@ class MT5TradeExecutor:
         # Paper-trade mode: simulated fills, never sent to the broker.
         self.paper_trade = config.get("paper_trade", False)
         self._paper_ticket_seq = 0
+        
+        # Adaptive exit components
+        self.phase_tracker = TradePhaseTracker(pip_mult=0.0001)
+        self.exit_stats = ExitStats(csv_path="reports/exit_stats.csv")
 
     def execute_signal(self, symbol: str, signal: str, live_state: Optional[Any] = None) -> Optional[dict]:
         """Convert a 5-tier signal into an MT5 order action.
@@ -112,8 +118,11 @@ class MT5TradeExecutor:
         direction = "BUY" if order_type == mt5.ORDER_TYPE_BUY else "SELL"
         pip = 0.01 if "JPY" in symbol.upper() else 0.0001
         
-        sl_distance = max(atr * 1.0, 8 * pip)
-        tp_distance = max(atr * 2.0, 16 * pip)
+        sl_atr_mult = self.config.get("realtime_sl_atr_multiple", self.config.get("sl_atr_multiple", 1.2))
+        tp_atr_mult = self.config.get("realtime_tp_atr_multiple", self.config.get("tp_atr_multiple", 1.5))
+        # SL is kept as sl_atr_mult*ATR to act as a hard backstop, while adaptive exit closes early
+        sl_distance = max(atr * sl_atr_mult, 8 * pip)
+        tp_distance = max(atr * tp_atr_mult, 16 * pip)
 
         # Spread guard: refuse entry when the live spread would eat too much of
         # the stop. Compared in price units (not pips) so it is symbol-agnostic.

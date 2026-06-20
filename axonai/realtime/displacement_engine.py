@@ -109,10 +109,11 @@ class DisplacementEngine:
         ts = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
         self._ticks.append((price, ts, volume))
 
-        if len(self._ticks) < 5:
-            return DisplacementState()
+        cutoff = ts - 300.0  # limit to 5 minutes to avoid spanning M15 candle gaps in backtests
+        ticks = [t for t in self._ticks if t[1] >= cutoff]
 
-        ticks = list(self._ticks)
+        if len(ticks) < 5:
+            return DisplacementState()
 
         # ── Net displacement ────────────────────────────────────
         net_move = (ticks[-1][0] - ticks[0][0]) / self._pip

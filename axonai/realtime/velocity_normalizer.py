@@ -76,6 +76,7 @@ class VelocityNormalizer:
         # Rolling velocity history for percentile / z-score
         self._velocity_history: deque[float] = deque(maxlen=window)
         self._abs_velocity_history: deque[float] = deque(maxlen=window)
+        self._sorted_abs_velocities: list[float] = []
 
         # Peak tracking for decay ratio
         self._peak_velocity: float = 0.0
@@ -88,6 +89,8 @@ class VelocityNormalizer:
 
         # Session baseline (resets on session boundaries or after window fills)
         self._session_velocities: deque[float] = deque(maxlen=5000)
+        self._session_sum: float = 0.0
+        self._session_sum_sq: float = 0.0
 
     def update(self, price: float, timestamp: datetime, volume: float = 1.0) -> NormalizedVelocity:
         """Process one tick and return normalized velocity state.
@@ -101,7 +104,6 @@ class VelocityNormalizer:
             NormalizedVelocity snapshot for this tick.
         """
         ts = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
-
         self._ticks.append((price, ts, volume))
 
         if len(self._ticks) < 3:
@@ -145,11 +147,29 @@ class VelocityNormalizer:
         if self._peak_decay_ticks > 50:
             self._peak_velocity *= 0.995
 
-        # ── Percentile (rank among last N velocities) ───────────
-        self._velocity_history.append(abs_vel)
-        self._abs_velocity_history.append(abs_vel)
+        # Update session running stats for z-score
+        if len(self._session_velocities) >= 5000:
+            evited = self._session_velocities.popleft()
+            self._session_sum -= evited
+            self._session_sum_sq -= evited * evited
+        
         self._session_velocities.append(abs_vel)
+        self._session_sum += abs_vel
+        self._session_sum_sq += abs_vel * abs_vel
 
+        # Update sorted list for percentile
+        import bisect
+        if len(self._abs_velocity_history) >= self._window:
+            evited = self._abs_velocity_history.popleft()
+            idx = bisect.bisect_left(self._sorted_abs_velocities, evited)
+            if idx < len(self._sorted_abs_velocities) and self._sorted_abs_velocities[idx] == evited:
+                self._sorted_abs_velocities.pop(idx)
+        
+        self._abs_velocity_history.append(abs_vel)
+        bisect.insort(self._sorted_abs_velocities, abs_vel)
+        self._velocity_history.append(abs_vel)
+
+        # ── Percentile (rank among last N velocities) ───────────
         pct = self._percentile(abs_vel)
 
         # ── Z-score against session baseline ────────────────────
@@ -185,6 +205,13 @@ class VelocityNormalizer:
     def reset_session(self) -> None:
         """Reset session baseline (call on session boundary)."""
         self._session_velocities.clear()
+        self._session_sum = 0.0
+        self._session_sum_sq = 0.0
+        self._peak_velocity = 0.0
+        self._peak_decay_ticks = 0
+
+    def reset_peak(self) -> None:
+        """Reset the peak velocity tracking (call when entering a trade)."""
         self._peak_velocity = 0.0
         self._peak_decay_ticks = 0
 
@@ -242,19 +269,20 @@ class VelocityNormalizer:
 
     def _percentile(self, value: float) -> float:
         """Rank `value` among the rolling velocity window (0-100)."""
-        if len(self._abs_velocity_history) < 10:
+        if len(self._sorted_abs_velocities) < 10:
             return 50.0
-        below = sum(1 for v in self._abs_velocity_history if v <= value)
-        return 100.0 * below / len(self._abs_velocity_history)
+        import bisect
+        below = bisect.bisect_left(self._sorted_abs_velocities, value)
+        return 100.0 * below / len(self._sorted_abs_velocities)
 
     def _z_score(self, value: float) -> float:
         """Standard deviations from the session mean."""
-        if len(self._session_velocities) < 30:
+        n = len(self._session_velocities)
+        if n < 30:
             return 0.0
-        vals = list(self._session_velocities)
-        mean = sum(vals) / len(vals)
-        variance = sum((v - mean) ** 2 for v in vals) / len(vals)
-        std = math.sqrt(variance) if variance > 0 else 1e-10
+        mean = self._session_sum / n
+        variance = (self._session_sum_sq / n) - (mean * mean)
+        std = math.sqrt(max(0.0, variance)) if variance > 0 else 1e-10
         return (value - mean) / std
 
     def _avg_velocity(self, now: float, window_sec: float) -> float:

@@ -33,6 +33,7 @@ class BacktestEngine:
         self.ticker = ticker
         self.days = days
         self.config = config or {}
+        self.config["backtest_mode"] = True
         
         # Clean ticker suffix for pips
         ticker_clean = ticker.upper().replace("=X", "").replace("/", "")
@@ -112,7 +113,8 @@ class BacktestEngine:
             # Path: Open -> High -> Low -> Close (or opposite if bearish)
             o, h, l, c = candle.open, candle.high, candle.low, candle.close
             steps = 15
-            dt = timedelta(minutes=15) / steps
+            # Space ticks by 0.05 seconds, ending at candle close time, to simulate real tick speed for VelocityNormalizer
+            candle_close_time = t + timedelta(minutes=15)
             
             is_bullish = c >= o
             sub_prices = []
@@ -134,7 +136,7 @@ class BacktestEngine:
                 sub_prices.extend(np.linspace(l, c, 5)[1:])
                 
             for idx, price in enumerate(sub_prices):
-                tick_time = t + dt * idx
+                tick_time = candle_close_time - timedelta(seconds=(steps - 1 - idx) * 0.05)
                 ticks.append((price - 0.00005, price + 0.00005, tick_time))
                 
         return candles, ticks
@@ -230,7 +232,8 @@ class BacktestEngine:
             candles.append(candle)
             
             steps = 15
-            dt = timedelta(minutes=15) / steps
+            # Space ticks by 0.05 seconds, ending at candle close time, to simulate real tick speed for VelocityNormalizer
+            candle_close_time = bar_time + timedelta(minutes=15)
             if is_sweep:
                 sub_prices = []
                 extreme = low_p if close_p > open_p else high_p
@@ -250,7 +253,7 @@ class BacktestEngine:
                                   list(np.linspace(low_p, close_p, 5)[1:]))
             
             for idx, pr in enumerate(sub_prices):
-                tick_time = bar_time + dt * idx
+                tick_time = candle_close_time - timedelta(seconds=(steps - 1 - idx) * 0.05)
                 ticks.append((round(pr - 0.00005, 5), round(pr + 0.00005, 5), tick_time))
                 
         return candles, ticks
@@ -269,7 +272,9 @@ class BacktestEngine:
         
         # Populate M15 history directly
         for c in warmup_candles:
-            self.live_evidence._m15_candles.append(c)
+            self.live_state.on_candle_close(c)
+            self.live_evidence.on_candle_close(c)
+            self.reversal_model.on_candle_close(c)
             
         # Aggregate to H1 deques
         h1_chunk = []
@@ -286,7 +291,9 @@ class BacktestEngine:
                     open_time=h1_chunk[0].open_time,
                     is_closed=True
                 )
-                self.live_evidence._h1_candles.append(h1_candle)
+                self.live_state.on_candle_close(h1_candle)
+                self.live_evidence.on_candle_close(h1_candle)
+                self.reversal_model.on_candle_close(h1_candle)
                 h1_chunk = []
                 
         # Aggregate to H4 deques
@@ -304,11 +311,11 @@ class BacktestEngine:
                     open_time=h4_chunk[0].open_time,
                     is_closed=True
                 )
-                self.live_evidence._h4_candles.append(h4_candle)
+                self.live_state.on_candle_close(h4_candle)
+                self.live_evidence.on_candle_close(h4_candle)
+                self.reversal_model.on_candle_close(h4_candle)
                 h4_chunk = []
                 
-        # Update indicators to set initial EMA trend, RSI, MACD
-        self.live_evidence._update_indicators()
         return warmup_limit
 
     def run(self) -> Dict[str, Any]:
@@ -373,6 +380,7 @@ class BacktestEngine:
                 PriceLevel(resistance_level, "RESISTANCE_ZONE", "D1", 0, now_utc, "resistance", 0.7, True)
             ]
             logger.info("BacktestEngine: Seeding initial price_levels (S=%.5f, R=%.5f)", support_level, resistance_level)
+        self.reversal_model.sync_levels(self.live_evidence.price_levels)
         
         sh_price = key_lvls[-1] if key_lvls else 1.1550
         sl_price = key_lvls[0] if key_lvls else 1.1480
@@ -400,6 +408,10 @@ class BacktestEngine:
         
         # Warm up candle history & aggregate deques
         warmup_limit = self._prewarm_candle_history(candles)
+        
+        # Calculate initial institutional levels from the prewarmed historical candles
+        self.live_evidence._calculate_initial_institutional_levels()
+        self.reversal_model.sync_levels(self.live_evidence.price_levels)
         
         # Group ticks by their corresponding candle bar timestamp
         tick_index = 0
@@ -434,6 +446,11 @@ class BacktestEngine:
                 if tick_time > bar_end:
                     break
                     
+                # Update incrementally maintained state
+                self.live_state.on_tick(bid, ask, tick_time)
+                self.live_evidence.on_tick(bid, ask, tick_time)
+                self.reversal_model.sync_levels(self.live_evidence.price_levels)
+
                 # 1. Process Tick through Pure-Math Reversal Engine
                 snapshot = self.reversal_model.on_tick((bid+ask)/2.0, tick_time, 1)
                 
@@ -458,13 +475,16 @@ class BacktestEngine:
                 tick_index += 1
                 
             # 3. Trigger Candle-level updates and Candle Pattern detections on Bar close
+            self.live_state.on_candle_close(candle)
+            self.live_evidence.on_candle_close(candle)
+            self.reversal_model.sync_levels(self.live_evidence.price_levels)
             self.reversal_model.on_candle_close(candle)
             
             # Aggregate and trigger H1 closes
             if candle.open_time.minute == 45:
                 h1_hour = candle.open_time.hour
                 h1_day = candle.open_time.date()
-                h1_candles_chunk = [c for c in candles[:bar_idx+1] 
+                h1_candles_chunk = [c for c in candles[max(0, bar_idx - 6):bar_idx+1] 
                                     if c.open_time.date() == h1_day and c.open_time.hour == h1_hour]
                 if h1_candles_chunk:
                     h1_candle = LiveCandle(
@@ -477,13 +497,16 @@ class BacktestEngine:
                         open_time=h1_candles_chunk[0].open_time,
                         is_closed=True
                     )
+                    self.live_state.on_candle_close(h1_candle)
+                    self.live_evidence.on_candle_close(h1_candle)
+                    self.reversal_model.sync_levels(self.live_evidence.price_levels)
                     self.reversal_model.on_candle_close(h1_candle)
                     
             # Aggregate and trigger H4 closes
             if candle.open_time.minute == 45 and (candle.open_time.hour + 1) % 4 == 0:
                 h4_group = candle.open_time.hour // 4
                 h4_day = candle.open_time.date()
-                h4_candles_chunk = [c for c in candles[:bar_idx+1] 
+                h4_candles_chunk = [c for c in candles[max(0, bar_idx - 20):bar_idx+1] 
                                     if c.open_time.date() == h4_day and (c.open_time.hour // 4) == h4_group]
                 if h4_candles_chunk:
                     h4_candle = LiveCandle(
@@ -496,6 +519,9 @@ class BacktestEngine:
                         open_time=h4_candles_chunk[0].open_time,
                         is_closed=True
                     )
+                    self.live_state.on_candle_close(h4_candle)
+                    self.live_evidence.on_candle_close(h4_candle)
+                    self.reversal_model.sync_levels(self.live_evidence.price_levels)
                     self.reversal_model.on_candle_close(h4_candle)
             
             # Check pending level breaches for candle-close confirmation
@@ -508,6 +534,10 @@ class BacktestEngine:
             for trade in list(self.active_trades):
                 self._close_position(trade, final_bid, final_ask, final_time, "Market Close")
                 
+        # Write exit stats to CSV
+        if not self.config.get("backtest_mode", False):
+            self.reversal_model.exit_stats.to_csv("reports/exit_stats.csv")
+
         # Calculate Backtesting Performance Metrics
         report = self._compile_performance_metrics()
         return report
@@ -516,24 +546,30 @@ class BacktestEngine:
         """Evaluate engine decisions with backtester specific constraints."""
         # ── Gate 1: Max concurrent trades ──
         if len(self.active_trades) >= 1:
+            logger.info("BacktestEngine: Entry blocked by Gate 1 (Max concurrent trades)")
             return
 
         # ── Gate 2: London/NY sessions only (intraday) ──
         state = self.live_state._state
         if state and state.session not in ("london", "overlap", "newyork"):
+            logger.info("BacktestEngine: Entry blocked by Gate 2 (Session: %s)", state.session if state else "None")
             return
 
-        # ── Gate 3: 15-minute cooldown between entries ──
-        evt_time = datetime.fromtimestamp(snapshot.timestamp) if isinstance(snapshot.timestamp, (int, float)) else snapshot.timestamp
+        # ── Gate 3: cooldown between entries ──
+        evt_time = datetime.fromtimestamp(snapshot.timestamp, tz=timezone.utc).replace(tzinfo=None) if isinstance(snapshot.timestamp, (int, float)) else snapshot.timestamp
         if self.simulated_trades:
             last_entry_time = self.simulated_trades[-1]["entry_time"]
-            if (evt_time - last_entry_time).total_seconds() < 900:  # 15 min
+            cooldown_seconds = self.config.get("realtime_cooldown_seconds", self.config.get("cooldown_seconds", 900))
+            if (evt_time - last_entry_time).total_seconds() < cooldown_seconds:
+                logger.info("BacktestEngine: Entry blocked by Gate 3 (Cooldown)")
                 return
 
-        # ── Gate 3b: Loss-streak cooldown — skip 45 minutes after a losing trade ──
+        # ── Gate 3b: Loss-streak cooldown ──
         if self._last_loss_time is not None:
             minutes_since_loss = (evt_time - self._last_loss_time).total_seconds() / 60
-            if minutes_since_loss < 45:  # 45-min cooldown after any loss
+            loss_cooldown = self.config.get("realtime_loss_cooldown_minutes", self.config.get("loss_cooldown_minutes", 30))
+            if minutes_since_loss < loss_cooldown:
+                logger.info("BacktestEngine: Entry blocked by Gate 3b (Loss cooldown: %.1f mins left)", loss_cooldown - minutes_since_loss)
                 return
 
         direction = snapshot.entry_decision.direction
@@ -544,8 +580,9 @@ class BacktestEngine:
             return
 
         # ── Gate 7: Minimum signal quality threshold (after all adjustments) ──
-        min_quality = 0.65
+        min_quality = self.config.get("realtime_min_signal_quality", self.config.get("min_signal_quality", 0.55))
         if signal_quality < min_quality:
+            logger.info("BacktestEngine: Entry blocked by Gate 7 (Signal quality: %.2f < %.2f)", signal_quality, min_quality)
             return
 
         # ── Gate 8: Check for duplicate active trade in same direction ──
@@ -558,9 +595,10 @@ class BacktestEngine:
         state = self.live_state._state
         atr = state.atr_14_h1 if state else 0.0012
         
-        # SL = 1.0 × ATR, TP = 2.0 × ATR (optimized risk-reward ratio for WR/PF)
-        sl_distance = max(atr * 1.0, 8 * self.pip_mult)   # floor of 8 pips
-        tp_distance = max(atr * 2.0, 16 * self.pip_mult)   # floor of 16 pips
+        sl_atr_mult = self.config.get("realtime_sl_atr_multiple", self.config.get("sl_atr_multiple", 1.2))
+        tp_atr_mult = self.config.get("realtime_tp_atr_multiple", self.config.get("tp_atr_multiple", 1.5))
+        sl_distance = max(atr * sl_atr_mult, 8 * self.pip_mult)   # floor of 8 pips
+        tp_distance = max(atr * tp_atr_mult, 16 * self.pip_mult)   # floor of 16 pips
 
         if direction == "BUY":
             sl = entry_price - sl_distance
@@ -570,7 +608,7 @@ class BacktestEngine:
             tp = entry_price - tp_distance
                 
         self._open_position(direction, entry_price, evt_time, trigger_reason, signal_quality, sl=sl, tp=tp)
-        self.reversal_model.register_trade(len(self.simulated_trades), direction, entry_price, sl, tp)
+        self.reversal_model.register_trade(len(self.simulated_trades), direction, entry_price, sl, tp, reason=trigger_reason)
 
     def _execute_adaptive_exit(self, snapshot: Any):
         """Execute adaptive exit logic."""
@@ -581,7 +619,7 @@ class BacktestEngine:
             for trade in self.active_trades:
                 trade["sl"] = decision.suggested_sl
         elif decision.action == "CLOSE_NOW":
-            evt_time = datetime.fromtimestamp(snapshot.timestamp) if isinstance(snapshot.timestamp, (int, float)) else snapshot.timestamp
+            evt_time = datetime.fromtimestamp(snapshot.timestamp, tz=timezone.utc).replace(tzinfo=None) if isinstance(snapshot.timestamp, (int, float)) else snapshot.timestamp
             for trade in list(self.active_trades):
                 self._close_position(trade, snapshot.price, snapshot.price, evt_time, f"Adaptive Exit: {decision.reason}")
                 self.reversal_model.clear_trade()
@@ -595,6 +633,8 @@ class BacktestEngine:
             "entry_price": entry_price,
             "sl": round(sl, 5),
             "tp": round(tp, 5),
+            "hard_sl": round(sl, 5),
+            "hard_tp": round(tp, 5),
             "trigger": reason,
             "signal_quality": round(quality, 2),
             "status": "OPEN",
@@ -616,42 +656,29 @@ class BacktestEngine:
             dir = trade["direction"]
             sl = trade["sl"]
             tp = trade["tp"]
+            hard_sl = trade.get("hard_sl", sl)
+            hard_tp = trade.get("hard_tp", tp)
             
             if dir == "BUY":
-                # Trailing stop: when price reaches 1.0:1 risk-reward, lock breakeven + 1 pip
-                entry = trade["entry_price"]
-                sl_dist = entry - sl
-                current_profit = bid - entry
-                if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
-                    breakeven_sl = entry + 1 * self.pip_mult
-                    if trade["sl"] < breakeven_sl:
-                        trade["sl"] = breakeven_sl
-                        sl = breakeven_sl
-                
                 if bid <= sl:
                     self._close_position(trade, bid, ask, timestamp, "Stop Loss (SL) Hit")
-                elif bid >= tp:
-                    self._close_position(trade, bid, ask, timestamp, "Take Profit (TP) Hit")
+                elif bid <= hard_sl:
+                    self._close_position(trade, bid, ask, timestamp, "Hard SL (backstop) Hit")
+                elif bid >= hard_tp:
+                    self._close_position(trade, bid, ask, timestamp, "Hard TP (backstop) Hit")
                     
             elif dir == "SELL":
-                # Trailing stop for SELL
-                entry = trade["entry_price"]
-                sl_dist = sl - entry
-                current_profit = entry - ask
-                if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
-                    breakeven_sl = entry - 1 * self.pip_mult
-                    if trade["sl"] > breakeven_sl:
-                        trade["sl"] = breakeven_sl
-                        sl = breakeven_sl
-                
                 if ask >= sl:
                     self._close_position(trade, bid, ask, timestamp, "Stop Loss (SL) Hit")
-                elif ask <= tp:
-                    self._close_position(trade, bid, ask, timestamp, "Take Profit (TP) Hit")
+                elif ask >= hard_sl:
+                    self._close_position(trade, bid, ask, timestamp, "Hard SL (backstop) Hit")
+                elif bid <= hard_tp:
+                    self._close_position(trade, bid, ask, timestamp, "Hard TP (backstop) Hit")
 
     def _close_position(self, trade: Dict[str, Any], bid: float, ask: float, timestamp: datetime, reason: str):
         """Close mock position and log pips."""
         self.active_trades.remove(trade)
+        self.reversal_model.clear_trade()
         
         # BUY trade closes at Bid, SELL closes at Ask. Fill exact SL/TP targets to avoid tick gaps
         if "Stop Loss" in reason:
