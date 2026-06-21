@@ -16,6 +16,7 @@ from typing import Dict, List, Set, Any, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 import uvicorn
+from axonai.default_config import DEFAULT_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ class DashboardServer:
         self._lock = threading.Lock()
 
         self.daemon = None
+        self.fallback_config = DEFAULT_CONFIG.copy()
 
         # In-memory history for hydrating newly connected clients instantly
         self.history: Dict[str, Any] = {
@@ -87,17 +89,7 @@ class DashboardServer:
             with self._lock:
                 if self.daemon:
                     return {"status": "success", "config": self.daemon.config}
-                return {"status": "success", "config": {
-                    "tick_poll_interval_ms": 100,
-                    "realtime_suppress_asian": True,
-                    "realtime_level_reset_atr_multiple": 2.0,
-                    "indicator_rsi_length": 14,
-                    "indicator_ema_fast": 12,
-                    "indicator_ema_slow": 26,
-                    "realtime_use_pinpoint_price": False,
-                    "realtime_correct_rule_a_direction": False,
-                    "realtime_cooldown_bypass_better_peak": False,
-                }}
+                return {"status": "success", "config": self.fallback_config}
 
         @self.app.post("/config")
         def update_config(new_config: dict):
@@ -115,17 +107,9 @@ class DashboardServer:
                     if hasattr(self.daemon, "live_evidence") and self.daemon.live_evidence:
                         self.daemon.live_evidence.config.update(new_config)
                     return {"status": "success", "config": self.daemon.config}
-                return {"status": "success", "config": {
-                    "tick_poll_interval_ms": new_config.get("tick_poll_interval_ms", 100),
-                    "realtime_suppress_asian": new_config.get("realtime_suppress_asian", True),
-                    "realtime_level_reset_atr_multiple": new_config.get("realtime_level_reset_atr_multiple", 2.0),
-                    "indicator_rsi_length": new_config.get("indicator_rsi_length", 14),
-                    "indicator_ema_fast": new_config.get("indicator_ema_fast", 12),
-                    "indicator_ema_slow": new_config.get("indicator_ema_slow", 26),
-                    "realtime_use_pinpoint_price": new_config.get("realtime_use_pinpoint_price", False),
-                    "realtime_correct_rule_a_direction": new_config.get("realtime_correct_rule_a_direction", False),
-                    "realtime_cooldown_bypass_better_peak": new_config.get("realtime_cooldown_bypass_better_peak", False),
-                }}
+                
+                self.fallback_config.update(new_config)
+                return {"status": "success", "config": self.fallback_config}
 
         @self.app.post("/trigger")
         def trigger_event(event_type: str = "level_breach", peak_type: str = "microstructure_exhaustion"):

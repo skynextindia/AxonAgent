@@ -65,10 +65,13 @@ class VelocityNormalizer:
         pip_mult: float = 0.0001,
         window: int = 1000,
         velocity_window_sec: float = 10.0,
+        config: Optional[dict] = None,
     ):
         self._pip = pip_mult
         self._window = window
         self._vel_window_sec = velocity_window_sec
+        self._config = config or {}
+        self._backtest_mode = self._config.get("backtest_mode", False)
 
         # Rolling tick history: (price, timestamp_sec, volume)
         self._ticks: deque[tuple[float, float, float]] = deque(maxlen=window)
@@ -104,6 +107,13 @@ class VelocityNormalizer:
             NormalizedVelocity snapshot for this tick.
         """
         ts = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
+        
+        # Reset peak on large tick gap (context transition)
+        dt = ts - self._prev_timestamp if self._prev_timestamp > 0 else 1.0
+        if dt > 5.0:
+            self._peak_velocity = 0.0
+            self._peak_decay_ticks = 0
+
         self._ticks.append((price, ts, volume))
 
         if len(self._ticks) < 3:
@@ -181,7 +191,8 @@ class VelocityNormalizer:
 
         # ── Composite flags ─────────────────────────────────────
         is_unusual = pct > 90.0 or z > 2.0
-        is_decaying = decay_ratio < 0.5 and self._peak_decay_ticks > 10
+        decay_ticks_threshold = 3 if self._backtest_mode else 10
+        is_decaying = decay_ratio < 0.5 and self._peak_decay_ticks > decay_ticks_threshold
         is_accelerating = self._accel_direction_count >= 3
 
         return NormalizedVelocity(

@@ -10,6 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
+import logging
+logger = logging.getLogger(__name__)
 
 from axonai.realtime.velocity_normalizer import NormalizedVelocity
 from axonai.realtime.displacement_engine import DisplacementState, DISPLACEMENT_TRAP, DISPLACEMENT_ABSORPTION, DISPLACEMENT_IMPULSE
@@ -34,6 +36,7 @@ class LevelState:
     price: float
     level_type: str
     strength_score: float = 0.5
+    direction: str = ""
     
     # ── Interaction tracking ────────────────────────────────────
     touches: int = 0
@@ -90,12 +93,14 @@ class LiquidityEngine:
                     price=pl.price,
                     level_type=pl.level_type,
                     strength_score=pl.strength,
-                    touches=pl.touches
+                    touches=pl.touches,
+                    direction=pl.direction
                 )
             else:
                 # Update properties but keep interaction history
                 self._levels[pl.price].strength_score = pl.strength
                 self._levels[pl.price].level_type = pl.level_type
+                self._levels[pl.price].direction = pl.direction
                 
         # Prune dead levels
         for p in list(self._levels.keys()):
@@ -113,6 +118,11 @@ class LiquidityEngine:
         ts = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
         dt = ts - self._last_time if self._last_time > 0 else 0.0
         
+        if dt > 5.0:
+            for ls in self._levels.values():
+                ls.is_currently_breached = False
+                ls.time_since_breach_sec = 0.0
+                
         active_sweeps = []
         active_breaks = []
         
@@ -170,9 +180,9 @@ class LiquidityEngine:
                     ls.is_currently_breached = False
                     ls.time_since_breach_sec = 0.0
                     
-            if ls.is_swept:
+            if ls.is_swept and ls.is_currently_breached:
                 active_sweeps.append(ls)
-            if ls.is_broken:
+            if ls.is_broken and ls.is_currently_breached:
                 active_breaks.append(ls)
 
         # Global context
@@ -204,18 +214,7 @@ class LiquidityEngine:
         disp: DisplacementState,
         ts: float
     ) -> None:
-        """Determine if an active breach is a sweep or a structural break.
-        
-        SWEEP criteria:
-        - Price breaches level
-        - High velocity but TRAP/ABSORPTION displacement
-        - Price snaps back relatively quickly
-        
-        BREAK criteria:
-        - Price breaches level
-        - IMPULSE displacement holds
-        - Price spends time beyond the level without trapping
-        """
+        """Determine if an active breach is a sweep or a structural break."""
         # If it's already decided recently, don't flip flop instantly
         if ls.is_swept or ls.is_broken:
             # Decay the states if price moves far away
@@ -224,42 +223,81 @@ class LiquidityEngine:
                 ls.is_broken = False
             return
 
-        # SWEEP SCORING
-        sweep_score = 0.0
-        if disp.classification in (DISPLACEMENT_TRAP, DISPLACEMENT_ABSORPTION):
-            sweep_score += 0.4
-        if vel.is_decaying:
-            sweep_score += 0.3
-        if ls.max_breach_depth_pips < 10.0 and ls.time_since_breach_sec > 5.0:
-            sweep_score += 0.2
-            
-        # BREAK SCORING
-        break_score = 0.0
-        if disp.classification == DISPLACEMENT_IMPULSE:
-            break_score += 0.5
-        if ls.max_breach_depth_pips > 8.0:
-            break_score += 0.3
-        if ls.time_since_breach_sec > 60.0:
-            break_score += 0.2
-
-        ls.sweep_probability = min(sweep_score, 1.0)
-        ls.acceptance_probability = min(break_score, 1.0)
+        is_major_level = ls.level_type in (
+            "PDH", "PDL", "PWH", "PWL", "ASH", "ASL", "H4_SWING",
+            "SUPPORT_ZONE", "RESISTANCE_ZONE"
+        )
         
-        # Thresholds
-        if ls.sweep_probability >= 0.7:
+        has_returned = False
+        direction = getattr(ls, "direction", "")
+        if not direction:
+            is_supp = "support" in ls.level_type.lower() or any(x in ls.level_type for x in ("SUPPORT", "PDL", "PWL", "ASL", "LDL", "TODAY_L"))
+            direction = "support" if is_supp else "resistance"
+
+        if is_major_level and ls.max_breach_depth_pips >= 0.5:
+            if direction == "support" and price > ls.price + 0.2 * self._pip:
+                has_returned = True
+            elif direction == "resistance" and price < ls.price - 0.2 * self._pip:
+                has_returned = True
+
+        is_broken = False
+        if ls.max_breach_depth_pips > 8.0:
+            is_broken = True
+
+        if has_returned:
+            ls.sweep_probability = 1.0
             ls.is_swept = True
+            logger.info("!!! MAJOR GEOMETRIC SWEEP DETECTED !!! Level: %s (%s), dir=%s, max_depth=%.2f",
+                        ls.price, ls.level_type, direction, ls.max_breach_depth_pips)
             ls.recent_events.append(LiquidityEvent(
                 timestamp=ts, level_price=ls.price, level_type=ls.level_type,
                 interaction_type="SWEEP", velocity_z=vel.z_score,
                 displacement_ratio=disp.displacement_ratio, depth_pips=ls.max_breach_depth_pips
             ))
-            
-        elif ls.acceptance_probability >= 0.8:
+        elif is_broken:
+            ls.acceptance_probability = 1.0
             ls.is_broken = True
             ls.recent_events.append(LiquidityEvent(
                 timestamp=ts, level_price=ls.price, level_type=ls.level_type,
                 interaction_type="ACCEPTANCE", velocity_z=vel.z_score,
                 displacement_ratio=disp.displacement_ratio, depth_pips=ls.max_breach_depth_pips
             ))
+        else:
+            # Fallback score-based check for minor levels (like ROUND numbers)
+            sweep_score = 0.0
+            if disp.classification in (DISPLACEMENT_TRAP, DISPLACEMENT_ABSORPTION):
+                sweep_score += 0.4
+            if vel.is_decaying:
+                sweep_score += 0.3
+            if ls.max_breach_depth_pips < 10.0 and ls.time_since_breach_sec > 5.0:
+                sweep_score += 0.2
+
+            # BREAK SCORING
+            break_score = 0.0
+            if disp.classification == DISPLACEMENT_IMPULSE:
+                break_score += 0.5
+            if ls.max_breach_depth_pips > 8.0:
+                break_score += 0.3
+            if ls.time_since_breach_sec > 60.0:
+                break_score += 0.2
+
+            ls.sweep_probability = min(sweep_score, 1.0)
+            ls.acceptance_probability = min(break_score, 1.0)
+            
+            # Thresholds
+            if ls.sweep_probability >= 0.7:
+                ls.is_swept = True
+                ls.recent_events.append(LiquidityEvent(
+                    timestamp=ts, level_price=ls.price, level_type=ls.level_type,
+                    interaction_type="SWEEP", velocity_z=vel.z_score,
+                    displacement_ratio=disp.displacement_ratio, depth_pips=ls.max_breach_depth_pips
+                ))
+            elif ls.acceptance_probability >= 0.8:
+                ls.is_broken = True
+                ls.recent_events.append(LiquidityEvent(
+                    timestamp=ts, level_price=ls.price, level_type=ls.level_type,
+                    interaction_type="ACCEPTANCE", velocity_z=vel.z_score,
+                    displacement_ratio=disp.displacement_ratio, depth_pips=ls.max_breach_depth_pips
+                ))
 
 __all__ = ["LiquidityEngine", "LiquidityState", "LevelState", "LiquidityEvent"]

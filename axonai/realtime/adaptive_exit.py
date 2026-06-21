@@ -260,7 +260,7 @@ class AdaptiveExitManager:
                     is_trend_aligned = True
 
             factor = self.config.get("realtime_velocity_decay_profit_factor", 0.25)
-            if getattr(self, "_is_sweep", False):
+            if getattr(self, "_is_sweep", False) and is_trend_aligned:
                 factor *= 4.0  # Require 1.0 * ATR (12-15 pips) profit floor for sweeps to run further
                 
             min_profit_limit = factor * atr_pips
@@ -275,7 +275,13 @@ class AdaptiveExitManager:
                 decision = self._close(f"Velocity Decay Exit (decay={velocity.decay_ratio:.2f}, threshold={decay_threshold:.2f}, aligned={is_trend_aligned})")
 
 
-        # ── Priority 4 — Velocity Trail ──
+        # ── Priority 4 — Health Failure (stagnation / drawdown) ──
+        if decision is None and health.is_failing and "Adverse Impulse" not in health.reason:
+            # Stagnation / extended drawdown — only cut if not sitting on a profit
+            if pips_profit < 0.4 * atr_pips:
+                decision = self._close(f"Health: {health.reason}")
+
+        # ── Priority 5 — Velocity Trail ──
         if decision is None:
             trail_pips = self._compute_trail_pips(velocity, displacement, liquidity, phase, phase_confidence, atr_pips)
             trail_dist = trail_pips * self._pip
@@ -300,7 +306,7 @@ class AdaptiveExitManager:
                         suggested_sl=new_sl
                     )
 
-        # ── Priority 5 — Breakeven ──
+        # ── Priority 6 — Breakeven ──
         if decision is None and just_secured_be:
             decision = ExitDecision(
                 should_exit=False,
@@ -308,12 +314,6 @@ class AdaptiveExitManager:
                 reason="Secured Breakeven",
                 suggested_sl=self._current_sl
             )
-
-        # ── Priority 6 — Health Failure (stagnation / drawdown) ──
-        if decision is None and health.is_failing and "Adverse Impulse" not in health.reason:
-            # Stagnation / extended drawdown — only cut if not sitting on a profit
-            if pips_profit < 0.4 * atr_pips:
-                decision = self._close(f"Health: {health.reason}")
 
         if decision is None:
             decision = ExitDecision()

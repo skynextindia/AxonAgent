@@ -37,7 +37,8 @@ def _gate(event, levels=None, trend="sideways", regime="", active=None):
         levels = [_Lvl(1.10000)]  # right at price → 0 pips away
     return evaluate_peak_entry(event, price_levels=levels, pip_mult=PIP,
                                trend_h4=trend, dominant_regime=regime,
-                               active_directions=active or [])
+                               active_directions=active or [],
+                               config={"realtime_min_signal_quality": 0.65})
 
 
 def test_high_quality_confirmed_peak_passes():

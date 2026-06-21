@@ -55,8 +55,8 @@ class ReversalModel:
         self._config = config or {}
         
         # Instantiate Tier 1
-        self.velocity = VelocityNormalizer(pip_mult=self._pip)
-        self.displacement = DisplacementEngine(pip_mult=self._pip)
+        self.velocity = VelocityNormalizer(pip_mult=self._pip, config=self._config)
+        self.displacement = DisplacementEngine(pip_mult=self._pip, config=self._config)
         
         # Instantiate Tier 2
         self.regime = RegimeEngine(pip_mult=self._pip)
@@ -65,7 +65,7 @@ class ReversalModel:
         
         # Instantiate Tier 3
         self.entry = EntryStateMachine(pip_mult=self._pip)
-        self.health = TradeHealthMonitor(pip_mult=self._pip)
+        self.health = TradeHealthMonitor(pip_mult=self._pip, config=self._config)
         self.exit = AdaptiveExitManager(pip_mult=self._pip, config=self._config)
         self.phase_tracker = TradePhaseTracker(pip_mult=self._pip)
         stats_csv = None if self._config.get("backtest_mode", False) else "reports/exit_stats.csv"
@@ -75,6 +75,8 @@ class ReversalModel:
         self._last_regime_state = RegimeState()
         self._last_mtf_state = MTFState()
         self._last_liquidity_state = LiquidityState()
+        self._last_vel_state = NormalizedVelocity()
+        self._last_disp_state = DisplacementState()
         
         # H1 ATR tracking
         self._h1_tr_window = deque(maxlen=14)
@@ -102,9 +104,7 @@ class ReversalModel:
         
         # 3. Update Regime engine (M15 only to reduce noise)
         if candle.timeframe.upper() == "M15":
-            vel_snap = NormalizedVelocity() # Dummy pass for candle update, uses latest
-            disp_snap = DisplacementState()
-            self._last_regime_state = self.regime.update(candle, vel_snap, disp_snap)
+            self._last_regime_state = self.regime.update(candle, self._last_vel_state, self._last_disp_state)
 
     def on_tick(self, price: float, timestamp: datetime, volume: float = 1.0) -> EngineSnapshot:
         """Process a new tick through the entire pipeline."""
@@ -112,7 +112,9 @@ class ReversalModel:
         
         # --- TIER 1: DATA PIPELINE ---
         vel_state = self.velocity.update(price, timestamp, volume)
+        self._last_vel_state = vel_state
         disp_state = self.displacement.update(price, timestamp, volume, vel_state)
+        self._last_disp_state = disp_state
         
         # --- TIER 2: ANALYSIS PIPELINE ---
         liq_state = self.liquidity.update(price, timestamp, vel_state, disp_state)
@@ -171,7 +173,7 @@ class ReversalModel:
             ticket, direction, entry_price, ts, 
             self._last_regime_state.regime, self._last_mtf_state.alignment_score
         )
-        is_sweep = "Sweep" in reason
+        is_sweep = "sweep" in reason.lower()
         self.exit.register_trade(ticket, direction, entry_price, sl, tp, is_sweep=is_sweep)
         self.phase_tracker.register_trade(
             direction=direction,
@@ -187,6 +189,12 @@ class ReversalModel:
         self.health.clear()
         self.exit.clear()
         self.phase_tracker.clear()
+
+    @property
+    def config(self) -> dict:
+        """Expose config for update propagation."""
+        return self._config
+
 
 
 __all__ = ["ReversalModel", "EngineSnapshot"]

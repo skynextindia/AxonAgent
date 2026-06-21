@@ -213,18 +213,18 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
       <div style="display:flex;justify-content:space-between;border-bottom:1px solid #1f1f2e;padding-bottom:4px;"><span style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">ENGINE_PIPELINE</span><div style="display:flex;align-items:center;gap:4px;"><span id="pipeline-led" style="width:5px;height:5px;border-radius:50%;background:#00ff66;box-shadow:0 0 6px #00ff66;display:inline-block;"></span><span id="pipeline-status" style="font-size:6.5px;color:var(--green);font-weight:900;letter-spacing:.04em;text-transform:uppercase;">ACTIVE</span></div></div>
       <div style="font-size:6.5px;display:flex;flex-direction:column;gap:6px;">
         <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 1: DATA NORMALIZATION</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-top:2px;">
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-wyckoff"><span id="led-wyckoff" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">VELOCITY</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-keynes"><span id="led-keynes" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">DISPLACEMENT</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-velocity-normalizer"><span id="led-velocity-normalizer" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">VELOCITY NORMALIZER</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-displacement-engine"><span id="led-displacement-engine" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">DISPLACEMENT ENGINE</span></div>
         </div></div>
         <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 2: STATE ANALYSIS</span><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-top:2px;">
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-buffett"><span id="led-buffett" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">REGIME</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-soros"><span id="led-soros" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">MTF BIAS</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-munger"><span id="led-munger" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">LIQUIDITY</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-regime-engine"><span id="led-regime-engine" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">REGIME ENGINE</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-mtf-bias"><span id="led-mtf-bias" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">MTF BIAS</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-liquidity-sweep"><span id="led-liquidity-sweep" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">LIQUIDITY SWEEP</span></div>
         </div></div>
         <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 3: EXECUTION & HEALTH</span><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-top:2px;">
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-simons"><span id="led-simons" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">ENTRY SM</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-dalio"><span id="led-dalio" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">HEALTH</span></div>
-          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-marks"><span id="led-marks" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">EXIT MGR</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-entry-sm"><span id="led-entry-sm" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">ENTRY SM</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-health-monitor"><span id="led-health-monitor" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">HEALTH MONITOR</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-adaptive-exit-manager"><span id="led-adaptive-exit-manager" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">ADAPTIVE EXIT MGR</span></div>
         </div></div>
       </div>
     </div>
@@ -284,12 +284,12 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
         </div>
       </div>
       <div class="cyber-panel" style="padding:12px;background:#040406;display:flex;flex-direction:column;">
-        <span style="font-size:8px;color:var(--text-secondary);font-weight:900;letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;">TOKEN USAGE</span>
+        <span style="font-size:8px;color:var(--text-secondary);font-weight:900;letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;">PURE MATH TELEMETRY</span>
         <div style="display:flex;flex-direction:column;gap:4px;font-size:8px;">
-          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Input Tokens</span><span id="sys-tokens-input" style="color:var(--cyan);font-weight:700;">0</span></div>
-          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Output Tokens</span><span id="sys-tokens-output" style="color:var(--amber);font-weight:700;">0</span></div>
-          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Total Tokens</span><span id="sys-tokens-total" style="color:var(--purple);font-weight:700;">0</span></div>
-          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">LLM/Tool Calls</span><span id="sys-token-calls" style="color:#fff;font-weight:700;">0 / 0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Rule B Divergence</span><span id="sys-tokens-input" style="color:var(--cyan);font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Tick Efficiency</span><span id="sys-tokens-output" style="color:var(--amber);font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Rule A Max Velocity</span><span id="sys-tokens-total" style="color:var(--purple);font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Engine State / Dir</span><span id="sys-token-calls" style="color:#fff;font-weight:700;">0 / 0</span></div>
         </div>
       </div>
     </div>
@@ -362,22 +362,51 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
 </main>
 <!-- ═══ SETTINGS MODAL ═══ -->
 <div id="settings-modal" style="position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.75);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:all .3s;">
-  <div class="cyber-panel" style="padding:16px;width:360px;background:rgba(0,0,0,.95);border-color:var(--purple);position:relative;display:flex;flex-direction:column;gap:12px;">
+  <div class="cyber-panel" style="padding:16px;width:420px;background:rgba(0,0,0,.95);border-color:var(--purple);position:relative;display:flex;flex-direction:column;gap:12px;">
     <div style="position:absolute;top:0;left:0;right:0;height:1.5px;background:var(--purple);"></div>
     <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1f1f2e;padding-bottom:6px;">
       <span style="font-size:9px;color:var(--purple);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">DAEMON CONFIG</span>
       <button id="close-settings-btn" style="color:var(--text-dim);background:none;border:none;font-size:14px;font-weight:900;cursor:pointer;font-family:inherit;">&times;</button>
     </div>
-    <form id="settings-form" style="display:flex;flex-direction:column;gap:10px;font-size:8.5px;">
-      <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Tick Poll (ms)</label><input type="number" name="tick_poll_interval_ms" min="50" max="5000" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:6px 8px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:7px;">Suppress Asian</span><input type="checkbox" name="realtime_suppress_asian" style="accent-color:var(--purple);"></div>
-      <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">S/R Reset ATR</label><input type="number" name="realtime_level_reset_atr_multiple" step="0.1" min="0.5" max="5.0" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
-      <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">RSI Period</label><input type="number" name="indicator_rsi_length" min="5" max="50" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;"><div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">EMA Fast</label><input type="number" name="indicator_ema_fast" min="5" max="100" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div><div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">EMA Slow</label><input type="number" name="indicator_ema_slow" min="10" max="200" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:6px 8px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:7px;">Pinpoint Price Reversals</span><input type="checkbox" name="realtime_use_pinpoint_price" style="accent-color:var(--purple);"></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:6px 8px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:7px;">Correct Rule A Reversals</span><input type="checkbox" name="realtime_correct_rule_a_direction" style="accent-color:var(--purple);"></div>
-      <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:6px 8px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:7px;">Bypass Cooldown Better Peak</span><input type="checkbox" name="realtime_cooldown_bypass_better_peak" style="accent-color:var(--purple);"></div>
-      <button type="submit" style="width:100%;background:rgba(157,0,255,.2);color:var(--purple);border:1px solid var(--purple);font-weight:900;text-transform:uppercase;padding:6px;font-size:8px;font-family:inherit;cursor:pointer;letter-spacing:.08em;">APPLY CHANGES</button>
+    <form id="settings-form" style="display:flex;flex-direction:column;gap:8px;font-size:8.5px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Tick Poll (ms)</label><input type="number" name="tick_poll_interval_ms" min="50" max="5000" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">S/R Reset ATR</label><input type="number" name="realtime_level_reset_atr_multiple" step="0.1" min="0.5" max="5.0" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">RSI Period</label><input type="number" name="indicator_rsi_length" min="5" max="50" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Min Signal Quality</label><input type="number" name="realtime_min_signal_quality" step="0.05" min="0.10" max="1.00" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">EMA Fast</label><input type="number" name="indicator_ema_fast" min="5" max="100" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">EMA Slow</label><input type="number" name="indicator_ema_slow" min="10" max="200" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Cooldown (sec)</label><input type="number" name="cooldown_seconds" min="10" max="3600" step="10" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Loss Cooldown (min)</label><input type="number" name="loss_cooldown_minutes" min="5" max="1440" step="5" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">SL ATR Multiple</label><input type="number" name="sl_atr_multiple" step="0.1" min="0.1" max="5.0" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">TP ATR Multiple</label><input type="number" name="tp_atr_multiple" step="0.1" min="0.1" max="10.0" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Decay Profit Factor</label><input type="number" name="realtime_velocity_decay_profit_factor" step="0.05" min="0.1" max="2.0" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Stagnation (sec)</label><input type="number" name="stagnation_limit" min="100" max="86400" step="100" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Drawdown Trend (sec)</label><input type="number" name="drawdown_limit_trending" min="100" max="86400" step="100" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Drawdown Range (sec)</label><input type="number" name="drawdown_limit_ranging" min="100" max="86400" step="100" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:4px 6px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:6px;">Suppress Asian</span><input type="checkbox" name="realtime_suppress_asian" style="accent-color:var(--purple);"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:4px 6px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:6px;">Pinpoint Price</span><input type="checkbox" name="realtime_use_pinpoint_price" style="accent-color:var(--purple);"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:4px 6px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:6px;">Correct Rule A</span><input type="checkbox" name="realtime_correct_rule_a_direction" style="accent-color:var(--purple);"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:4px 6px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:6px;">Bypass Cooldown</span><input type="checkbox" name="realtime_cooldown_bypass_better_peak" style="accent-color:var(--purple);"></div>
+      </div>
+      <button type="submit" style="width:100%;background:rgba(157,0,255,.2);color:var(--purple);border:1px solid var(--purple);font-weight:900;text-transform:uppercase;padding:6px;font-size:8px;font-family:inherit;cursor:pointer;letter-spacing:.08em;margin-top:4px;">APPLY CHANGES</button>
     </form>
   </div>
 </div>
@@ -545,20 +574,21 @@ class DashboardController {
     if(form){
       form.onsubmit = async e=>{
         e.preventDefault(); const fd = new FormData(form);
-        const data = {
-          tick_poll_interval_ms:parseInt(fd.get("tick_poll_interval_ms")),
-          realtime_suppress_asian:fd.get("realtime_suppress_asian")==="on",
-          realtime_level_reset_atr_multiple:parseFloat(fd.get("realtime_level_reset_atr_multiple")),
-          indicator_rsi_length:parseInt(fd.get("indicator_rsi_length")),
-          indicator_ema_fast:parseInt(fd.get("indicator_ema_fast")),
-          indicator_ema_slow:parseInt(fd.get("indicator_ema_slow")),
-          realtime_use_pinpoint_price:fd.get("realtime_use_pinpoint_price")==="on",
-          realtime_correct_rule_a_direction:fd.get("realtime_correct_rule_a_direction")==="on",
-          realtime_cooldown_bypass_better_peak:fd.get("realtime_cooldown_bypass_better_peak")==="on"
-        };
+        const data = {};
+        for(let [k,v] of fd.entries()) {
+          const inp = form.querySelector(`[name="${k}"]`);
+          if (inp) {
+            if (inp.type === "checkbox") data[k] = v === "on";
+            else if (inp.type === "number") data[k] = inp.getAttribute("step") ? parseFloat(v) : parseInt(v);
+            else data[k] = v;
+          }
+        }
+        form.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+          if (!data.hasOwnProperty(cb.name)) data[cb.name] = false;
+        });
         try{const r=await fetch("/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});const j=await r.json();if(j.status==="success"){modal.style.opacity="0";modal.style.pointerEvents="none";Object.keys(j.config).forEach(k=>{const inp=form.querySelector(`[name="${k}"]`);if(inp){inp.type==="checkbox"?inp.checked=!!j.config[k]:inp.value=j.config[k]}})}}catch(err){console.log(err)}
       };
-      (async()=>{try{const r=await fetch("/config");const j=await r.json();if(j.status==="success"&&j.config){const c=j.config;if(c.tick_poll_interval_ms!==undefined)form.querySelector('[name="tick_poll_interval_ms"]').value=c.tick_poll_interval_ms;if(c.realtime_suppress_asian!==undefined)form.querySelector('[name="realtime_suppress_asian"]').checked=!!c.realtime_suppress_asian;if(c.realtime_level_reset_atr_multiple!==undefined)form.querySelector('[name="realtime_level_reset_atr_multiple"]').value=c.realtime_level_reset_atr_multiple;if(c.indicator_rsi_length!==undefined)form.querySelector('[name="indicator_rsi_length"]').value=c.indicator_rsi_length;if(c.indicator_ema_fast!==undefined)form.querySelector('[name="indicator_ema_fast"]').value=c.indicator_ema_fast;if(c.indicator_ema_slow!==undefined)form.querySelector('[name="indicator_ema_slow"]').value=c.indicator_ema_slow;if(c.realtime_use_pinpoint_price!==undefined)form.querySelector('[name="realtime_use_pinpoint_price"]').checked=!!c.realtime_use_pinpoint_price;if(c.realtime_correct_rule_a_direction!==undefined)form.querySelector('[name="realtime_correct_rule_a_direction"]').checked=!!c.realtime_correct_rule_a_direction;if(c.realtime_cooldown_bypass_better_peak!==undefined)form.querySelector('[name="realtime_cooldown_bypass_better_peak"]').checked=!!c.realtime_cooldown_bypass_better_peak;}}catch(e){}})();
+      (async()=>{try{const r=await fetch("/config");const j=await r.json();if(j.status==="success"&&j.config){const c=j.config;Object.keys(c).forEach(k=>{const inp=form.querySelector(`[name="${k}"]`);if(inp){if(inp.type==="checkbox")inp.checked=!!c[k];else inp.value=c[k]}})}}catch(e){}})();
     }
     // Tab buttons
     ["cockpit","intel","journal","system"].forEach(t=>{const btn=g("tab-"+t+"-btn");if(btn)btn.onclick=()=>this.switchTab(t);});
@@ -731,36 +761,36 @@ class DashboardController {
 
     if (d.tick_velocity !== undefined) {
       const v = Number(d.tick_velocity);
-      if (v > 2.0) updateLed("led-wyckoff", "active");
-      else if (v > 1.0) updateLed("led-wyckoff", "cyan");
-      else updateLed("led-wyckoff", "idle");
+      if (v > 2.0) updateLed("led-velocity-normalizer", "active");
+      else if (v > 1.0) updateLed("led-velocity-normalizer", "cyan");
+      else updateLed("led-velocity-normalizer", "idle");
     }
 
     if (d.rule_b_divergence !== undefined) {
       const div = Number(d.rule_b_divergence);
-      if (div > 0.8) updateLed("led-keynes", "active");
-      else if (div > 0.6) updateLed("led-keynes", "amber");
-      else updateLed("led-keynes", "idle");
+      if (div > 0.8) updateLed("led-displacement-engine", "active");
+      else if (div > 0.6) updateLed("led-displacement-engine", "amber");
+      else updateLed("led-displacement-engine", "idle");
     }
 
     if (d.dominant !== undefined) {
       const conf = Number(d.confidence) || 0;
-      if (conf > 0.65) updateLed("led-buffett", "active");
-      else if (conf > 0.3) updateLed("led-buffett", "cyan");
-      else updateLed("led-buffett", "idle");
+      if (conf > 0.65) updateLed("led-regime-engine", "active");
+      else if (conf > 0.3) updateLed("led-regime-engine", "cyan");
+      else updateLed("led-regime-engine", "idle");
     }
 
     if (d.trend_h4 !== undefined && d.trend_h1 !== undefined) {
       const h4 = String(d.trend_h4).toLowerCase();
       const h1 = String(d.trend_h1).toLowerCase();
       if ((h4 === "up" || h4.includes("bull")) && (h1 === "up" || h1.includes("bull"))) {
-        updateLed("led-soros", "active");
+        updateLed("led-mtf-bias", "active");
       } else if ((h4 === "down" || h4.includes("bear")) && (h1 === "down" || h1.includes("bear"))) {
-        updateLed("led-soros", "active");
+        updateLed("led-mtf-bias", "active");
       } else if (h4 === "sideways" || h1 === "sideways") {
-        updateLed("led-soros", "amber");
+        updateLed("led-mtf-bias", "amber");
       } else {
-        updateLed("led-soros", "idle");
+        updateLed("led-mtf-bias", "idle");
       }
     }
 
@@ -768,48 +798,48 @@ class DashboardController {
       const distRes = (this.currentRes - this.currentBid) / this.pipMult;
       const distSup = (this.currentBid - this.currentSup) / this.pipMult;
       if (distRes <= 3.0 || distSup <= 3.0) {
-        updateLed("led-munger", "active");
+        updateLed("led-liquidity-sweep", "active");
       } else if (distRes <= 7.0 || distSup <= 7.0) {
-        updateLed("led-munger", "cyan");
+        updateLed("led-liquidity-sweep", "cyan");
       } else {
-        updateLed("led-munger", "idle");
+        updateLed("led-liquidity-sweep", "idle");
       }
     }
 
     if (d.entry_state !== undefined) {
       const st = String(d.entry_state).toUpperCase();
-      if (st === "TRIGGERED") updateLed("led-simons", "active");
-      else if (st === "ARMING") updateLed("led-simons", "purple");
-      else if (st === "ANOMALY") updateLed("led-simons", "amber");
-      else if (st === "INVALIDATED") updateLed("led-simons", "fail");
-      else updateLed("led-simons", "idle");
+      if (st === "TRIGGERED") updateLed("led-entry-sm", "active");
+      else if (st === "ARMING") updateLed("led-entry-sm", "purple");
+      else if (st === "ANOMALY") updateLed("led-entry-sm", "amber");
+      else if (st === "INVALIDATED") updateLed("led-entry-sm", "fail");
+      else updateLed("led-entry-sm", "idle");
     }
 
     if (d.health_active !== undefined) {
       if (d.health_active) {
         const sc = Number(d.health_score) || 0.0;
-        if (sc > 0.7) updateLed("led-dalio", "active");
-        else if (sc > 0.4) updateLed("led-dalio", "amber");
-        else updateLed("led-dalio", "fail");
+        if (sc > 0.7) updateLed("led-health-monitor", "active");
+        else if (sc > 0.4) updateLed("led-health-monitor", "amber");
+        else updateLed("led-health-monitor", "fail");
       } else {
-        updateLed("led-dalio", "idle");
+        updateLed("led-health-monitor", "idle");
       }
     }
 
     if (d.health_active !== undefined) {
       if (d.health_active) {
         if (d.exit_should_exit) {
-          updateLed("led-marks", "fail");
+          updateLed("led-adaptive-exit-manager", "fail");
         } else {
           const action = String(d.exit_action).toUpperCase();
           if (action === "ADJUST_SL" || action === "ADJUST_TP") {
-            updateLed("led-marks", "amber");
+            updateLed("led-adaptive-exit-manager", "amber");
           } else {
-            updateLed("led-marks", "active");
+            updateLed("led-adaptive-exit-manager", "active");
           }
         }
       } else {
-        updateLed("led-marks", "idle");
+        updateLed("led-adaptive-exit-manager", "idle");
       }
     }
   }

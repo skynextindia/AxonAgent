@@ -125,12 +125,12 @@ def main():
     init_worker(candle_rows, ticks_list)
 
     search_space = []
-    for min_q in [0.50, 0.55, 0.60]:
-        for sl_atr in [1.0, 1.2]:
-            for tp_atr in [1.5, 2.0, 2.5]:
-                for cool in [120, 300, 600]:
-                    for loss_cool in [5, 15, 30]:
-                        for decay_factor in [0.25, 0.50, 0.75]:
+    for min_q in [0.60, 0.65]:
+        for sl_atr in [0.8, 0.9, 1.0]:
+            for tp_atr in [1.3, 1.5, 1.7, 2.0]:
+                for cool in [300, 600]:
+                    for loss_cool in [15, 30]:
+                        for decay_factor in [0.50, 0.60, 0.70, 0.80]:
                             search_space.append({
                                 "min_signal_quality": min_q,
                                 "sl_atr_multiple": sl_atr,

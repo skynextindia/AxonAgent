@@ -32,8 +32,8 @@ ENERGY_PHASE_PENALTIES = {
     ("ADVERSE_IMPULSE", "COMPRESSION"):     0.3,
     ("ADVERSE_IMPULSE", "EXHAUSTION"):      0.4,
     ("ADVERSE_IMPULSE", "REVERSAL_RISK"):   0.5,
-    ("EXHAUSTING",      "CONTINUATION"):    0.1,
-    ("EXHAUSTING",      "EXPANSION"):       0.0,   # could be a pause
+    ("EXHAUSTING",      "CONTINUATION"):    0.3,
+    ("EXHAUSTING",      "EXPANSION"):       0.1,   # could be a pause
     ("EXHAUSTING",      "EXHAUSTION"):      0.0,   # already in exhaustion — expected
     ("NOISE",           "*"):               0.0,   # never penalise for noise
 }
@@ -52,8 +52,10 @@ class TradeHealth:
 class TradeHealthMonitor:
     """Evaluates position health relative to its intended market state."""
 
-    def __init__(self, pip_mult: float = 0.0001):
+    def __init__(self, pip_mult: float = 0.0001, config: Optional[dict] = None):
         self._pip = pip_mult
+        self._config = config or {}
+        self._backtest_mode = self._config.get("backtest_mode", False)
         
         # Position state
         self._is_active = False
@@ -117,7 +119,8 @@ class TradeHealthMonitor:
                 return "HEALTHY_IMPULSE"
             else:
                 self._consecutive_adverse += 1
-                return "ADVERSE_IMPULSE" if self._consecutive_adverse >= 5 else "NOISE"
+                limit = self._config.get("adverse_impulse_ticks", 2 if self._backtest_mode else 3)
+                return "ADVERSE_IMPULSE" if self._consecutive_adverse >= limit else "NOISE"
 
         if cls == DISPLACEMENT_EXHAUSTION:
             self._consecutive_adverse = 0
@@ -144,7 +147,8 @@ class TradeHealthMonitor:
         dt = ts - self._last_tick_time
         # Under squeezed ticks backtesting, there's a 15-minute gap between candles
         if dt > 5.0 and self._last_tick_time > 0.0:
-            dt = 1.0
+            if not self._backtest_mode:
+                dt = 1.0
         self._last_tick_time = ts
         
         # Calculate PnL in pips
@@ -166,15 +170,22 @@ class TradeHealthMonitor:
         reason = "Healthy"
         
         # 1. Stagnation / Time decay
-        if trade_duration > 3600: # 1 hour
+        stagnation_limit = self._config.get("stagnation_limit", 2700)
+        if trade_duration > stagnation_limit:
             # If we've been in a trade for an hour and barely moved, thesis is weak
             if self._max_favorable_excursion < 5.0 and pips_profit < 2.0:
-                score -= 0.4
+                score -= 0.85
                 reason = "Stagnant (Time Decay)"
                 
         # 2. Drawdown duration
-        if self._time_in_drawdown_sec > 1800: # 30 mins underwater
-            score -= 0.3
+        # Dynamic drawdown limit based on market regime:
+        # Trending regimes require tight cutting (30 mins), ranging/reversing regimes allow wider breathing room (60 mins)
+        is_trending = regime.regime in ("TREND_EXPANSION", "TREND_CONTINUATION", "BREAKOUT")
+        drawdown_limit_trending = self._config.get("drawdown_limit_trending", 2400)
+        drawdown_limit_ranging = self._config.get("drawdown_limit_ranging", 2700)
+        drawdown_limit = drawdown_limit_trending if is_trending else drawdown_limit_ranging
+        if self._time_in_drawdown_sec > drawdown_limit:
+            score -= 0.85
             reason = "Extended Drawdown"
             
         # 3. Energy/Phase-based health evaluation
@@ -192,7 +203,7 @@ class TradeHealthMonitor:
         # 4. Failed Breakout / Fakeout Return
         # If we had a nice run (+10 pips) and it fully retraced to negative
         if self._max_favorable_excursion > 10.0 and pips_profit < -2.0:
-            score -= 0.6
+            score -= 0.85
             reason = "Failed Expansion (Full Retracement)"
             
         # 5. Regime Shift

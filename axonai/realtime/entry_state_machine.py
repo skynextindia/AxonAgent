@@ -220,9 +220,17 @@ class EntryStateMachine:
             
         if is_trigger:
             # Final safety check against MTF
-            if (self._anomaly_direction == "BUY" and mtf.h4_bias < -0.8) or \
-               (self._anomaly_direction == "SELL" and mtf.h4_bias > 0.8):
-                self._transition(STATE_INVALIDATED, "Blocked: Trading against strong H4 trend")
+            is_trend_blocked = False
+            if self._anomaly_direction == "BUY" and mtf.h1_bias < 0.0 and mtf.h4_bias < 0.0:
+                is_trend_blocked = True
+            elif self._anomaly_direction == "SELL" and mtf.h1_bias > 0.0 and mtf.h4_bias > 0.0:
+                is_trend_blocked = True
+
+            if is_trend_blocked:
+                self._transition(STATE_INVALIDATED, f"Blocked: Trend filter (H1={mtf.h1_bias:.2f}, H4={mtf.h4_bias:.2f})")
+            elif (self._anomaly_direction == "BUY" and (mtf.h1_bias < -0.4 or mtf.h4_bias < -0.4)) or \
+                 (self._anomaly_direction == "SELL" and (mtf.h1_bias > 0.4 or mtf.h4_bias > 0.4)):
+                self._transition(STATE_INVALIDATED, f"Blocked: Trading against strong trend (H1={mtf.h1_bias:.2f}, H4={mtf.h4_bias:.2f})")
             else:
                 self._transition(STATE_TRIGGERED, "Displacement away from trap confirmed.")
 

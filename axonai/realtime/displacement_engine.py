@@ -72,9 +72,12 @@ class DisplacementEngine:
         impulse_ratio_threshold: float = 0.6,
         trap_ratio_threshold: float = 0.25,
         compression_velocity_z: float = -0.5,
+        config: Optional[dict] = None,
     ):
         self._pip = pip_mult
         self._window = window_ticks
+        self._config = config or {}
+        self._backtest_mode = self._config.get("backtest_mode", False)
 
         # Thresholds
         self._impulse_threshold = impulse_ratio_threshold
@@ -231,7 +234,7 @@ class DisplacementEngine:
             return DISPLACEMENT_IMPULSE
 
         # Priority 3: Trap / Absorption (high velocity + LOW displacement)
-        if is_high_vel and disp_ratio < self._trap_threshold:
+        if (is_high_vel or self._backtest_mode) and disp_ratio < self._trap_threshold:
             # Distinguish trap from absorption by tick density
             if velocity.tick_efficiency < 0.15:
                 return DISPLACEMENT_ABSORPTION

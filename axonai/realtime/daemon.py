@@ -69,6 +69,7 @@ class AxonDaemon:
         self._cooldown_seconds: int = config.get("realtime_cooldown_seconds", 300)
         self._last_execution_time: datetime = datetime.min
         self._last_loss_time: Optional[datetime] = None
+        self._last_close_time: Optional[datetime] = None
 
         # Layer 4: Trade Executor
         config_base = config.copy()
@@ -381,12 +382,12 @@ class AxonDaemon:
             "exit_action": exit_action,
             "exit_reason": exit_reason,
             "exit_should_exit": exit_should_exit,
-            # No LLM token tracking
-            "tokens_in": 0,
-            "tokens_out": 0,
-            "tokens_total": 0,
-            "llm_calls": 0,
-            "tool_calls": 0
+            # Map legacy token tracking keys to pure-math parameters for UI dashboard compat
+            "tokens_in": round(ws.displacement.displacement_ratio, 2) if (ws and getattr(ws, "displacement", None)) else 0.0,
+            "tokens_out": round(ws.velocity.tick_efficiency, 2) if (ws and getattr(ws, "velocity", None)) else 0.0,
+            "tokens_total": round(ws.velocity.raw_velocity, 2) if (ws and getattr(ws, "velocity", None)) else 0.0,
+            "llm_calls": entry_state,
+            "tool_calls": entry_direction or "WAIT"
         }
 
     def _get_levels_payload(self) -> dict:
@@ -465,6 +466,29 @@ class AxonDaemon:
         }
 
     def _get_account_payload(self) -> Optional[dict]:
+        is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
+        if is_bridge:
+            from axonai.realtime.execution_client import send_execution_command
+            try:
+                acc_res = send_execution_command(self.config, {"action": "account_info"})
+                if not acc_res.get("success", False):
+                    return None
+                pos_res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol})
+                pos_list = pos_res.get("positions", [])
+                return {
+                    "type": "account",
+                    "balance": acc_res.get("balance", 0.0),
+                    "equity": acc_res.get("equity", 0.0),
+                    "profit": acc_res.get("profit", 0.0),
+                    "margin": acc_res.get("margin", 0.0),
+                    "free_margin": acc_res.get("free_margin", 0.0),
+                    "margin_level": acc_res.get("margin_level", 0.0),
+                    "positions": pos_list
+                }
+            except Exception as e:
+                logger.warning("Failed to retrieve execution bridge account info: %s", e)
+                return None
+
         if not mt5:
             return None
         try:
@@ -530,13 +554,25 @@ class AxonDaemon:
         logger.info("Step 1/4: MT5 connected")
 
         # Pre-populate active positions for trailing SL tracking
+        is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
         try:
-            positions = mt5.positions_get(symbol=self.mt5_symbol) if mt5 else None
-            if positions:
-                for pos in positions:
-                    self._tracked_positions.add(pos.ticket)
-                    self._active_trade_initial_sl[pos.ticket] = pos.sl
-                logger.info("AxonDaemon: Pre-populated %d active positions for trailing stop tracking.", len(positions))
+            if is_bridge:
+                from axonai.realtime.execution_client import send_execution_command
+                res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol})
+                positions = res.get("positions", []) if res.get("success", False) else []
+                if positions:
+                    for pos in positions:
+                        ticket = pos["ticket"]
+                        self._tracked_positions.add(ticket)
+                        self._active_trade_initial_sl[ticket] = pos["sl"]
+                    logger.info("AxonDaemon: Pre-populated %d active positions from execution bridge.", len(positions))
+            else:
+                positions = mt5.positions_get(symbol=self.mt5_symbol) if mt5 else None
+                if positions:
+                    for pos in positions:
+                        self._tracked_positions.add(pos.ticket)
+                        self._active_trade_initial_sl[pos.ticket] = pos.sl
+                    logger.info("AxonDaemon: Pre-populated %d active positions for trailing stop tracking.", len(positions))
         except Exception as pe:
             logger.warning("AxonDaemon: Failed to pre-populate active positions: %s", pe)
 
@@ -877,61 +913,111 @@ class AxonDaemon:
                 decision = snapshot.exit_decision
                 logger.info("EXIT DECISION: %s - %s", decision.action, decision.reason)
                 
+                is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
                 if decision.action == "ADJUST_SL" and decision.suggested_sl:
                     # Trailing stop update logic
-                    import MetaTrader5 as mt5
-                    if mt5 and mt5.terminal_info():
-                        positions = mt5.positions_get(symbol=self.mt5_symbol)
-                        if positions:
-                            for p in positions:
-                                if p.magic == self.trade_executor_opt.magic:
-                                    request = {
-                                        "action": mt5.TRADE_ACTION_SLTP,
-                                        "position": p.ticket,
-                                        "symbol": p.symbol,
-                                        "sl": decision.suggested_sl,
-                                        "tp": p.tp
-                                    }
-                                    mt5.order_send(request)
-                                    logger.info("Adjusted SL for ticket %d to %.5f", p.ticket, decision.suggested_sl)
-                                    
-                elif decision.action == "CLOSE_NOW":
-                    import MetaTrader5 as mt5
-                    if mt5 and mt5.terminal_info():
-                        positions = mt5.positions_get(symbol=self.mt5_symbol)
-                        if positions:
-                            for p in positions:
-                                if p.magic == self.trade_executor_opt.magic:
-                                    # Create market order to close
-                                    tick = mt5.symbol_info_tick(self.mt5_symbol)
-                                    price = tick.ask if p.type == mt5.POSITION_TYPE_SELL else tick.bid
-                                    order_type = mt5.ORDER_TYPE_BUY if p.type == mt5.POSITION_TYPE_SELL else mt5.ORDER_TYPE_SELL
-                                    request = {
-                                        "action": mt5.TRADE_ACTION_DEAL,
-                                        "symbol": p.symbol,
-                                        "volume": p.volume,
-                                        "type": order_type,
-                                        "position": p.ticket,
-                                        "price": price,
-                                        "deviation": 20,
-                                        "magic": p.magic,
-                                        "comment": f"Adaptive Exit: {decision.reason}",
-                                        "type_time": mt5.ORDER_TIME_GTC,
-                                        "type_filling": mt5.ORDER_FILLING_IOC,
-                                    }
-                                    res = mt5.order_send(request)
-                                    if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                                        profit_pips = (price - p.price_open) / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001)
-                                        if p.type == mt5.POSITION_TYPE_SELL: profit_pips = -profit_pips
+                    if is_bridge:
+                        from axonai.realtime.execution_client import send_execution_command
+                        res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol, "magic": self.trade_executor_opt.magic})
+                        positions = res.get("positions", []) if res.get("success", False) else []
+                        for p in positions:
+                            send_execution_command(self.config, {
+                                "action": "modify",
+                                "position": p["ticket"],
+                                "symbol": p["symbol"],
+                                "sl": decision.suggested_sl,
+                                "tp": p["tp"]
+                            })
+                            logger.info("Adjusted SL (Bridge) for ticket %d to %.5f", p["ticket"], decision.suggested_sl)
+                    else:
+                        import MetaTrader5 as mt5
+                        if mt5 and mt5.terminal_info():
+                            positions = mt5.positions_get(symbol=self.mt5_symbol)
+                            if positions:
+                                for p in positions:
+                                    if p.magic == self.trade_executor_opt.magic:
+                                        request = {
+                                            "action": mt5.TRADE_ACTION_SLTP,
+                                            "position": p.ticket,
+                                            "symbol": p.symbol,
+                                            "sl": decision.suggested_sl,
+                                            "tp": p.tp
+                                        }
+                                        mt5.order_send(request)
+                                        logger.info("Adjusted SL for ticket %d to %.5f", p.ticket, decision.suggested_sl)
                                         
-                                        self.trade_analytics.record_exit(
-                                            p.ticket, price, profit_pips, decision.reason, snapshot
-                                        )
-                                        self.reversal_model.clear_trade()
-                                        if p.ticket in self._tracked_positions:
-                                            self._tracked_positions.remove(p.ticket)
+                elif decision.action == "CLOSE_NOW":
+                    if is_bridge:
+                        from axonai.realtime.execution_client import send_execution_command
+                        res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol, "magic": self.trade_executor_opt.magic})
+                        positions = res.get("positions", []) if res.get("success", False) else []
+                        for p in positions:
+                            # Close position via bridge
+                            # Determine close side (SELL to close BUY, BUY to close SELL)
+                            order_type = 1 if p["type"] == "BUY" else 0
+                            tick_bid = self.live_state.current_bid if hasattr(self.live_state, "current_bid") else p["price_current"]
+                            tick_ask = self.live_state.current_ask if hasattr(self.live_state, "current_ask") else p["price_current"]
+                            price = tick_ask if order_type == 0 else tick_bid
+                            
+                            close_res = send_execution_command(self.config, {
+                                "action": "close",
+                                "position": p["ticket"],
+                                "symbol": p["symbol"],
+                                "volume": p["volume"],
+                                "type": order_type,
+                                "price": price,
+                                "magic": p["magic"],
+                                "deviation": 20
+                            })
+                            if close_res.get("success"):
+                                profit_pips = (price - p["price_open"]) / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001)
+                                if p["type"] == "SELL": profit_pips = -profit_pips
+                                
+                                self.trade_analytics.record_exit(
+                                    p["ticket"], price, profit_pips, decision.reason, snapshot
+                                )
+                                self.reversal_model.clear_trade()
+                                if p["ticket"] in self._tracked_positions:
+                                    self._tracked_positions.remove(p["ticket"])
+                                    
+                                logger.info("Successfully closed position %d via bridge: %s", p["ticket"], decision.reason)
+                    else:
+                        import MetaTrader5 as mt5
+                        if mt5 and mt5.terminal_info():
+                            positions = mt5.positions_get(symbol=self.mt5_symbol)
+                            if positions:
+                                for p in positions:
+                                    if p.magic == self.trade_executor_opt.magic:
+                                        # Create market order to close
+                                        tick = mt5.symbol_info_tick(self.mt5_symbol)
+                                        price = tick.ask if p.type == mt5.POSITION_TYPE_SELL else tick.bid
+                                        order_type = mt5.ORDER_TYPE_BUY if p.type == mt5.POSITION_TYPE_SELL else mt5.ORDER_TYPE_SELL
+                                        request = {
+                                            "action": mt5.TRADE_ACTION_DEAL,
+                                            "symbol": p.symbol,
+                                            "volume": p.volume,
+                                            "type": order_type,
+                                            "position": p.ticket,
+                                            "price": price,
+                                            "deviation": 20,
+                                            "magic": p.magic,
+                                            "comment": f"Adaptive Exit: {decision.reason}",
+                                            "type_time": mt5.ORDER_TIME_GTC,
+                                            "type_filling": mt5.ORDER_FILLING_IOC,
+                                        }
+                                        res = mt5.order_send(request)
+                                        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                                            profit_pips = (price - p.price_open) / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001)
+                                            if p.type == mt5.POSITION_TYPE_SELL: profit_pips = -profit_pips
                                             
-                                        logger.info("Successfully closed position %d: %s", p.ticket, decision.reason)
+                                            self.trade_analytics.record_exit(
+                                                p.ticket, price, profit_pips, decision.reason, snapshot
+                                            )
+                                            self.reversal_model.clear_trade()
+                                            if p.ticket in self._tracked_positions:
+                                                self._tracked_positions.remove(p.ticket)
+                                                
+                                            logger.info("Successfully closed position %d: %s", p.ticket, decision.reason)
 
             # Print stats
             self._log_stats()
@@ -983,9 +1069,18 @@ class AxonDaemon:
     def _seconds_until_ready(self) -> float:
         """Seconds remaining in execution cooldown."""
         now = datetime.now()
-        elapsed = (now - self._last_execution_time).total_seconds()
-        cooldown_rem = max(0.0, self._cooldown_seconds - elapsed)
         
+        # Standard entry cooldown
+        cooldown_seconds = self.config.get("realtime_cooldown_seconds", self.config.get("cooldown_seconds", 300))
+        elapsed = (now - self._last_execution_time).total_seconds()
+        cooldown_rem = max(0.0, cooldown_seconds - elapsed)
+        
+        # Post-trade cooldown (measured from last close/exit time)
+        post_trade_rem = 0.0
+        if getattr(self, "_last_close_time", None) is not None:
+            elapsed_close = (now - self._last_close_time).total_seconds()
+            post_trade_rem = max(0.0, self._cooldown_seconds - elapsed_close)
+            
         # Loss cooldown check
         loss_cooldown_rem = 0.0
         if getattr(self, "_last_loss_time", None) is not None:
@@ -993,7 +1088,7 @@ class AxonDaemon:
             loss_cooldown_minutes = self.config.get("realtime_loss_cooldown_minutes", self.config.get("loss_cooldown_minutes", 30))
             loss_cooldown_rem = max(0.0, (loss_cooldown_minutes * 60) - elapsed_loss)
             
-        return max(cooldown_rem, loss_cooldown_rem)
+        return max(cooldown_rem, post_trade_rem, loss_cooldown_rem)
 
     def _log_stats(self):
         """Log daemon statistics."""
@@ -1058,10 +1153,30 @@ class AxonDaemon:
 
     def _manage_trailing_stops(self, bid: float, ask: float):
         """Manage trailing stop modifications on active MT5 positions."""
-        if not mt5 or not mt5.terminal_info():
-            return
+        is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
+        
+        # Throttling for bridge mode
+        if is_bridge:
+            if not hasattr(self, "_last_bridge_check_time"):
+                self._last_bridge_check_time = 0.0
+            import time as pytime
+            now = pytime.time()
+            if now - self._last_bridge_check_time < 1.0:
+                return
+            self._last_bridge_check_time = now
             
-        positions = mt5.positions_get(symbol=self.mt5_symbol)
+            # If no tracked positions, nothing to manage
+            if not self._tracked_positions:
+                return
+                
+            from axonai.realtime.execution_client import send_execution_command
+            res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol})
+            positions = res.get("positions", []) if res.get("success", False) else []
+        else:
+            if not mt5 or not mt5.terminal_info():
+                return
+            positions = mt5.positions_get(symbol=self.mt5_symbol)
+            
         if not positions:
             return
             
@@ -1069,63 +1184,106 @@ class AxonDaemon:
         digits = 3 if "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() else 5
         
         for pos in positions:
-            ticket = pos.ticket
-            # If we don't have the initial SL recorded, initialize it from pos.sl
+            if is_bridge:
+                ticket = pos["ticket"]
+                pos_type = pos["type"]
+                price_open = pos["price_open"]
+                pos_sl = pos["sl"]
+                pos_tp = pos["tp"]
+                pos_symbol = pos["symbol"]
+            else:
+                ticket = pos.ticket
+                pos_type = "BUY" if pos.type == mt5.POSITION_TYPE_BUY else "SELL"
+                price_open = pos.price_open
+                pos_sl = pos.sl
+                pos_tp = pos.tp
+                pos_symbol = pos.symbol
+                
+            # If we don't have the initial SL recorded, initialize it from pos_sl
             if ticket not in self._active_trade_initial_sl:
-                self._active_trade_initial_sl[ticket] = pos.sl
+                self._active_trade_initial_sl[ticket] = pos_sl
                 self._tracked_positions.add(ticket)
                 
             initial_sl = self._active_trade_initial_sl[ticket]
             if initial_sl <= 0.0:
                 continue
                 
-            if pos.type == mt5.POSITION_TYPE_BUY:
+            if pos_type == "BUY":
                 # BUY: profit is (bid - price_open). SL distance is (price_open - initial_sl)
-                sl_dist = pos.price_open - initial_sl
-                current_profit = bid - pos.price_open
+                sl_dist = price_open - initial_sl
+                current_profit = bid - price_open
                 if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
-                    breakeven_sl = round(pos.price_open + 1 * pip, digits)
-                    if pos.sl < breakeven_sl:
+                    breakeven_sl = round(price_open + 1 * pip, digits)
+                    if pos_sl < breakeven_sl:
                         logger.info("AxonDaemon: Trailing SL triggered for BUY ticket %d. Modifying SL: %.5f -> %.5f",
-                                    ticket, pos.sl, breakeven_sl)
-                        request = {
-                            "action": mt5.TRADE_ACTION_SLTP,
-                            "position": ticket,
-                            "symbol": self.mt5_symbol,
-                            "sl": breakeven_sl,
-                            "tp": pos.tp,
-                        }
-                        res = mt5.order_send(request)
-                        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                            logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
-                            
-            elif pos.type == mt5.POSITION_TYPE_SELL:
+                                    ticket, pos_sl, breakeven_sl)
+                        if is_bridge:
+                            from axonai.realtime.execution_client import send_execution_command
+                            send_execution_command(self.config, {
+                                "action": "modify",
+                                "position": ticket,
+                                "symbol": pos_symbol,
+                                "sl": breakeven_sl,
+                                "tp": pos_tp,
+                            })
+                        else:
+                            request = {
+                                "action": mt5.TRADE_ACTION_SLTP,
+                                "position": ticket,
+                                "symbol": self.mt5_symbol,
+                                "sl": breakeven_sl,
+                                "tp": pos_tp,
+                            }
+                            res = mt5.order_send(request)
+                            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                                logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
+                                
+            elif pos_type == "SELL":
                 # SELL: profit is (price_open - ask). SL distance is (initial_sl - price_open)
-                sl_dist = initial_sl - pos.price_open
-                current_profit = pos.price_open - ask
+                sl_dist = initial_sl - price_open
+                current_profit = price_open - ask
                 if sl_dist > 0 and current_profit >= 1.0 * sl_dist:
-                    breakeven_sl = round(pos.price_open - 1 * pip, digits)
-                    if pos.sl > breakeven_sl or pos.sl == 0.0:
+                    breakeven_sl = round(price_open - 1 * pip, digits)
+                    if pos_sl > breakeven_sl or pos_sl == 0.0:
                         logger.info("AxonDaemon: Trailing SL triggered for SELL ticket %d. Modifying SL: %.5f -> %.5f",
-                                    ticket, pos.sl, breakeven_sl)
-                        request = {
-                            "action": mt5.TRADE_ACTION_SLTP,
-                            "position": ticket,
-                            "symbol": self.mt5_symbol,
-                            "sl": breakeven_sl,
-                            "tp": pos.tp,
-                        }
-                        res = mt5.order_send(request)
-                        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                            logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
+                                    ticket, pos_sl, breakeven_sl)
+                        if is_bridge:
+                            from axonai.realtime.execution_client import send_execution_command
+                            send_execution_command(self.config, {
+                                "action": "modify",
+                                "position": ticket,
+                                "symbol": pos_symbol,
+                                "sl": breakeven_sl,
+                                "tp": pos_tp,
+                            })
+                        else:
+                            request = {
+                                "action": mt5.TRADE_ACTION_SLTP,
+                                "position": ticket,
+                                "symbol": self.mt5_symbol,
+                                "sl": breakeven_sl,
+                                "tp": pos_tp,
+                            }
+                            res = mt5.order_send(request)
+                            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                                logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
 
     def _check_for_closed_positions(self, bid: float, ask: float):
         """Detect closed positions and log outcomes."""
-        if not mt5 or not mt5.terminal_info():
-            return
-            
-        positions = mt5.positions_get(symbol=self.mt5_symbol)
-        active_tickets = {p.ticket for p in positions} if positions else set()
+        is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
+        
+        if is_bridge:
+            if not self._tracked_positions:
+                return
+            from axonai.realtime.execution_client import send_execution_command
+            res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol})
+            positions = res.get("positions", []) if res.get("success", False) else []
+            active_tickets = {int(p["ticket"]) for p in positions}
+        else:
+            if not mt5 or not mt5.terminal_info():
+                return
+            positions = mt5.positions_get(symbol=self.mt5_symbol)
+            active_tickets = {p.ticket for p in positions} if positions else set()
         
         # Detect closed tickets
         closed_tickets = self._tracked_positions - active_tickets
@@ -1141,7 +1299,12 @@ class AxonDaemon:
             logger.info("AxonDaemon: Detected closed position for ticket %d", ticket)
             
             # Fetch deal history for this ticket
-            deals = mt5.history_deals_get(position=ticket)
+            if is_bridge:
+                from axonai.realtime.execution_client import send_execution_command
+                hist_res = send_execution_command(self.config, {"action": "history_deals_get", "position": ticket})
+                deals = hist_res.get("deals", []) if hist_res.get("success", False) else []
+            else:
+                deals = mt5.history_deals_get(position=ticket)
             
             exit_price = 0.0
             exit_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -1155,25 +1318,29 @@ class AxonDaemon:
             initial_sl = self._active_trade_initial_sl.get(ticket, 0.0)
             
             if deals:
-                # Find exit deal (DEAL_ENTRY_OUT)
+                # Find exit deal
                 exit_deal = None
                 entry_deal = None
                 for deal in deals:
-                    if deal.entry == mt5.DEAL_ENTRY_OUT:
+                    deal_entry = deal["entry"] if is_bridge else deal.entry
+                    
+                    if deal_entry == 1 or (not is_bridge and deal_entry == mt5.DEAL_ENTRY_OUT):
                         exit_deal = deal
-                    elif deal.entry == mt5.DEAL_ENTRY_IN:
+                    elif deal_entry == 0 or (not is_bridge and deal_entry == mt5.DEAL_ENTRY_IN):
                         entry_deal = deal
                         
                 if entry_deal:
-                    entry_price = entry_deal.price
-                    volume = entry_deal.volume
-                    direction = "BUY" if entry_deal.type == mt5.DEAL_TYPE_BUY or entry_deal.type == 0 else "SELL"
+                    entry_price = entry_deal["price"] if is_bridge else entry_deal.price
+                    volume = entry_deal["volume"] if is_bridge else entry_deal.volume
+                    deal_type = entry_deal["type"] if is_bridge else entry_deal.type
+                    direction = "BUY" if deal_type == 0 else "SELL"
                     
                 if exit_deal:
-                    exit_price = exit_deal.price
-                    exit_time_str = datetime.fromtimestamp(exit_deal.time).strftime("%Y-%m-%d %H:%M:%S")
-                    profit = exit_deal.profit
-                    comment = getattr(exit_deal, "comment", "").lower()
+                    exit_price = exit_deal["price"] if is_bridge else exit_deal.price
+                    deal_time = exit_deal["time"] if is_bridge else exit_deal.time
+                    exit_time_str = datetime.fromtimestamp(deal_time).strftime("%Y-%m-%d %H:%M:%S")
+                    profit = exit_deal["profit"] if is_bridge else exit_deal.profit
+                    comment = (exit_deal["comment"] if is_bridge else getattr(exit_deal, "comment", "")).lower()
                     
                     # Calculate pips
                     if direction == "BUY":
@@ -1193,7 +1360,7 @@ class AxonDaemon:
                     elif "so" in comment:
                         reason = "Stop Out (SO)"
                     else:
-                        reason = f"Closed ({exit_deal.comment or 'Manual'})"
+                        reason = f"Closed ({exit_deal['comment'] if is_bridge else (exit_deal.comment or 'Manual')})"
                         
             # If history failed, fallback to basic estimates
             if entry_price == 0.0:
@@ -1268,6 +1435,9 @@ class AxonDaemon:
             cooldown_minutes = 45 if profit < 0 else 15
             logger.info("Trade closed (Profit: %.2f). Applying %d minute post-trade cooldown.", profit, cooldown_minutes)
             self._cooldown_seconds = cooldown_minutes * 60
+            self._last_close_time = datetime.now()
+            if profit < 0:
+                self._last_loss_time = datetime.now()
             
         # Update tracked positions with active ones
         self._tracked_positions = active_tickets.copy()

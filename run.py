@@ -78,6 +78,8 @@ def main():
     parser.add_argument("--paper", action="store_true",
                         help="Paper-trade mode: simulate fills internally, never send orders to MT5. "
                              "Safe for testing; dry-run (default) still places real demo orders.")
+    parser.add_argument("--live", action="store_true",
+                        help="Live execution mode: disables dry-run (fixed 1.00 lot size) and enables dynamic position sizing.")
     args = parser.parse_args()
 
     env = "wsl" if is_wsl() else "windows" if is_windows() else "linux"
@@ -145,7 +147,7 @@ def main():
         from axonai.default_config import DEFAULT_CONFIG
         config = DEFAULT_CONFIG.copy()
         config["symbol"] = args.symbol
-        config["realtime_dry_run"] = True
+        config["realtime_dry_run"] = not args.live
         # Pure-math mode by default (Rule A+B signals, no LLM/API key). Pass --enable-llm to turn the agent layer on.
         config["disable_llm"] = not args.enable_llm
         # Paper-trade: simulate fills (no MT5 send). Default dry-run still sends real demo orders.
