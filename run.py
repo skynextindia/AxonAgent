@@ -80,7 +80,15 @@ def main():
                              "Safe for testing; dry-run (default) still places real demo orders.")
     parser.add_argument("--live", action="store_true",
                         help="Live execution mode: disables dry-run (fixed 1.00 lot size) and enables dynamic position sizing.")
+    parser.add_argument("--feed-path", type=str, default=None,
+                        help="Path to feed MT5 terminal64.exe (e.g. Exness)")
+    parser.add_argument("--exec-path", type=str, default=None,
+                        help="Path to execution MT5 terminal64.exe (e.g. MetaQuotes)")
     args = parser.parse_args()
+
+    if args.feed_path:
+        from axonai.dataflows.mt5_data import set_feed_terminal_path
+        set_feed_terminal_path(args.feed_path)
 
     env = "wsl" if is_wsl() else "windows" if is_windows() else "linux"
     bridge_mode = args.bridge or (env == "wsl" and not args.direct)
@@ -152,6 +160,8 @@ def main():
         config["disable_llm"] = not args.enable_llm
         # Paper-trade: simulate fills (no MT5 send). Default dry-run still sends real demo orders.
         config["paper_trade"] = args.paper
+        if args.feed_path:
+            config["mt5_terminal_path"] = args.feed_path
         daemon = AxonDaemon(symbol=args.symbol, config=config)
         daemon.start()
 

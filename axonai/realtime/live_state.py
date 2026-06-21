@@ -164,7 +164,7 @@ class LiveWorldState:
             from axonai.dataflows.mt5_data import (
                 mt5_initialize, _to_mt5_symbol, _ensure_symbol_visible, _fetch_bars
             )
-            if not mt5_initialize():
+            if not mt5_initialize(self.config.get("mt5_terminal_path")):
                 return
 
             mt5_sym = _to_mt5_symbol(self.symbol)
@@ -644,7 +644,7 @@ class LiveMarketEvidence:
             from axonai.dataflows.mt5_data import (
                 mt5_initialize, _to_mt5_symbol, _ensure_symbol_visible, _fetch_bars
             )
-            if not mt5_initialize():
+            if not mt5_initialize(self.config.get("mt5_terminal_path")):
                 logger.warning("LiveMarketEvidence: MT5 initialization failed for candle history seeding.")
                 return
 

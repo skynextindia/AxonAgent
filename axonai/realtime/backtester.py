@@ -66,7 +66,7 @@ class BacktestEngine:
         """Fetch real data from MT5 if connected, otherwise generate synthetic market dataset."""
         connected = False
         try:
-            if mt5_initialize():
+            if mt5_initialize(self.config.get("mt5_terminal_path")):
                 connected = True
         except Exception:
             pass

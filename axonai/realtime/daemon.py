@@ -548,7 +548,7 @@ class AxonDaemon:
             dashboard.daemon = self
 
         # 1. Initialize MT5
-        if not mt5_initialize():
+        if not mt5_initialize(self.config.get("mt5_terminal_path")):
             logger.error("AxonDaemon: MT5 initialization failed. Cannot start.")
             return
         logger.info("Step 1/4: MT5 connected")
