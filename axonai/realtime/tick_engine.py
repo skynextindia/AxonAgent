@@ -215,6 +215,10 @@ class TickEngine(threading.Thread):
             if not mt5.initialize(**kwargs):
                 logger.error("TickEngine: MT5 init failed: %s", mt5.last_error())
                 return False
+            # Bind the live MT5 handle so _poll_ticks / _preseed read real data.
+            # Without this, self._mt5 stays None and the engine silently falls
+            # back to the simulated stale-feed loop (~1 mock tick / 10s).
+            self._mt5 = mt5
             # Ensure symbol visible
             info = mt5.symbol_info(self.symbol)
             if info is None:

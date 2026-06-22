@@ -182,32 +182,40 @@ class MT5TradeExecutor:
         tp = round(tp, digits)
         price = round(price, digits)
 
-        # 3. Dynamic Position Sizing based on Account Equity & Risk Percentage
+        # 3. Position Sizing
+        #    - dry-run: fixed 1.00 lot (sandbox)
+        #    - live + realtime_dynamic_sizing: risk-based off account equity
+        #    - live (default): the configured realtime_default_lot_size (predictable)
         is_mock_env = self.config.get("realtime_dry_run", False)
-        
+
         if is_mock_env:
             lot = 1.00
             logger.info("TradeExecutor: Dryrun active. Using fixed lot size: 1.00")
-        else:
+        elif self.config.get("realtime_dynamic_sizing", False):
             if is_bridge:
                 res = send_execution_command(self.config, {"action": "account_info"})
                 equity = res.get("equity", 10000.0) if res.get("success") else 10000.0
             else:
                 acc = mt5.account_info()
                 equity = acc.equity if acc else 10000.0
-                
+
             risk_pct = self.config.get("realtime_risk_pct", 0.01)
             risk_amount = equity * risk_pct
             sl_pips = sl_distance / pip
-            lot_size = round(risk_amount / (sl_pips * 0.10), 2)
-            lot_size = max(0.01, min(lot_size, 0.10))  # hard limits
-            lot = lot_size
-            
+            # $10 per pip per 1.00 standard lot (FX majors).
+            pip_value_per_lot = 10.0
+            lot_size = round(risk_amount / max(sl_pips * pip_value_per_lot, 1e-6), 2)
+            max_lot = self.config.get("realtime_max_lot", 1.00)
+            lot = max(0.01, min(lot_size, max_lot))
+
             logger.info(
-                "TradeExecutor: Account equity: %.2f | Risk amount: %.2f | "
-                "SL pips: %.2f | Calculated lot: %.4f | Final lot: %.2f",
+                "TradeExecutor: Dynamic sizing | equity: %.2f | risk: %.2f | "
+                "SL pips: %.2f | calc lot: %.4f | final lot: %.2f",
                 equity, risk_amount, sl_pips, lot_size, lot
             )
+        else:
+            lot = self.default_lot_size
+            logger.info("TradeExecutor: Using configured default lot size: %.2f", lot)
 
         # Paper-trade mode: simulate the fill and return without live order API.
         if self.paper_trade or self.config.get("paper_trade", False):

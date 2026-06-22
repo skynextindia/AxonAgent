@@ -1,7 +1,6 @@
 """Shared pytest fixtures that prevent CI hangs when API keys are absent."""
 
 import os
-from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -33,14 +32,3 @@ _API_KEY_ENV_VARS = (
 def _dummy_api_keys(monkeypatch):
     for env_var in _API_KEY_ENV_VARS:
         monkeypatch.setenv(env_var, os.environ.get(env_var, "placeholder"))
-
-
-@pytest.fixture()
-def mock_llm_client():
-    client = MagicMock()
-    client.get_llm.return_value = MagicMock()
-    with patch(
-        "axonai.llm_clients.factory.create_llm_client",
-        return_value=client,
-    ):
-        yield client

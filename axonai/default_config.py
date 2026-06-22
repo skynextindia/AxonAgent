@@ -140,10 +140,15 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_log_events": True,
     "realtime_magic_number": 123456,
     "realtime_default_lot_size": 0.01,
+    # Live sizing: when False, every live order uses realtime_default_lot_size.
+    # When True, size is risk-based off account equity (realtime_risk_pct),
+    # capped at realtime_max_lot.
+    "realtime_dynamic_sizing": False,
+    "realtime_risk_pct": 0.01,
+    "realtime_max_lot": 1.00,
     "realtime_deviation": 20,
     "realtime_min_confluence_conditions": 1,
     "realtime_dry_run": True,
-    "disable_llm": False,           # True = pure-math mode: skip LangGraph/LLM, trade on Rule A+B signals only (no API key needed)
     "paper_trade": False,           # True = simulate fills internally, never call mt5.order_send (safe for tests / funded accounts)
     "peak_detector_rule_c_enabled": False,
     "trade_risk_pct": 0.01,
