@@ -159,30 +159,18 @@ class DashboardServer:
         @self.app.post("/api/pause_llm")
         def pause_llm():
             with self._lock:
-                if self.daemon:
-                    if hasattr(self.daemon, "paused"):
-                        self.daemon.paused = not self.daemon.paused
-                        state = "paused" if self.daemon.paused else "resumed"
-                        return {"status": "success", "message": f"Trading operations {state}", "paused": self.daemon.paused}
-                    elif hasattr(self.daemon, "llm"):
-                        self.daemon.llm.paused = not getattr(self.daemon.llm, "paused", False)
-                        state = "paused" if self.daemon.llm.paused else "resumed"
-                        return {"status": "success", "message": f"LLM operations {state}"}
+                if self.daemon and hasattr(self.daemon, "paused"):
+                    self.daemon.paused = not self.daemon.paused
+                    state = "paused" if self.daemon.paused else "resumed"
+                    return {"status": "success", "message": f"Trading operations {state}", "paused": self.daemon.paused}
                 return {"status": "error", "message": "Daemon not registered or not pausable"}
 
 
         @self.app.get("/api/logs/decisions")
         def get_decisions_log():
-            import os
-            from axonai.agents.utils.memory import TradingMemoryLog
-            from axonai.default_config import DEFAULT_CONFIG
-            config = self.daemon.config if (self.daemon and hasattr(self.daemon, "config")) else DEFAULT_CONFIG
-            mem_path = config.get("memory_log_path", os.path.expanduser("~/.axonai/memory/trading_memory.md"))
-            try:
-                log = TradingMemoryLog({"memory_log_path": mem_path})
-                return {"status": "success", "entries": log.load_entries()}
-            except Exception as e:
-                return {"status": "error", "message": str(e)}
+            # Pure-math engine has no LLM decision journal; trade history is
+            # served by /api/logs/trades. Kept for frontend API compatibility.
+            return {"status": "success", "entries": []}
 
         @self.app.get("/api/logs/trades")
         def get_trades_log():

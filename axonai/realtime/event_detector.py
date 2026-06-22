@@ -725,15 +725,19 @@ class EventDetector:
                 logger.debug("Event suppressed (cooldown): %s", event)
             return
 
-        # Hard UTC session block: only allow events between 07:00-20:00 UTC
-        evt = event.timestamp
-        if evt.tzinfo:
-            evt = evt.astimezone(timezone.utc)
-        utc_hour = evt.hour + evt.minute / 60.0
-        if not (7.0 <= utc_hour < 20.0):
-            if self._log_events:
-                logger.debug("Event suppressed (outside 07:00-20:00 UTC): %s", event)
-            return
+        # Hard UTC session block: only allow events between 07:00-20:00 UTC.
+        # Bypassed in test mode so unit tests are not wall-clock dependent
+        # (tests build candles with a naive datetime.now() that this gate
+        # would otherwise interpret as a UTC hour and suppress off-hours).
+        if not self._test_mode:
+            evt = event.timestamp
+            if evt.tzinfo:
+                evt = evt.astimezone(timezone.utc)
+            utc_hour = evt.hour + evt.minute / 60.0
+            if not (7.0 <= utc_hour < 20.0):
+                if self._log_events:
+                    logger.debug("Event suppressed (outside 07:00-20:00 UTC): %s", event)
+                return
 
         # Asian session filter
         if self._suppress_asian:
