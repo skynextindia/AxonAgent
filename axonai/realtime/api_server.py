@@ -65,6 +65,7 @@ class DashboardServer:
             "events": [],        # List of last 30 detected events
             "agent_trace": [],   # List of last 50 agent steps
             "decision": None,    # Latest final decision
+            "trigger_metrics": None,  # Real-time entry trigger conditions
             "mode": None,        # Execution mode badge (paper / dry-run / live + LLM on/off)
         }
 
@@ -592,6 +593,7 @@ class DashboardServer:
             decision_data = self.history["decision"]
             news_data = self.history["news_data"]
             mode_data = self.history["mode"]
+            trigger_metrics_data = self.history.get("trigger_metrics")
 
         # 2. Perform all asynchronous sends safely OUTSIDE the lock block!
         # 0. Execution mode badge (send first so the header reflects mode immediately)
@@ -621,6 +623,9 @@ class DashboardServer:
         # 8. Latest final trade decision
         if decision_data:
             await websocket.send_json(decision_data)
+        # 8.5. Trigger Metrics (real-time entry conditions)
+        if trigger_metrics_data:
+            await websocket.send_json(trigger_metrics_data)
         # 9. Sentiment News Feed
         if news_data:
             await websocket.send_json(news_data)
@@ -635,7 +640,7 @@ class DashboardServer:
         with self._lock:
             # Update cache history
             save_needed = False
-            if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data", "mode"]:
+            if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data", "mode", "trigger_metrics"]:
                 self.history[msg_type] = message
                 if msg_type in ["decision", "news_data"]:
                     save_needed = True

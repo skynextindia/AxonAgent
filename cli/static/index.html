@@ -706,7 +706,7 @@ class DashboardController {
     const reasonEl = document.getElementById("trigger-reason");
     if(reasonEl) {
       reasonEl.textContent = d.reason || "Awaiting conditions...";
-      reasonEl.style.color = d.is_valid ? "var(--green)" : "var(--text-dim)";
+      reasonEl.style.color = d.is_valid ? "#00c853" : "#444";
       reasonEl.style.fontWeight = d.is_valid ? "900" : "700";
     }
   }
