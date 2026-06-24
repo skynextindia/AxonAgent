@@ -32,9 +32,9 @@ class TestDaemonE2E(unittest.TestCase):
     @patch("axonai.realtime.daemon.get_broker_tz_offset")
     @patch("axonai.realtime.daemon.LiveWorldState")
     @patch("axonai.realtime.daemon.LiveMarketEvidence")
-    @patch("axonai.realtime.daemon.GraphExecutor")
+    @patch("axonai.realtime.daemon.ReversalModel")
     def test_daemon_full_flow(
-        self, mock_graph, mock_evidence, mock_state, mock_tz_offset,
+        self, mock_reversal, mock_evidence, mock_state, mock_tz_offset,
         mock_acc_info, mock_order_send, mock_tick_info, mock_sym_info, mock_term_info
     ):
         """Verify the full E2E flow from tick to event queue and signal execution."""
@@ -93,17 +93,6 @@ class TestDaemonE2E(unittest.TestCase):
         daemon._start_time = datetime.now()
         daemon._running = True
 
-        # Mock graph executor to return a BUY signal and stop the loop
-        graph_inst = mock_graph.return_value
-        graph_inst.seconds_until_ready = 0
-        graph_inst.should_execute.return_value = True
-        
-        def stop_loop_and_return_buy(*args, **kwargs):
-            daemon._running = False
-            return MagicMock(), "Buy"
-            
-        graph_inst.execute.side_effect = stop_loop_and_return_buy
-
         # Mock account info
         acc = MagicMock()
         acc.equity = 10000.0
@@ -119,17 +108,26 @@ class TestDaemonE2E(unittest.TestCase):
         order_res.comment = "Success"
         mock_order_send.return_value = order_res
 
-        # Create event to process in loop
-        event = MarketEvent(
-            event_type=EventType.LEVEL_BREACH,
-            priority=EventPriority.HIGH,
-            timestamp=datetime.now(),
-            symbol="EURUSD=X",
-            price=1.15005,
-            details={"level": 1.15000}
-        )
+        # Mock reversal model
+        reversal_inst = mock_reversal.return_value
+        
+        # When order_send is called, stop the loop to prevent hanging
+        def stop_loop_and_order_send(*args, **kwargs):
+            daemon._running = False
+            return order_res
+        mock_order_send.side_effect = stop_loop_and_order_send
 
-        # Ingest event directly into queue
+        # Create mock snapshot for event
+        mock_snapshot = MagicMock()
+        mock_snapshot.entry_decision.direction = "BUY"
+        mock_snapshot.entry_decision.signal_quality = 0.8
+        mock_snapshot.price = 1.15005
+
+        # Ingest event directly into queue matching the new event format
+        event = {
+            "type": "entry",
+            "snapshot": mock_snapshot
+        }
         daemon.event_queue.put(event)
 
         # Let the loop execute

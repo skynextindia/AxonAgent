@@ -25,24 +25,31 @@ from axonai.realtime.level_tracker import LevelBehaviorTracker
 logger = logging.getLogger(__name__)
 
 
+_session_hours_cache = {}
+
 def get_dst_session_hours(dt: datetime) -> tuple[float, float, float, float]:
     """Return (ldn_open, ldn_close, ny_open, ny_close) in UTC for a given datetime."""
+    key = (dt.year, dt.month, dt.day)
+    global _session_hours_cache
+    if key in _session_hours_cache:
+        return _session_hours_cache[key]
+
     from zoneinfo import ZoneInfo
     if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
+        dt_utc = dt.replace(tzinfo=timezone.utc)
     else:
-        dt = dt.astimezone(timezone.utc)
+        dt_utc = dt.astimezone(timezone.utc)
         
     ldn_tz = ZoneInfo("Europe/London")
     ny_tz = ZoneInfo("America/New_York")
     
-    dt_ldn = dt.astimezone(ldn_tz)
+    dt_ldn = dt_utc.astimezone(ldn_tz)
     ldn_open_local = datetime(dt_ldn.year, dt_ldn.month, dt_ldn.day, 8, 0, tzinfo=ldn_tz)
     ldn_close_local = datetime(dt_ldn.year, dt_ldn.month, dt_ldn.day, 16, 0, tzinfo=ldn_tz)
     ldn_open_utc = ldn_open_local.astimezone(timezone.utc)
     ldn_close_utc = ldn_close_local.astimezone(timezone.utc)
     
-    dt_ny = dt.astimezone(ny_tz)
+    dt_ny = dt_utc.astimezone(ny_tz)
     ny_open_local = datetime(dt_ny.year, dt_ny.month, dt_ny.day, 8, 0, tzinfo=ny_tz)
     ny_close_local = datetime(dt_ny.year, dt_ny.month, dt_ny.day, 14, 0, tzinfo=ny_tz)
     ny_open_utc = ny_open_local.astimezone(timezone.utc)
@@ -52,6 +59,10 @@ def get_dst_session_hours(dt: datetime) -> tuple[float, float, float, float]:
     ldn_close = ldn_close_utc.hour + ldn_close_utc.minute / 60.0
     ny_open = ny_open_utc.hour + ny_open_utc.minute / 60.0
     ny_close = ny_close_utc.hour + ny_close_utc.minute / 60.0
+    
+    if len(_session_hours_cache) > 200:
+        _session_hours_cache.clear()
+    _session_hours_cache[key] = (ldn_open, ldn_close, ny_open, ny_close)
     return ldn_open, ldn_close, ny_open, ny_close
 
 
@@ -86,6 +97,13 @@ class LiveWorldState:
         self._state: Optional[WorldState] = None
         self._initialized = False
 
+        # Latest live price (consumed by MT5TradeExecutor bridge path and daemon
+        # close logic). Must be populated on every tick — otherwise the executor
+        # falls back to a dummy 1.1000/1.1005 price and the broker rejects orders
+        # with retcode_10016 (INVALID_STOPS).
+        self.current_bid: float = 0.0
+        self.current_ask: float = 0.0
+
         # Parse JPY and base/quote symbols dynamically
         sym_clean = symbol.strip().upper().replace("/", "").replace("=X", "")
         if len(sym_clean) >= 6:
@@ -97,6 +115,9 @@ class LiveWorldState:
         
         self._is_jpy = self._quote_currency == "JPY"
         self._pip_mult = 0.01 if self._is_jpy else 0.0001
+        
+        self._broker_symbol = _to_mt5_symbol(self.symbol, self.config)
+        self._offset_hours = get_broker_tz_offset(self._broker_symbol)
 
         # Config-driven lengths with defaults
         rsi_len = config.get("indicator_rsi_length", 14)
@@ -150,7 +171,7 @@ class LiveWorldState:
             from axonai.dataflows.mt5_data import (
                 mt5_initialize, _to_mt5_symbol, _ensure_symbol_visible, _fetch_bars
             )
-            if not mt5_initialize():
+            if not mt5_initialize(self.config.get("mt5_terminal_path")):
                 return
 
             mt5_sym = _to_mt5_symbol(self.symbol)
@@ -207,6 +228,11 @@ class LiveWorldState:
 
     def on_tick(self, bid: float, ask: float, timestamp: datetime):
         """Update spread and session on every tick. O(1) cost."""
+        # Always track the latest live price, even before full init, so the
+        # executor never falls back to the dummy 1.1000 price.
+        self.current_bid = bid
+        self.current_ask = ask
+
         if not self._initialized or self._state is None:
             return
 
@@ -222,40 +248,14 @@ class LiveWorldState:
             self._state.spread_safe = False
 
         # Update session (time-based) using true UTC time adjusted for broker DST/offset
-        broker_symbol = _to_mt5_symbol(self.symbol, self.config)
-        offset_hours = get_broker_tz_offset(broker_symbol)
-        
         if timestamp.tzinfo:
             utc_dt = timestamp.astimezone(timezone.utc)
         else:
-            utc_dt = timestamp - timedelta(hours=offset_hours)
+            utc_dt = timestamp - timedelta(hours=self._offset_hours)
             utc_dt = utc_dt.replace(tzinfo=timezone.utc)
         utc_hour = utc_dt.hour + utc_dt.minute / 60.0
 
-        year = utc_dt.year
-        
-        # New York DST (EDT: 2nd Sunday in March to 1st Sunday in November)
-        dst_start_us = datetime(year, 3, 8)
-        while dst_start_us.weekday() != 6:
-            dst_start_us += timedelta(days=1)
-        dst_end_us = datetime(year, 11, 1)
-        while dst_end_us.weekday() != 6:
-            dst_end_us += timedelta(days=1)
-        is_us_dst = dst_start_us.date() <= utc_dt.date() < dst_end_us.date()
-
-        # London DST (BST: Last Sunday in March to Last Sunday in October)
-        dst_start_eu = datetime(year, 3, 31)
-        while dst_start_eu.weekday() != 6:
-            dst_start_eu -= timedelta(days=1)
-        dst_end_eu = datetime(year, 10, 31)
-        while dst_end_eu.weekday() != 6:
-            dst_end_eu -= timedelta(days=1)
-        is_eu_dst = dst_start_eu.date() <= utc_dt.date() < dst_end_eu.date()
-
-        ldn_open = 7.0 if is_eu_dst else 8.0
-        ldn_close = 15.0 if is_eu_dst else 16.0
-        ny_open = 12.0 if is_us_dst else 13.0
-        ny_close = 18.0 if is_us_dst else 19.0
+        ldn_open, ldn_close, ny_open, ny_close = get_dst_session_hours(utc_dt)
 
         prev_session = self._state.session
         if ny_open <= utc_hour < ldn_close:
@@ -487,7 +487,7 @@ class LiveWorldState:
         # Try cross-pair strength calculation via MT5
         try:
             import MetaTrader5 as mt5
-            if mt5 and mt5.terminal_info():
+            if not self.config.get("backtest_mode", False) and mt5 and mt5.terminal_info():
                 usd_pairs = {
                     "EURUSD": -1.0,  # USD is quote
                     "GBPUSD": -1.0,  # USD is quote
@@ -590,6 +590,9 @@ class LiveMarketEvidence:
         sym_clean = symbol.strip().upper().replace("/", "").replace("=X", "")
         is_jpy = sym_clean.endswith("JPY") or (len(sym_clean) >= 6 and sym_clean[3:6] == "JPY")
         self._pip_mult = 0.01 if is_jpy else 0.0001
+        
+        self._broker_symbol = _to_mt5_symbol(self.symbol, self.config)
+        self._offset_hours = get_broker_tz_offset(self._broker_symbol)
 
         # Rolling candle history for structural detection
         candle_history_limit = self.config.get("realtime_candle_history", 500)
@@ -653,7 +656,7 @@ class LiveMarketEvidence:
             from axonai.dataflows.mt5_data import (
                 mt5_initialize, _to_mt5_symbol, _ensure_symbol_visible, _fetch_bars
             )
-            if not mt5_initialize():
+            if not mt5_initialize(self.config.get("mt5_terminal_path")):
                 logger.warning("LiveMarketEvidence: MT5 initialization failed for candle history seeding.")
                 return
 
@@ -722,176 +725,118 @@ class LiveMarketEvidence:
             logger.error("LiveMarketEvidence candle seed error: %s", e, exc_info=True)
 
     def _calculate_initial_institutional_levels(self):
-        """Compute the 6 institutional levels from MT5 history on startup."""
+        """Compute the 6 institutional levels from local history deques."""
         try:
-            from axonai.dataflows.mt5_data import (
-                mt5_initialize, _to_mt5_symbol, _ensure_symbol_visible, _fetch_bars
-            )
-            if not mt5_initialize():
-                logger.warning("LiveMarketEvidence: MT5 initialization failed for institutional calculation.")
-                return
-
-            mt5_sym = _to_mt5_symbol(self.symbol)
-            _ensure_symbol_visible(mt5_sym)
-
-            end_dt = datetime.now()
-            
-            # Fetch bars
-            df_d1 = _fetch_bars(mt5_sym, "D1", end_dt - timedelta(days=15), end_dt)
-            df_w1 = _fetch_bars(mt5_sym, "W1", end_dt - timedelta(days=45), end_dt)
-            df_h1 = _fetch_bars(mt5_sym, "H1", end_dt - timedelta(days=5), end_dt)
-            df_h4 = _fetch_bars(mt5_sym, "H4", end_dt - timedelta(days=30), end_dt)
-
             self.price_levels.clear()
             now_utc = datetime.now(timezone.utc)
-            offset_hours = get_broker_tz_offset(mt5_sym)
+            
+            # Find current price proxy
+            current_bid = 1.1600
+            if self._h1_candles:
+                current_bid = self._h1_candles[-1].close
+            elif self._m15_candles:
+                current_bid = self._m15_candles[-1].close
 
-            # Get current bid/close proxy
-            current_bid = float(df_h1["Close"].iloc[-1]) if df_h1 is not None and not df_h1.empty else 1.1600
+            # 1. PDH/PDL from H1 candles
+            if self._h1_candles:
+                # Group H1 candles by date (ignoring the last date which is today)
+                h1_list = list(self._h1_candles)
+                dates = sorted(list(set(c.open_time.date() for c in h1_list)))
+                if len(dates) >= 2:
+                    yesterday_date = dates[-2]
+                    yesterday_candles = [c for c in h1_list if c.open_time.date() == yesterday_date]
+                    if yesterday_candles:
+                        yd_high = max(c.high for c in yesterday_candles)
+                        yd_low = min(c.low for c in yesterday_candles)
+                        self.price_levels.append(PriceLevel(
+                            price=float(yd_high), level_type="PDH", timeframe="D1",
+                            touches=0, last_touch=now_utc, direction="resistance", strength=0.2, is_active=True
+                        ))
+                        self.price_levels.append(PriceLevel(
+                            price=float(yd_low), level_type="PDL", timeframe="D1",
+                            touches=0, last_touch=now_utc, direction="support", strength=0.2, is_active=True
+                        ))
 
-            # 1. PDH/PDL
-            if df_d1 is not None and len(df_d1) >= 2:
-                yesterday = df_d1.iloc[-2]
-                self.price_levels.append(PriceLevel(
-                    price=float(yesterday["High"]),
-                    level_type="PDH",
-                    timeframe="D1",
-                    touches=0,
-                    last_touch=now_utc,
-                    direction="resistance",
-                    strength=0.2,
-                    is_active=True
-                ))
-                self.price_levels.append(PriceLevel(
-                    price=float(yesterday["Low"]),
-                    level_type="PDL",
-                    timeframe="D1",
-                    touches=0,
-                    last_touch=now_utc,
-                    direction="support",
-                    strength=0.2,
-                    is_active=True
-                ))
+            # 2. PWH/PWL from H1 candles
+            if self._h1_candles:
+                # Group H1 candles by week number (ignoring the last week which is today)
+                h1_list = list(self._h1_candles)
+                weeks = sorted(list(set(c.open_time.isocalendar()[:2] for c in h1_list)))
+                if len(weeks) >= 2:
+                    last_week = weeks[-2]
+                    last_week_candles = [c for c in h1_list if c.open_time.isocalendar()[:2] == last_week]
+                    if last_week_candles:
+                        lw_high = max(c.high for c in last_week_candles)
+                        lw_low = min(c.low for c in last_week_candles)
+                        self.price_levels.append(PriceLevel(
+                            price=float(lw_high), level_type="PWH", timeframe="W1",
+                            touches=0, last_touch=now_utc, direction="resistance", strength=0.2, is_active=True
+                        ))
+                        self.price_levels.append(PriceLevel(
+                            price=float(lw_low), level_type="PWL", timeframe="W1",
+                            touches=0, last_touch=now_utc, direction="support", strength=0.2, is_active=True
+                        ))
 
-            # 2. PWH/PWL
-            if df_w1 is not None and len(df_w1) >= 2:
-                last_week = df_w1.iloc[-2]
-                self.price_levels.append(PriceLevel(
-                    price=float(last_week["High"]),
-                    level_type="PWH",
-                    timeframe="W1",
-                    touches=0,
-                    last_touch=now_utc,
-                    direction="resistance",
-                    strength=0.2,
-                    is_active=True
-                ))
-                self.price_levels.append(PriceLevel(
-                    price=float(last_week["Low"]),
-                    level_type="PWL",
-                    timeframe="W1",
-                    touches=0,
-                    last_touch=now_utc,
-                    direction="support",
-                    strength=0.2,
-                    is_active=True
-                ))
-
-            # 3. ASH/ASL
-            if df_h1 is not None and not df_h1.empty:
-                start_search = end_dt - timedelta(days=2)
+            # 3. ASH/ASL from H1 candles
+            if self._h1_candles:
+                h1_list = list(self._h1_candles)
+                # Last 24 hours of H1 candles for Asian session
                 asian_highs = []
                 asian_lows = []
-                for open_time, row in df_h1.iterrows():
-                    utc_time = open_time - timedelta(hours=offset_hours)
-                    if utc_time >= start_search:
-                        ldn_open, _, _, _ = get_dst_session_hours(utc_time)
-                        if 22 <= utc_time.hour or utc_time.hour < ldn_open:
-                            asian_highs.append(row["High"])
-                            asian_lows.append(row["Low"])
+                for c in h1_list[-24:]:
+                    if 22 <= c.open_time.hour or c.open_time.hour < 8:
+                        asian_highs.append(c.high)
+                        asian_lows.append(c.low)
                 if asian_highs and asian_lows:
                     self.price_levels.append(PriceLevel(
-                        price=float(max(asian_highs)),
-                        level_type="ASH",
-                        timeframe="SESSION",
-                        touches=0,
-                        last_touch=now_utc,
-                        direction="resistance",
-                        strength=0.2,
-                        is_active=True
+                        price=float(max(asian_highs)), level_type="ASH", timeframe="SESSION",
+                        touches=0, last_touch=now_utc, direction="resistance", strength=0.2, is_active=True
                     ))
                     self.price_levels.append(PriceLevel(
-                        price=float(min(asian_lows)),
-                        level_type="ASL",
-                        timeframe="SESSION",
-                        touches=0,
-                        last_touch=now_utc,
-                        direction="support",
-                        strength=0.2,
-                        is_active=True
+                        price=float(min(asian_lows)), level_type="ASL", timeframe="SESSION",
+                        touches=0, last_touch=now_utc, direction="support", strength=0.2, is_active=True
                     ))
 
-            # 4. ROUND
+            # 4. ROUND Numbers
             pip50 = 50 * self._pip_mult
             base = round(current_bid / pip50) * pip50
             for i in range(-4, 5):
                 r_price = base + (i * pip50)
                 self.price_levels.append(PriceLevel(
-                    price=float(r_price),
-                    level_type="ROUND",
-                    timeframe="SESSION",
-                    touches=0,
-                    last_touch=now_utc,
-                    direction="support" if r_price < current_bid else "resistance",
-                    strength=0.2,
-                    is_active=True
+                    price=float(r_price), level_type="ROUND", timeframe="SESSION", touches=0, last_touch=now_utc,
+                    direction="support" if r_price < current_bid else "resistance", strength=0.2, is_active=True
                 ))
 
             # 5. H4_SWING
-            if df_h4 is not None and len(df_h4) >= 16:
-                # Scan last 10 completed H4 bars (len-13 to len-4)
-                for i in range(len(df_h4) - 13, len(df_h4) - 3):
-                    if i < 3 or i >= len(df_h4) - 3:
-                        continue
-                    row = df_h4.iloc[i]
-                    left = df_h4.iloc[i-3:i]
-                    right = df_h4.iloc[i+1:i+4]
+            if self._h4_candles and len(self._h4_candles) >= 16:
+                h4_list = list(self._h4_candles)
+                for i in range(3, len(h4_list) - 3):
+                    row = h4_list[i]
+                    left = h4_list[i-3:i]
+                    right = h4_list[i+1:i+4]
                     
                     # Swing High
-                    if row["High"] > max(left["High"]) and row["High"] > max(right["High"]):
-                        window_low = df_h4.iloc[i-3:i+4]["Low"].min()
-                        if row["High"] - window_low >= 15 * self._pip_mult:
+                    if row.high > max(c.high for c in left) and row.high > max(c.high for c in right):
+                        window_low = min(c.low for c in h4_list[i-3:i+4])
+                        if row.high - window_low >= 15 * self._pip_mult:
                             self.price_levels.append(PriceLevel(
-                                price=float(row["High"]),
-                                level_type="H4_SWING",
-                                timeframe="H4",
-                                touches=0,
-                                last_touch=now_utc,
-                                direction="resistance",
-                                strength=0.2,
-                                is_active=True
+                                price=float(row.high), level_type="H4_SWING", timeframe="H4",
+                                touches=0, last_touch=now_utc, direction="resistance", strength=0.2, is_active=True
                             ))
-
+                            
                     # Swing Low
-                    if row["Low"] < min(left["Low"]) and row["Low"] < min(right["Low"]):
-                        window_high = df_h4.iloc[i-3:i+4]["High"].max()
-                        if window_high - row["Low"] >= 15 * self._pip_mult:
+                    if row.low < min(c.low for c in left) and row.low < min(c.low for c in right):
+                        window_high = max(c.high for c in h4_list[i-3:i+4])
+                        if window_high - row.low >= 15 * self._pip_mult:
                             self.price_levels.append(PriceLevel(
-                                price=float(row["Low"]),
-                                level_type="H4_SWING",
-                                timeframe="H4",
-                                touches=0,
-                                last_touch=now_utc,
-                                direction="support",
-                                strength=0.2,
-                                is_active=True
+                                price=float(row.low), level_type="H4_SWING", timeframe="H4",
+                                touches=0, last_touch=now_utc, direction="support", strength=0.2, is_active=True
                             ))
 
             self._reclassify_all_directions(current_bid)
-            logger.info("LiveMarketEvidence: seeded %d institutional levels", len(self.price_levels))
-
+            logger.info("LiveMarketEvidence: computed %d institutional levels from local history", len(self.price_levels))
         except Exception as e:
-            logger.error("Error in LiveMarketEvidence institutional levels seed: %s", e, exc_info=True)
+            logger.error("Error in LiveMarketEvidence institutional levels calculation: %s", e, exc_info=True)
 
     def _reclassify_all_directions(self, current_bid: float):
         """Update direction for all active levels based on current bid."""
@@ -913,12 +858,10 @@ class LiveMarketEvidence:
         mid = (bid + ask) / 2.0
         
         # Calculate UTC hour
-        broker_symbol = _to_mt5_symbol(self.symbol)
-        offset_hours = get_broker_tz_offset(broker_symbol)
         if timestamp.tzinfo:
             utc_dt = timestamp.astimezone(timezone.utc)
         else:
-            utc_dt = timestamp - timedelta(hours=offset_hours)
+            utc_dt = timestamp - timedelta(hours=self._offset_hours)
             utc_dt = utc_dt.replace(tzinfo=timezone.utc)
 
         # 1. London rolling high/low
@@ -961,7 +904,12 @@ class LiveMarketEvidence:
 
         # Ensure active levels for LDH/LDL/LNDH/LNDL/NYH/NYL/TODAY_H/TODAY_L are present/updated in the list
         self.price_levels = [l for l in self.price_levels if l.level_type not in ("LDH", "LDL", "LNDH", "LNDL", "NYH", "NYL", "TODAY_H", "TODAY_L")]
-        if self._london_high is not None:
+        
+        is_backtest = self.config.get("backtest_mode", False)
+        ldn_active = ldn_open <= utc_dt.hour < ldn_close
+        ny_active = ny_open <= utc_dt.hour < ny_close
+
+        if self._london_high is not None and (not is_backtest or not ldn_active):
             self.price_levels.append(PriceLevel(
                 price=float(self._london_high),
                 level_type="LNDH",
@@ -982,7 +930,7 @@ class LiveMarketEvidence:
                 strength=0.8,
                 is_active=True
             ))
-        if self._london_low is not None:
+        if self._london_low is not None and (not is_backtest or not ldn_active):
             self.price_levels.append(PriceLevel(
                 price=float(self._london_low),
                 level_type="LNDL",
@@ -1003,7 +951,7 @@ class LiveMarketEvidence:
                 strength=0.8,
                 is_active=True
             ))
-        if self._ny_high is not None:
+        if self._ny_high is not None and (not is_backtest or not ny_active):
             self.price_levels.append(PriceLevel(
                 price=float(self._ny_high),
                 level_type="NYH",
@@ -1014,7 +962,7 @@ class LiveMarketEvidence:
                 strength=0.8,
                 is_active=True
             ))
-        if self._ny_low is not None:
+        if self._ny_low is not None and (not is_backtest or not ny_active):
             self.price_levels.append(PriceLevel(
                 price=float(self._ny_low),
                 level_type="NYL",
@@ -1025,7 +973,7 @@ class LiveMarketEvidence:
                 strength=0.8,
                 is_active=True
             ))
-        if self._today_high is not None:
+        if self._today_high is not None and not is_backtest:
             self.price_levels.append(PriceLevel(
                 price=float(self._today_high),
                 level_type="TODAY_H",
@@ -1036,7 +984,7 @@ class LiveMarketEvidence:
                 strength=0.8,
                 is_active=True
             ))
-        if self._today_low is not None:
+        if self._today_low is not None and not is_backtest:
             self.price_levels.append(PriceLevel(
                 price=float(self._today_low),
                 level_type="TODAY_L",
@@ -1093,76 +1041,37 @@ class LiveMarketEvidence:
             self._level_tracker.prune_old_behaviors(active_prices)
 
     def _recalculate_daily_levels(self):
-        """Reset PDH/PDL daily."""
+        """Reset and recalculate all institutional levels daily using local history."""
         try:
-            from axonai.dataflows.mt5_data import mt5_initialize, _to_mt5_symbol, _fetch_bars
-            if not mt5_initialize():
-                return
-            mt5_sym = _to_mt5_symbol(self.symbol)
-            end_dt = datetime.now()
-            df_d1 = _fetch_bars(mt5_sym, "D1", end_dt - timedelta(days=5), end_dt)
-            if df_d1 is not None and len(df_d1) >= 2:
-                yesterday = df_d1.iloc[-2]
-                self.price_levels = [l for l in self.price_levels if l.level_type not in ("PDH", "PDL")]
-                now_utc = datetime.now(timezone.utc)
-                self.price_levels.append(PriceLevel(
-                    price=float(yesterday["High"]),
-                    level_type="PDH",
-                    timeframe="D1",
-                    touches=0,
-                    last_touch=now_utc,
-                    direction="resistance",
-                    strength=0.2,
-                    is_active=True
-                ))
-                self.price_levels.append(PriceLevel(
-                    price=float(yesterday["Low"]),
-                    level_type="PDL",
-                    timeframe="D1",
-                    touches=0,
-                    last_touch=now_utc,
-                    direction="support",
-                    strength=0.2,
-                    is_active=True
-                ))
-                logger.info("LiveMarketEvidence: Reset PDH/PDL daily.")
+            self._calculate_initial_institutional_levels()
+            logger.info("LiveMarketEvidence: Recalculated all institutional levels daily from local history. Active levels: %d", len(self.price_levels))
         except Exception as e:
             logger.error("LiveMarketEvidence: Daily reset error: %s", e)
 
     def _recalculate_weekly_levels(self):
-        """Reset PWH/PWL weekly."""
+        """Reset PWH/PWL weekly using local history."""
         try:
-            from axonai.dataflows.mt5_data import mt5_initialize, _to_mt5_symbol, _fetch_bars
-            if not mt5_initialize():
-                return
-            mt5_sym = _to_mt5_symbol(self.symbol)
-            end_dt = datetime.now()
-            df_w1 = _fetch_bars(mt5_sym, "W1", end_dt - timedelta(days=20), end_dt)
-            if df_w1 is not None and len(df_w1) >= 2:
-                last_week = df_w1.iloc[-2]
-                self.price_levels = [l for l in self.price_levels if l.level_type not in ("PWH", "PWL")]
-                now_utc = datetime.now(timezone.utc)
-                self.price_levels.append(PriceLevel(
-                    price=float(last_week["High"]),
-                    level_type="PWH",
-                    timeframe="W1",
-                    touches=0,
-                    last_touch=now_utc,
-                    direction="resistance",
-                    strength=0.2,
-                    is_active=True
-                ))
-                self.price_levels.append(PriceLevel(
-                    price=float(last_week["Low"]),
-                    level_type="PWL",
-                    timeframe="W1",
-                    touches=0,
-                    last_touch=now_utc,
-                    direction="support",
-                    strength=0.2,
-                    is_active=True
-                ))
-                logger.info("LiveMarketEvidence: Reset PWH/PWL weekly.")
+            if self._h1_candles:
+                h1_list = list(self._h1_candles)
+                weeks = sorted(list(set(c.open_time.isocalendar()[:2] for c in h1_list)))
+                if len(weeks) >= 2:
+                    last_week = weeks[-2]
+                    last_week_candles = [c for c in h1_list if c.open_time.isocalendar()[:2] == last_week]
+                    if last_week_candles:
+                        lw_high = max(c.high for c in last_week_candles)
+                        lw_low = min(c.low for c in last_week_candles)
+                        
+                        self.price_levels = [l for l in self.price_levels if l.level_type not in ("PWH", "PWL")]
+                        now_utc = datetime.now(timezone.utc)
+                        self.price_levels.append(PriceLevel(
+                            price=float(lw_high), level_type="PWH", timeframe="W1",
+                            touches=0, last_touch=now_utc, direction="resistance", strength=0.2, is_active=True
+                        ))
+                        self.price_levels.append(PriceLevel(
+                            price=float(lw_low), level_type="PWL", timeframe="W1",
+                            touches=0, last_touch=now_utc, direction="support", strength=0.2, is_active=True
+                        ))
+                        logger.info("LiveMarketEvidence: Reset PWH/PWL weekly from local history: H=%.5f L=%.5f", lw_high, lw_low)
         except Exception as e:
             logger.error("LiveMarketEvidence: Weekly reset error: %s", e)
 
@@ -1402,8 +1311,7 @@ class LiveMarketEvidence:
         start_search = now_utc - timedelta(hours=24)
         m15_candles = list(self._m15_candles)
         
-        broker_symbol = _to_mt5_symbol(self.symbol)
-        offset_hours = get_broker_tz_offset(broker_symbol)
+        offset_hours = self._offset_hours
         
         asian_highs = []
         asian_lows = []

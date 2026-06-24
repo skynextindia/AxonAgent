@@ -16,6 +16,7 @@ from typing import Dict, List, Set, Any, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 import uvicorn
+from axonai.default_config import DEFAULT_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,13 @@ class DashboardServer:
         self._lock = threading.Lock()
 
         self.daemon = None
+        self.fallback_config = DEFAULT_CONFIG.copy()
+
+        # CHANGE 10A: Broadcast throttle
+        self._last_broadcast_ms: float = 0.0
+        self._broadcast_interval_ms: float = DEFAULT_CONFIG.get(
+            "dashboard_broadcast_interval_ms", 125.0
+        )
 
         # In-memory history for hydrating newly connected clients instantly
         self.history: Dict[str, Any] = {
@@ -63,6 +71,11 @@ class DashboardServer:
             "events": [],        # List of last 30 detected events
             "agent_trace": [],   # List of last 50 agent steps
             "decision": None,    # Latest final decision
+            "trigger_metrics": None,  # Real-time entry trigger conditions
+            "mode": None,        # Execution mode badge (paper / dry-run / live + LLM on/off)
+            # CHANGE 10B: New lifecycle fields
+            "trade_state": None,      # current phase, health, MFE/MAE
+            "location_context": None, # distance to levels, at_structure
         }
 
         # Setup routing
@@ -86,17 +99,7 @@ class DashboardServer:
             with self._lock:
                 if self.daemon:
                     return {"status": "success", "config": self.daemon.config}
-                return {"status": "success", "config": {
-                    "tick_poll_interval_ms": 100,
-                    "realtime_suppress_asian": True,
-                    "realtime_level_reset_atr_multiple": 2.0,
-                    "indicator_rsi_length": 14,
-                    "indicator_ema_fast": 12,
-                    "indicator_ema_slow": 26,
-                    "realtime_use_pinpoint_price": False,
-                    "realtime_correct_rule_a_direction": False,
-                    "realtime_cooldown_bypass_better_peak": False,
-                }}
+                return {"status": "success", "config": self.fallback_config}
 
         @self.app.post("/config")
         def update_config(new_config: dict):
@@ -104,28 +107,19 @@ class DashboardServer:
                 if self.daemon:
                     # Update config in daemon and dependent modules!
                     self.daemon.config.update(new_config)
-                    # Expose configuration update to event_detector, tick_engine, live_state, etc.
+                    # Expose configuration update to tick_engine, live_state, etc.
                     if hasattr(self.daemon, "tick_engine") and self.daemon.tick_engine:
                         self.daemon.tick_engine.poll_interval_ms = int(self.daemon.config.get("tick_poll_interval_ms", 100))
-                    if hasattr(self.daemon, "event_detector") and self.daemon.event_detector:
-                        self.daemon.event_detector._suppress_asian = self.daemon.config.get("realtime_suppress_asian", True)
-                        self.daemon.event_detector._level_reset_atr_mult = float(self.daemon.config.get("realtime_level_reset_atr_multiple", 2.0))
+                    if hasattr(self.daemon, "reversal_model") and self.daemon.reversal_model:
+                        self.daemon.reversal_model.config.update(new_config)
                     if hasattr(self.daemon, "live_state") and self.daemon.live_state:
                         self.daemon.live_state.config.update(new_config)
                     if hasattr(self.daemon, "live_evidence") and self.daemon.live_evidence:
                         self.daemon.live_evidence.config.update(new_config)
                     return {"status": "success", "config": self.daemon.config}
-                return {"status": "success", "config": {
-                    "tick_poll_interval_ms": new_config.get("tick_poll_interval_ms", 100),
-                    "realtime_suppress_asian": new_config.get("realtime_suppress_asian", True),
-                    "realtime_level_reset_atr_multiple": new_config.get("realtime_level_reset_atr_multiple", 2.0),
-                    "indicator_rsi_length": new_config.get("indicator_rsi_length", 14),
-                    "indicator_ema_fast": new_config.get("indicator_ema_fast", 12),
-                    "indicator_ema_slow": new_config.get("indicator_ema_slow", 26),
-                    "realtime_use_pinpoint_price": new_config.get("realtime_use_pinpoint_price", False),
-                    "realtime_correct_rule_a_direction": new_config.get("realtime_correct_rule_a_direction", False),
-                    "realtime_cooldown_bypass_better_peak": new_config.get("realtime_cooldown_bypass_better_peak", False),
-                }}
+                
+                self.fallback_config.update(new_config)
+                return {"status": "success", "config": self.fallback_config}
 
         @self.app.post("/trigger")
         def trigger_event(event_type: str = "level_breach", peak_type: str = "microstructure_exhaustion"):
@@ -153,18 +147,8 @@ class DashboardServer:
                             "peak_confidence": 0.85
                         }
                     
-                    event = MarketEvent(
-                        event_type=ev_type,
-                        priority=EventPriority.CRITICAL,
-                        timestamp=datetime.now(),
-                        symbol=self.daemon.yf_symbol,
-                        price=price,
-                        details=details
-                    )
-                    # Bypass cooldown so it fires immediately
-                    self.daemon.event_detector._cooldown_until = datetime.min
-                    self.daemon.event_detector.event_queue.put_nowait(event)
-                    return {"status": "triggered", "event": str(event)}
+                    # Trigger endpoint currently unsupported without EventDetector
+                    return {"status": "error", "message": "Trigger via API disabled on pure-math engine"}
                 return {"status": "error", "message": "Daemon not registered"}
         @self.app.post("/api/emergency_stop")
         def emergency_stop():
@@ -185,24 +169,18 @@ class DashboardServer:
         @self.app.post("/api/pause_llm")
         def pause_llm():
             with self._lock:
-                if self.daemon and hasattr(self.daemon, "llm"):
-                    self.daemon.llm.paused = not getattr(self.daemon.llm, "paused", False)
-                    state = "paused" if self.daemon.llm.paused else "resumed"
-                    return {"status": "success", "message": f"LLM operations {state}"}
-                return {"status": "error", "message": "LLM bridge not available"}
+                if self.daemon and hasattr(self.daemon, "paused"):
+                    self.daemon.paused = not self.daemon.paused
+                    state = "paused" if self.daemon.paused else "resumed"
+                    return {"status": "success", "message": f"Trading operations {state}", "paused": self.daemon.paused}
+                return {"status": "error", "message": "Daemon not registered or not pausable"}
+
 
         @self.app.get("/api/logs/decisions")
         def get_decisions_log():
-            import os
-            from axonai.agents.utils.memory import TradingMemoryLog
-            from axonai.default_config import DEFAULT_CONFIG
-            config = self.daemon.config if (self.daemon and hasattr(self.daemon, "config")) else DEFAULT_CONFIG
-            mem_path = config.get("memory_log_path", os.path.expanduser("~/.axonai/memory/trading_memory.md"))
-            try:
-                log = TradingMemoryLog({"memory_log_path": mem_path})
-                return {"status": "success", "entries": log.load_entries()}
-            except Exception as e:
-                return {"status": "error", "message": str(e)}
+            # Pure-math engine has no LLM decision journal; trade history is
+            # served by /api/logs/trades. Kept for frontend API compatibility.
+            return {"status": "success", "entries": []}
 
         @self.app.get("/api/logs/trades")
         def get_trades_log():
@@ -623,8 +601,16 @@ class DashboardServer:
             trace_data = list(self.history["agent_trace"])
             decision_data = self.history["decision"]
             news_data = self.history["news_data"]
+            mode_data = self.history["mode"]
+            trigger_metrics_data = self.history.get("trigger_metrics")
+            # CHANGE 10B: Get new lifecycle fields
+            trade_state_data = self.history.get("trade_state")
+            location_context_data = self.history.get("location_context")
 
         # 2. Perform all asynchronous sends safely OUTSIDE the lock block!
+        # 0. Execution mode badge (send first so the header reflects mode immediately)
+        if mode_data:
+            await websocket.send_json(mode_data)
         # 1. Account details
         if account_data:
             await websocket.send_json(account_data)
@@ -649,6 +635,16 @@ class DashboardServer:
         # 8. Latest final trade decision
         if decision_data:
             await websocket.send_json(decision_data)
+        # 8.5. Trigger Metrics (real-time entry conditions)
+        if trigger_metrics_data:
+            await websocket.send_json(trigger_metrics_data)
+        # CHANGE 10B: Send trade state and location context
+        # 8.6. Trade State (phase, health, MFE/MAE)
+        if trade_state_data:
+            await websocket.send_json(trade_state_data)
+        # 8.7. Location Context (distance to levels, at_structure)
+        if location_context_data:
+            await websocket.send_json(location_context_data)
         # 9. Sentiment News Feed
         if news_data:
             await websocket.send_json(news_data)
@@ -660,10 +656,31 @@ class DashboardServer:
         if not msg_type:
             return
 
+        # CHANGE 10A: Broadcast throttle gate — only throttle tick messages
+        import time
+
+        if msg_type == "tick":
+            now_ms = time.perf_counter() * 1000
+            if now_ms - self._last_broadcast_ms < self._broadcast_interval_ms:
+                return  # drop tick, trading logic unaffected
+            self._last_broadcast_ms = now_ms
+
         with self._lock:
             # Update cache history
             save_needed = False
-            if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data"]:
+            # CHANGE 10B: Include new trade_state and location_context fields
+            if msg_type in [
+                "tick",
+                "regime",
+                "levels",
+                "account",
+                "decision",
+                "news_data",
+                "mode",
+                "trigger_metrics",
+                "trade_state",
+                "location_context",
+            ]:
                 self.history[msg_type] = message
                 if msg_type in ["decision", "news_data"]:
                     save_needed = True

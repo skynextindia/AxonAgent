@@ -22,10 +22,14 @@ logger = logging.getLogger(__name__)
 # Lazy import so the module loads even when MetaTrader5 isn't installed
 _mt5 = None
 _initialized = False
+_feed_terminal_path: Optional[str] = None
 
-# ── MT5 timeframe constants ──────────────────────────────────────────────
-# Mapping from human-readable labels to MT5 TIMEFRAME_* constants.
-# Populated on first successful mt5_initialize().
+# Separate MT5 instance for trade execution (dual-terminal setup)
+_mt5_trade = None
+_trade_initialized = False
+_trade_terminal_path: Optional[str] = None
+
+# Timeframe period in seconds
 _TF_MAP: Dict[str, int] = {}
 _cached_tz_offset: Optional[int] = None
 
@@ -44,16 +48,23 @@ def _load_mt5():
     return _mt5
 
 
+def set_feed_terminal_path(path: str):
+    """Set the global fallback path for the feed terminal (e.g. Exness)."""
+    global _feed_terminal_path
+    _feed_terminal_path = path
+
+
 def mt5_initialize(terminal_path: Optional[str] = None) -> bool:
     """Connect to the MT5 terminal. Cached — safe to call repeatedly."""
-    global _initialized, _TF_MAP
+    global _initialized, _TF_MAP, _feed_terminal_path
     if _initialized:
         return True
     mt5 = _load_mt5()
 
     kwargs = {}
-    if terminal_path:
-        kwargs["path"] = terminal_path
+    path_to_use = terminal_path or _feed_terminal_path
+    if path_to_use:
+        kwargs["path"] = path_to_use
 
     if not mt5.initialize(**kwargs):
         err = mt5.last_error()
@@ -88,6 +99,43 @@ def mt5_shutdown():
         except Exception:
             pass
         _initialized = False
+
+
+def set_trade_terminal_path(path: Optional[str]) -> None:
+    """Set the path for the trade execution terminal (e.g. default MetaTrader 5)."""
+    global _trade_terminal_path
+    _trade_terminal_path = path
+
+
+def mt5_initialize_trade(terminal_path: Optional[str] = None) -> bool:
+    """Initialize separate MT5 connection for trade execution. Supports dual-terminal setup."""
+    global _mt5_trade, _trade_initialized, _trade_terminal_path
+    if _trade_initialized and _mt5_trade:
+        return True
+
+    mt5 = _load_mt5()
+    kwargs = {}
+    path_to_use = terminal_path or _trade_terminal_path
+    if path_to_use:
+        kwargs["path"] = path_to_use
+
+    if not mt5.initialize(**kwargs):
+        err = mt5.last_error()
+        logger.warning("MT5 trade terminal initialize failed: %s", err)
+        return False
+
+    _trade_initialized = True
+    _mt5_trade = mt5
+    logger.info("MT5 trade terminal connected: %s", mt5.terminal_info())
+    return True
+
+
+def get_mt5_trade() -> Optional[object]:
+    """Get the MT5 instance for trade execution."""
+    global _mt5_trade, _trade_initialized
+    if _trade_initialized and _mt5_trade:
+        return _mt5_trade
+    return None
 
 
 # ── Symbol Mapping ───────────────────────────────────────────────────────
@@ -344,7 +392,7 @@ def get_mt5_atr(yf_symbol: str, period: int = 14,
     return float(atr) if pd.notna(atr) else None
 
 
-def get_broker_tz_offset(symbol: str = "EURUSDm") -> int:
+def get_broker_tz_offset(symbol: str = "EURUSD") -> int:
     """Get broker timezone offset from UTC in hours. Cached to prevent repeated MT5 calls.
     
     If the market is open, computes it dynamically by comparing the latest tick time
