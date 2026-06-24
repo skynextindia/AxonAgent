@@ -176,8 +176,12 @@ class EntryStateMachine:
             self._anomaly_direction = direction
             self._anomaly_type = "sweep" if is_sweep else "climax"
             self._max_adverse_excursion = 0.0
-            
+
             reason = "Sweep detected" if is_sweep else "Microstructure climax"
+            logger.info(
+                "EntryStateMachine ANOMALY detected: price=%.5f direction=%s type=%s (climax: vel_unusual=%s eff=%.2f)",
+                price, direction, self._anomaly_type, vel.is_unusual, vel.tick_efficiency
+            )
             self._transition(STATE_ANOMALY, f"{reason}. Expected reversal: {direction}")
 
     def _evaluate_anomaly(
@@ -208,15 +212,26 @@ class EntryStateMachine:
     ) -> None:
         """Wait for the price to break away from the trap in our direction."""
         dist = (price - self._anomaly_price) / self._pip
-        
-        # Trigger criteria: Genuine displacement impulse in our direction, or high displacement ratio
-        is_impulse = (disp.classification == DISPLACEMENT_IMPULSE) or (disp.displacement_ratio > 0.5)
-        
+
+        # Trigger criteria: Impulse, or high displacement ratio, or exhaustion (velocity decay = momentum shift)
+        is_impulse = (
+            (disp.classification == DISPLACEMENT_IMPULSE) or
+            (disp.displacement_ratio > 0.5) or
+            (disp.classification == "EXHAUSTION")  # Velocity decay = potential reversal
+        )
+
         is_trigger = False
-        if self._anomaly_direction == "SELL" and dist < -1.5 and is_impulse:
+        # Relaxed thresholds for live market microstructure (was 1.5 pips, 0.5 ratio)
+        if self._anomaly_direction == "SELL" and dist < -0.5 and is_impulse:
             is_trigger = True
-        elif self._anomaly_direction == "BUY" and dist > 1.5 and is_impulse:
+        elif self._anomaly_direction == "BUY" and dist > 0.5 and is_impulse:
             is_trigger = True
+
+        # Debug logging for trigger condition
+        logger.info(
+            "EntryStateMachine ARMING check: dir=%s dist=%.2f is_impulse=%s (class=%s ratio=%.2f) trigger=%s",
+            self._anomaly_direction, dist, is_impulse, disp.classification, disp.displacement_ratio, is_trigger
+        )
             
         if is_trigger:
             # Final safety check against MTF

@@ -115,7 +115,7 @@ def main():
     )
     file_handler.setFormatter(logging.Formatter(fmt))
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.DEBUG,
         format=fmt,
         handlers=[logging.StreamHandler(), file_handler],
     )

@@ -1,0 +1,65 @@
+{
+  "version": "2.1.0",
+  "source": "autoresearch:debug",
+  "timestamp": "2026-06-23T00:24:00Z",
+  "status": "COMPLETE",
+  "results_tsv": "D:\\AXON.AI\\AxonAgent-Agy\\autoresearch\\debug-260623-0016\\results.tsv",
+  "summary": {
+    "total_hypotheses_tested": 5,
+    "confirmed_findings": 5,
+    "disproven_findings": 0,
+    "inconclusive_findings": 0
+  },
+  "findings": [
+    {
+      "finding": "Daemon initialization sequence properly implemented",
+      "severity": "info",
+      "location": "daemon.py:529-612",
+      "detail": "AxonDaemon.start() initializes MT5, checks realtime_execution_mode, cold-starts state from historical bars, starts tick engine, enters event loop"
+    },
+    {
+      "finding": "Order execution routes through trade_executor via send_order()",
+      "severity": "info",
+      "location": "trade_executor.py:216-242",
+      "detail": "send_order() checks realtime_execution_mode and routes: 'direct'→mt5.order_send(), 'bridge'→send_execution_command(ws://127.0.0.1:8766)"
+    },
+    {
+      "finding": "CONFIG KEY MISSING: realtime_execution_mode not defined in default_config.py",
+      "severity": "high",
+      "location": "default_config.py, daemon.py:557, trade_executor.py:61",
+      "detail": "Code uses config.get('realtime_execution_mode','direct') but key never defined in defaults. Must be set explicitly or defaults to 'direct' mode.",
+      "impact": "If direct mode used without active MT5 terminal, orders will fail. If bridge mode intended, must be explicitly configured."
+    },
+    {
+      "finding": "Entry signal generation requires complex 5-state machine",
+      "severity": "high",
+      "location": "entry_state_machine.py:81-235",
+      "detail": "EntryStateMachine: IDLE→ANOMALY→ARMING→TRIGGERED. Only TRIGGERED state (is_valid_entry=True) triggers execution. Requires: anomaly detection + absorption/decay + impulse breakaway (>1.5 pips)",
+      "impact": "If market lacks microstructure anomalies today, no entry signals will generate, blocking all trades."
+    },
+    {
+      "finding": "Execution bridge available but may not be running",
+      "severity": "medium",
+      "location": "windows/execution_bridge.py:1-100+",
+      "detail": "Bridge service on port 8766 available. Requires: python windows/execution_bridge.py --port 8766 --path 'C:\\Program Files\\MetaTrader 5\\terminal64.exe'",
+      "impact": "If bridge mode enabled and service not running, all orders fail with WebSocket connection error."
+    }
+  ],
+  "architecture_doc": "ARCHITECTURE_FINDINGS.md",
+  "recommendations": [
+    "IMMEDIATE: Check daemon logs to see if realtime_execution_mode is set. If not, add to config (decide: 'direct' or 'bridge').",
+    "DEBUG: Monitor EntryStateMachine state transitions in logs. Check if TRIGGERED state ever reached today.",
+    "DEBUG: If direct mode, verify MT5 terminal running. If bridge mode, start execution_bridge.py service.",
+    "ANALYSIS: Review velocity/displacement metrics. If all ticks normal, anomalies won't trigger.",
+    "VERIFY: Check cooldown elapsed, risk guard not tripped, trading not paused."
+  ],
+  "config": {
+    "scope": [
+      "axonai/daemon/**",
+      "axonai/realtime/**",
+      "windows/**"
+    ],
+    "symptom": "Orders not executing today. Need to understand daemon startup and bridge connectivity.",
+    "technique": "pattern_search"
+  }
+}
