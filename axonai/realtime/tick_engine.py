@@ -140,6 +140,8 @@ class TickEngine(threading.Thread):
         self.latest_bid: float = 0.0
         self.latest_ask: float = 0.0
         self.latest_timestamp: Optional[datetime] = None
+        self._last_valid_spread: float = 0.0  # Track last known good spread
+        self._broker_spread_pips: Optional[float] = None  # Actual broker spread from symbol_info
 
         # Callbacks
         self.on_tick_callback: Optional[Callable] = None
@@ -226,6 +228,16 @@ class TickEngine(threading.Thread):
                 return False
             if not info.visible:
                 mt5.symbol_select(self.symbol, True)
+
+            # Get broker spread from symbol info
+            pip_unit = 0.01 if "JPY" in self.symbol.upper() else 0.0001
+            if hasattr(info, 'spread') and info.spread > 0:
+                self._broker_spread_pips = float(info.spread) / pip_unit
+                logger.info("TickEngine: Broker spread for %s: %.1f pips", self.symbol, self._broker_spread_pips)
+            elif hasattr(info, 'ask') and hasattr(info, 'bid') and info.ask > info.bid:
+                self._broker_spread_pips = (float(info.ask) - float(info.bid)) / pip_unit
+                logger.info("TickEngine: Broker spread from symbol_info ask/bid: %.1f pips", self._broker_spread_pips)
+
             logger.info("TickEngine: MT5 connected, symbol %s ready", self.symbol)
 
             from axonai.dataflows.mt5_data import get_broker_tz_offset
@@ -247,10 +259,20 @@ class TickEngine(threading.Thread):
                 # Seed from last closed M1 rate if tick is None (e.g. weekend)
                 rates = mt5.copy_rates_from_pos(self.symbol, mt5.TIMEFRAME_M1, 0, 1)
                 if rates is not None and len(rates) > 0:
-                    self.latest_bid = float(rates[0]['close'])
-                    self.latest_ask = self.latest_bid + (0.012 if "JPY" in self.symbol.upper() else 0.00012)
+                    mid = float(rates[0]['close'])
+                    pip_mult = 0.01 if "JPY" in self.symbol.upper() else 0.0001
+                    # Priority: last_valid_spread > broker_spread > 0
+                    if self._last_valid_spread > 0:
+                        spread_pips = self._last_valid_spread
+                    elif self._broker_spread_pips is not None and self._broker_spread_pips >= 0:
+                        spread_pips = self._broker_spread_pips
+                    else:
+                        spread_pips = 0
+                    spread = spread_pips * pip_mult
+                    self.latest_bid = mid - spread / 2.0
+                    self.latest_ask = mid + spread / 2.0
                     self.latest_timestamp = datetime.fromtimestamp(rates[0]['time'], tz=timezone.utc).replace(tzinfo=None) + timedelta(hours=self.offset_hours)
-                    logger.info("TickEngine: Seeded initial bid=%.5f, ask=%.5f from M1 rate", self.latest_bid, self.latest_ask)
+                    logger.info("TickEngine: Seeded bid=%.5f, ask=%.5f (%.1f pips spread)", self.latest_bid, self.latest_ask, spread_pips)
 
             return True
         except ImportError:
@@ -336,7 +358,35 @@ class TickEngine(threading.Thread):
         """Update bid/ask, feed candle builders, invoke callbacks."""
         bid = float(tick['bid'])
         ask = float(tick['ask'])
-        
+
+        # If tick has valid bid/ask spread, track it as the last known good spread
+        if bid > 0 and ask > 0 and ask > bid:
+            pip_mult = 0.01 if "JPY" in self.symbol.upper() else 0.0001
+            self._last_valid_spread = (ask - bid) / pip_mult  # Store in pips
+
+        # If tick has invalid bid/ask (equal or zero), use best available spread
+        # Priority: last_valid_spread (real data from ticks) > broker_spread > 0
+        if bid <= 0 or ask <= 0 or bid == ask:
+            if bid > 0:
+                mid_price = bid
+            elif ask > 0:
+                mid_price = ask
+            else:
+                mid_price = self.latest_bid if self.latest_bid > 0 else 1.13500
+
+            pip_mult = 0.01 if "JPY" in self.symbol.upper() else 0.0001
+            # Priority: use last known REAL spread if available, else broker spread, else 0
+            if self._last_valid_spread > 0:
+                spread_pips = self._last_valid_spread
+            elif self._broker_spread_pips is not None and self._broker_spread_pips >= 0:
+                spread_pips = self._broker_spread_pips
+            else:
+                spread_pips = 0
+            spread = spread_pips * pip_mult
+
+            bid = mid_price - spread / 2.0
+            ask = mid_price + spread / 2.0
+
         # Handle dict or numpy structured array safely
         if isinstance(tick, dict):
             volume = int(tick.get('volume', 1))
@@ -344,13 +394,15 @@ class TickEngine(threading.Thread):
         else:
             volume = int(tick['volume']) if 'volume' in tick.dtype.names else 1
             time_msc = tick['time_msc']
-            
+
         if volume <= 0:
             volume = 1
-            
+
         # Use time_msc to preserve millisecond precision in the timestamp!
         timestamp = datetime.fromtimestamp(time_msc / 1000.0, tz=timezone.utc).replace(tzinfo=None)
         mid_price = (bid + ask) / 2.0
+        spread_raw = ask - bid
+        spread_pips = spread_raw / (0.0001 if "JPY" not in self.symbol.upper() else 0.01)
 
         self.latest_bid = bid
         self.latest_ask = ask
@@ -411,7 +463,14 @@ class TickEngine(threading.Thread):
                 pip_unit = 0.01 if "JPY" in self.symbol.upper() else 0.0001
                 change = random.uniform(-0.15, 0.15) * pip_unit
                 new_mid = last_price + change
-                spread_val = 1.2 * pip_unit
+                # Priority: last_valid_spread > broker_spread > 0
+                if self._last_valid_spread > 0:
+                    spread_pips = self._last_valid_spread
+                elif self._broker_spread_pips is not None and self._broker_spread_pips >= 0:
+                    spread_pips = self._broker_spread_pips
+                else:
+                    spread_pips = 0
+                spread_val = spread_pips * pip_unit
                 mock_bid = new_mid - spread_val / 2.0
                 mock_ask = new_mid + spread_val / 2.0
                 

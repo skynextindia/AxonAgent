@@ -98,13 +98,22 @@ def backtest(
     table.add_column("Value", style="green", justify="right", width=20)
     
     table.add_row("Total Triggered Trades", str(report["total_trades"]))
-    table.add_row("Wins", f"{report['wins']} \u2705")
-    table.add_row("Losses", f"{report['losses']} \u274c")
+    table.add_row("Wins", f"{report['wins']} OK")
+    table.add_row("Losses", f"{report['losses']} XX")
     table.add_row("Win Rate", f"{report['win_rate_percent']}%")
     table.add_row("Net Profit (Pips)", f"{report['net_profit_pips']:+.1f} pips")
     table.add_row("Profit Factor", f"{report['profit_factor']}")
-    
-    console.print(table)
+
+    try:
+        console.print(table)
+    except Exception as e:
+        print(f"BACKTEST RESULTS:")
+        print(f"  Total Trades: {report['total_trades']}")
+        print(f"  Wins: {report['wins']}")
+        print(f"  Losses: {report['losses']}")
+        print(f"  Win Rate: {report['win_rate_percent']}%")
+        print(f"  Net Profit: {report['net_profit_pips']:+.1f} pips")
+        print(f"  Profit Factor: {report['profit_factor']}")
     console.print()
     
     # Save the markdown report to disk

@@ -54,6 +54,12 @@ class DashboardServer:
         self.daemon = None
         self.fallback_config = DEFAULT_CONFIG.copy()
 
+        # CHANGE 10A: Broadcast throttle
+        self._last_broadcast_ms: float = 0.0
+        self._broadcast_interval_ms: float = DEFAULT_CONFIG.get(
+            "dashboard_broadcast_interval_ms", 125.0
+        )
+
         # In-memory history for hydrating newly connected clients instantly
         self.history: Dict[str, Any] = {
             "tick": None,
@@ -67,6 +73,9 @@ class DashboardServer:
             "decision": None,    # Latest final decision
             "trigger_metrics": None,  # Real-time entry trigger conditions
             "mode": None,        # Execution mode badge (paper / dry-run / live + LLM on/off)
+            # CHANGE 10B: New lifecycle fields
+            "trade_state": None,      # current phase, health, MFE/MAE
+            "location_context": None, # distance to levels, at_structure
         }
 
         # Setup routing
@@ -594,6 +603,9 @@ class DashboardServer:
             news_data = self.history["news_data"]
             mode_data = self.history["mode"]
             trigger_metrics_data = self.history.get("trigger_metrics")
+            # CHANGE 10B: Get new lifecycle fields
+            trade_state_data = self.history.get("trade_state")
+            location_context_data = self.history.get("location_context")
 
         # 2. Perform all asynchronous sends safely OUTSIDE the lock block!
         # 0. Execution mode badge (send first so the header reflects mode immediately)
@@ -626,6 +638,13 @@ class DashboardServer:
         # 8.5. Trigger Metrics (real-time entry conditions)
         if trigger_metrics_data:
             await websocket.send_json(trigger_metrics_data)
+        # CHANGE 10B: Send trade state and location context
+        # 8.6. Trade State (phase, health, MFE/MAE)
+        if trade_state_data:
+            await websocket.send_json(trade_state_data)
+        # 8.7. Location Context (distance to levels, at_structure)
+        if location_context_data:
+            await websocket.send_json(location_context_data)
         # 9. Sentiment News Feed
         if news_data:
             await websocket.send_json(news_data)
@@ -637,10 +656,31 @@ class DashboardServer:
         if not msg_type:
             return
 
+        # CHANGE 10A: Broadcast throttle gate — only throttle tick messages
+        import time
+
+        if msg_type == "tick":
+            now_ms = time.perf_counter() * 1000
+            if now_ms - self._last_broadcast_ms < self._broadcast_interval_ms:
+                return  # drop tick, trading logic unaffected
+            self._last_broadcast_ms = now_ms
+
         with self._lock:
             # Update cache history
             save_needed = False
-            if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data", "mode", "trigger_metrics"]:
+            # CHANGE 10B: Include new trade_state and location_context fields
+            if msg_type in [
+                "tick",
+                "regime",
+                "levels",
+                "account",
+                "decision",
+                "news_data",
+                "mode",
+                "trigger_metrics",
+                "trade_state",
+                "location_context",
+            ]:
                 self.history[msg_type] = message
                 if msg_type in ["decision", "news_data"]:
                     save_needed = True

@@ -13,6 +13,7 @@ try:
 except ImportError:
     mt5 = None
 
+from axonai.dataflows.mt5_data import get_mt5_trade
 from axonai.realtime.risk_guard import RiskGuard
 from axonai.realtime.alerts import send_alert
 from axonai.realtime.trade_phase import TradePhaseTracker
@@ -45,10 +46,17 @@ class MT5TradeExecutor:
         # Paper-trade mode: simulated fills, never sent to the broker.
         self.paper_trade = config.get("paper_trade", False)
         self._paper_ticket_seq = 0
-        
+
         # Adaptive exit components
         self.phase_tracker = TradePhaseTracker(pip_mult=0.0001)
         self.exit_stats = ExitStats(csv_path="reports/exit_stats.csv")
+
+    def _get_mt5(self):
+        """Get MT5 instance: prefer trade terminal (dual-terminal), fall back to main MT5."""
+        mt5_trade = get_mt5_trade()
+        if mt5_trade:
+            return mt5_trade
+        return mt5
 
     def execute_signal(self, symbol: str, signal: str, live_state: Optional[Any] = None) -> Optional[dict]:
         """Convert a 5-tier signal into an MT5 order action.
@@ -59,10 +67,12 @@ class MT5TradeExecutor:
 
         # Drawdown circuit breaker check
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
-        if not is_bridge and mt5 and mt5.terminal_info():
-            acc = mt5.account_info()
-            if acc:
-                self.risk_guard.update_equity(acc.equity, acc.balance)
+        if not is_bridge:
+            mt5_inst = self._get_mt5()
+            if mt5_inst and mt5_inst.terminal_info():
+                acc = mt5_inst.account_info()
+                if acc:
+                    self.risk_guard.update_equity(acc.equity, acc.balance)
 
         if self.circuit_breaker.is_tripped:
             logger.warning("CIRCUIT BREAKER ACTIVE — trade rejected")
@@ -97,21 +107,22 @@ class MT5TradeExecutor:
                 bid = 1.1000
                 ask = 1.1005
         else:
-            if mt5 is None or not mt5.terminal_info():
+            mt5_inst = self._get_mt5()
+            if mt5_inst is None or not mt5_inst.terminal_info():
                 logger.error("TradeExecutor: Not connected to MT5 terminal.")
                 return None
 
-            symbol_info = mt5.symbol_info(symbol)
+            symbol_info = mt5_inst.symbol_info(symbol)
             if symbol_info is None:
                 logger.error("TradeExecutor: Symbol %s not found.", symbol)
                 return None
 
             if not symbol_info.visible:
-                if not mt5.symbol_select(symbol, True):
+                if not mt5_inst.symbol_select(symbol, True):
                     logger.error("TradeExecutor: Failed to select symbol %s.", symbol)
                     return None
 
-            tick = mt5.symbol_info_tick(symbol)
+            tick = mt5_inst.symbol_info_tick(symbol)
             if tick is None:
                 logger.error("TradeExecutor: Failed to get tick for %s.", symbol)
                 return None
@@ -128,7 +139,8 @@ class MT5TradeExecutor:
                 logger.info("TradeExecutor: Position already open for magic %d on execution bridge. Skipping new order.", self.magic)
                 return None
         else:
-            existing = mt5.positions_get()
+            mt5_inst = self._get_mt5()
+            existing = mt5_inst.positions_get()
             if existing:
                 system_existing = [p for p in existing if p.magic == self.magic]
                 if len(system_existing) >= 1:
@@ -151,16 +163,19 @@ class MT5TradeExecutor:
             atr = price * 0.0015  # default to 0.15% of price
             logger.info("TradeExecutor: ATR unavailable. Using fallback value: %.5f", atr)
 
-        # 2. Calculate ATR-based Stop Loss & Take Profit exactly as requested
+        # 2. Calculate ATR-based Stop Loss & PLACEHOLDER Take Profit
+        # SL remains fixed (hard backstop). TP is a wide placeholder — ExitEngine drives actual exits.
         entry = price
         direction = "BUY" if order_type == ORDER_TYPE_BUY else "SELL"
         pip = 0.01 if "JPY" in symbol.upper() else 0.0001
-        
+
         sl_atr_mult = self.config.get("realtime_sl_atr_multiple", self.config.get("sl_atr_multiple", 1.2))
-        tp_atr_mult = self.config.get("realtime_tp_atr_multiple", self.config.get("tp_atr_multiple", 1.5))
-        # SL is kept as sl_atr_mult*ATR to act as a hard backstop, while adaptive exit closes early
+        # SL is kept as sl_atr_mult*ATR to act as a hard backstop
         sl_distance = max(atr * sl_atr_mult, 8 * pip)
-        tp_distance = max(atr * tp_atr_mult, 16 * pip)
+
+        # TP is now a placeholder (unreachable) — ExitEngine will close trades, not TP price
+        placeholder_tp_mult = self.config.get("placeholder_tp_sl_multiple", 3.0)
+        tp_distance = max(atr * sl_atr_mult * placeholder_tp_mult, 16 * pip)
 
         # Spread guard: refuse entry when the live spread would eat too much of the stop
         spread = ask - bid
@@ -172,9 +187,9 @@ class MT5TradeExecutor:
             )
             return {"success": False, "reason": "spread_too_wide",
                     "spread": round(spread, 5), "sl_distance": round(sl_distance, 5)}
-        
+
         sl = entry - sl_distance if direction == "BUY" else entry + sl_distance
-        tp = entry + tp_distance if direction == "BUY" else entry - tp_distance
+        tp = entry + tp_distance if direction == "BUY" else entry - tp_distance  # Placeholder — ExitEngine drives exits
 
         # Format price to correct number of digits
         digits = 3 if "JPY" in symbol.upper() else 5
@@ -196,7 +211,8 @@ class MT5TradeExecutor:
                 res = send_execution_command(self.config, {"action": "account_info"})
                 equity = res.get("equity", 10000.0) if res.get("success") else 10000.0
             else:
-                acc = mt5.account_info()
+                mt5_inst = self._get_mt5()
+                acc = mt5_inst.account_info() if mt5_inst else None
                 equity = acc.equity if acc else 10000.0
 
             risk_pct = self.config.get("realtime_risk_pct", 0.01)
@@ -266,7 +282,8 @@ class MT5TradeExecutor:
             }
 
             logger.info("TradeExecutor: Sending order request with SL/TP: %s", request)
-            result = mt5.order_send(request)
+            mt5_inst = self._get_mt5()
+            result = mt5_inst.order_send(request) if mt5_inst else None
             if result is None:
                 logger.error("TradeExecutor: order_send returned None")
                 return None

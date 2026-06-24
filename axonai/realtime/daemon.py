@@ -20,7 +20,7 @@ try:
 except ImportError:
     mt5 = None
 
-from axonai.dataflows.mt5_data import mt5_initialize, mt5_shutdown, _to_mt5_symbol, get_broker_tz_offset
+from axonai.dataflows.mt5_data import mt5_initialize, mt5_shutdown, mt5_initialize_trade, set_trade_terminal_path, get_mt5_trade, _to_mt5_symbol, get_broker_tz_offset
 from axonai.realtime.event_types import EventPriority, LiveCandle, MarketEvent, EventType
 from axonai.realtime.tick_engine import TickEngine
 from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
@@ -95,6 +95,30 @@ class AxonDaemon:
         self.paused: bool = False
         self._last_snapshot = None
 
+        # CHANGE 9B: MT5 slow poll caches (keep off tick thread)
+        self._account_info_cache = None
+        self._position_cache = None
+        self._slow_poll_running = True
+
+        import threading
+
+        self._slow_poll_thread = threading.Thread(
+            target=self._slow_poll_loop, daemon=True, name="mt5-slow-poll"
+        )
+        self._slow_poll_thread.start()
+
+
+    def _slow_poll_loop(self) -> None:
+        """Poll slow MT5 endpoints every 1s. Never blocks tick thread."""
+        poll_interval = self.config.get("dashboard_mt5_poll_interval_seconds", 1.0)
+        while self._slow_poll_running:
+            try:
+                if mt5:
+                    self._account_info_cache = mt5.account_info()
+                    self._position_cache = mt5.positions_get(symbol=self.mt5_symbol)
+            except Exception as e:
+                logger.warning(f"Slow poll failed: {e}")
+            time.sleep(poll_interval)
 
     @staticmethod
     def _get_session_details(now_utc: datetime) -> list:
@@ -319,13 +343,13 @@ class AxonDaemon:
                         resume_dt += timedelta(days=1)
                     market_resume_timestamp = int(resume_dt.timestamp())
 
-        return {
+        regime_msg = {
             "type": "regime",
             "symbol": self.mt5_symbol,
             "dominant": ws.dominant_regime,
             "confidence": ws.regime_confidence,
             "volatility": ws.volatility_regime,
-            "atr": ws.atr_14_h1,
+            "atr": self.reversal_model._h1_atr,
             "spread_pips": ws.spread_pips,
             "spread_safe": ws.spread_safe,
             "belief": ws.belief_score,
@@ -389,6 +413,8 @@ class AxonDaemon:
             "llm_calls": entry_state,
             "tool_calls": entry_direction or "WAIT"
         }
+
+        return regime_msg
 
     def _get_levels_payload(self) -> dict:
         levels = []
@@ -547,11 +573,20 @@ class AxonDaemon:
         if dashboard:
             dashboard.daemon = self
 
-        # 1. Initialize MT5
+        # 1. Initialize MT5 (data feed - Exness)
         if not mt5_initialize(self.config.get("mt5_terminal_path")):
             logger.error("AxonDaemon: MT5 initialization failed. Cannot start.")
             return
-        logger.info("Step 1/4: MT5 connected")
+        logger.info("Step 1/4: MT5 data feed connected")
+
+        # 1B. Initialize separate MT5 for trade execution (dual-terminal setup)
+        trade_terminal_path = self.config.get("mt5_trade_terminal_path")
+        if trade_terminal_path:
+            set_trade_terminal_path(trade_terminal_path)
+            if mt5_initialize_trade(trade_terminal_path):
+                logger.info("Step 1B/4: MT5 trade terminal connected (dual-terminal mode)")
+            else:
+                logger.warning("AxonDaemon: Trade terminal initialization failed, will use data terminal for orders")
 
         # Pre-populate active positions for trailing SL tracking
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
@@ -689,10 +724,42 @@ class AxonDaemon:
         self.live_state.on_tick(bid, ask, timestamp)
         self.live_evidence.on_tick(bid, ask, timestamp, volume)
         self.reversal_model.sync_levels(self.live_evidence.price_levels)
+
+        # CHANGE 9A: Compute location context ONCE here, pass to reversal_model
+        location_context = self.reversal_model.location_engine.compute(
+            price=mid,
+            atr_14_h1=self.reversal_model._h1_atr,
+            recent_candles=self.live_evidence._m1_candles[-50:]
+            if hasattr(self.live_evidence, "_m1_candles")
+            else [],
+            price_levels=self.live_evidence.price_levels,
+        )
+
         # 1. Update pure-math reversal engine
-        snapshot = self.reversal_model.on_tick(mid, timestamp, volume)
+        _t0 = time.perf_counter()
+        snapshot = self.reversal_model.on_tick(
+            mid, timestamp, volume, location_context=location_context
+        )
+        _t1 = time.perf_counter()
         self._last_snapshot = snapshot
-        
+
+        # CHANGE 9C: Dependency injection for EntryDecision
+        if snapshot and snapshot.entry_decision:
+            snapshot.entry_decision.entry_location_context = {
+                "distance_to_liquidity": location_context.distance_to_liquidity,
+                "distance_to_sr": location_context.distance_to_sr,
+                "room_available": location_context.room_available,
+                "at_structure": location_context.at_structure,
+                "nearest_level_type": location_context.nearest_level_type,
+                "nearest_level_price": location_context.nearest_level_price,
+            }
+            if snapshot.regime:
+                snapshot.entry_decision.entry_regime = snapshot.regime.regime
+            if snapshot.velocity:
+                snapshot.entry_decision.entry_velocity_percentile = snapshot.velocity.percentile
+            if snapshot.displacement:
+                snapshot.entry_decision.entry_displacement_class = snapshot.displacement.classification
+
         # 2. Check for entry triggers + broadcast trigger metrics to dashboard
         dashboard = get_dashboard()
         if dashboard:
@@ -806,7 +873,20 @@ class AxonDaemon:
                 "exit_should_exit": snapshot.exit_decision.should_exit
             })
 
-            
+            # CHANGE 9D: Timing instrumentation
+            _t2 = time.perf_counter()
+            if self.config.get("latency_instrumentation_enabled", False):
+                _rev_ms = (_t1 - _t0) * 1000
+                _brd_ms = (_t2 - _t1) * 1000
+                _tot_ms = (_t2 - _t0) * 1000
+                if _tot_ms > 10.0:
+                    logger.error(
+                        f"on_tick exceeded budget: {_tot_ms:.1f}ms "
+                        f"(reversal={_rev_ms:.1f}ms, broadcast={_brd_ms:.1f}ms)"
+                    )
+                elif _tot_ms > 5.0:
+                    logger.warning(f"on_tick slow: {_tot_ms:.1f}ms")
+
             # Throttle heavier updates to once every 5 ticks
             if self.tick_engine._tick_count % 5 == 1:
                 dashboard.broadcast(self._get_regime_payload())
@@ -912,6 +992,19 @@ class AxonDaemon:
                         self._active_trade_system[ticket] = system_name
                         
                         # Register trade with models
+                        # CHANGE 9C: Register with trade_state_engine for lifecycle tracking
+                        self.reversal_model.trade_state_engine.register_trade(
+                            ticket=ticket,
+                            direction=snapshot.entry_decision.direction,
+                            entry_price=snapshot.price,
+                            entry_time=datetime.now(timezone.utc),
+                            entry_sl=trade_result.get("sl"),
+                            entry_tp=trade_result.get("tp"),
+                            entry_reason=snapshot.entry_decision.reason,
+                            position_size=trade_result.get("volume", 0.01),
+                        )
+
+                        # Also keep legacy register_trade for health monitoring compatibility
                         self.reversal_model.register_trade(
                             ticket, snapshot.entry_decision.direction, snapshot.price,
                             trade_result.get("sl"), trade_result.get("tp"),
@@ -932,6 +1025,15 @@ class AxonDaemon:
                     self._log_dry_run_event('event_detected', {'event_type': 'REVERSAL', 'price': snapshot.price, 'details': {}})
 
             elif event_type == "exit":
+                # CHANGE 9C: Position reconciliation
+                is_live = self.reversal_model.trade_state_engine.is_position_live()
+                if not is_live:
+                    logger.warning(
+                        "EXIT signal received but no live position found. "
+                        "Skipping exit to prevent ghost close."
+                    )
+                    continue
+
                 # The exit action could be ADJUST_SL or CLOSE_NOW
                 decision = snapshot.exit_decision
                 logger.info("EXIT DECISION: %s - %s", decision.action, decision.reason)

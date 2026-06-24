@@ -97,6 +97,13 @@ class LiveWorldState:
         self._state: Optional[WorldState] = None
         self._initialized = False
 
+        # Latest live price (consumed by MT5TradeExecutor bridge path and daemon
+        # close logic). Must be populated on every tick — otherwise the executor
+        # falls back to a dummy 1.1000/1.1005 price and the broker rejects orders
+        # with retcode_10016 (INVALID_STOPS).
+        self.current_bid: float = 0.0
+        self.current_ask: float = 0.0
+
         # Parse JPY and base/quote symbols dynamically
         sym_clean = symbol.strip().upper().replace("/", "").replace("=X", "")
         if len(sym_clean) >= 6:
@@ -221,6 +228,11 @@ class LiveWorldState:
 
     def on_tick(self, bid: float, ask: float, timestamp: datetime):
         """Update spread and session on every tick. O(1) cost."""
+        # Always track the latest live price, even before full init, so the
+        # executor never falls back to the dummy 1.1000 price.
+        self.current_bid = bid
+        self.current_ask = ask
+
         if not self._initialized or self._state is None:
             return
 

@@ -43,9 +43,15 @@ class EntryDecision:
     """The output of the entry state machine."""
     state: str = STATE_IDLE
     is_valid_entry: bool = False
-    direction: Optional[str] = None    # "BUY" or "SELL"
-    signal_quality: float = 0.0        # 0.0 to 1.0
+    direction: Optional[str] = None              # "BUY" or "SELL"
+    signal_quality: float = 0.0                  # 0.0 to 1.0
     reason: str = "Awaiting anomaly"
+
+    # New optional fields (populated by daemon.py dependency injection)
+    entry_location_context: Optional[dict] = None      # from LocationEngine
+    entry_regime: Optional[str] = None                 # from RegimeEngine
+    entry_velocity_percentile: Optional[float] = None  # from VelocityNormalizer
+    entry_displacement_class: Optional[str] = None     # from DisplacementEngine
 
 
 class EntryStateMachine:
