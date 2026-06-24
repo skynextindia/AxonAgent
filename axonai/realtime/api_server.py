@@ -16,6 +16,7 @@ from typing import Dict, List, Set, Any, Optional
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 import uvicorn
+from axonai.default_config import DEFAULT_CONFIG
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,7 @@ class DashboardServer:
         self._lock = threading.Lock()
 
         self.daemon = None
+        self.fallback_config = DEFAULT_CONFIG.copy()
 
         # In-memory history for hydrating newly connected clients instantly
         self.history: Dict[str, Any] = {
@@ -63,6 +65,7 @@ class DashboardServer:
             "events": [],        # List of last 30 detected events
             "agent_trace": [],   # List of last 50 agent steps
             "decision": None,    # Latest final decision
+            "mode": None,        # Execution mode badge (paper / dry-run / live + LLM on/off)
         }
 
         # Setup routing
@@ -86,17 +89,7 @@ class DashboardServer:
             with self._lock:
                 if self.daemon:
                     return {"status": "success", "config": self.daemon.config}
-                return {"status": "success", "config": {
-                    "tick_poll_interval_ms": 100,
-                    "realtime_suppress_asian": True,
-                    "realtime_level_reset_atr_multiple": 2.0,
-                    "indicator_rsi_length": 14,
-                    "indicator_ema_fast": 12,
-                    "indicator_ema_slow": 26,
-                    "realtime_use_pinpoint_price": False,
-                    "realtime_correct_rule_a_direction": False,
-                    "realtime_cooldown_bypass_better_peak": False,
-                }}
+                return {"status": "success", "config": self.fallback_config}
 
         @self.app.post("/config")
         def update_config(new_config: dict):
@@ -104,28 +97,19 @@ class DashboardServer:
                 if self.daemon:
                     # Update config in daemon and dependent modules!
                     self.daemon.config.update(new_config)
-                    # Expose configuration update to event_detector, tick_engine, live_state, etc.
+                    # Expose configuration update to tick_engine, live_state, etc.
                     if hasattr(self.daemon, "tick_engine") and self.daemon.tick_engine:
                         self.daemon.tick_engine.poll_interval_ms = int(self.daemon.config.get("tick_poll_interval_ms", 100))
-                    if hasattr(self.daemon, "event_detector") and self.daemon.event_detector:
-                        self.daemon.event_detector._suppress_asian = self.daemon.config.get("realtime_suppress_asian", True)
-                        self.daemon.event_detector._level_reset_atr_mult = float(self.daemon.config.get("realtime_level_reset_atr_multiple", 2.0))
+                    if hasattr(self.daemon, "reversal_model") and self.daemon.reversal_model:
+                        self.daemon.reversal_model.config.update(new_config)
                     if hasattr(self.daemon, "live_state") and self.daemon.live_state:
                         self.daemon.live_state.config.update(new_config)
                     if hasattr(self.daemon, "live_evidence") and self.daemon.live_evidence:
                         self.daemon.live_evidence.config.update(new_config)
                     return {"status": "success", "config": self.daemon.config}
-                return {"status": "success", "config": {
-                    "tick_poll_interval_ms": new_config.get("tick_poll_interval_ms", 100),
-                    "realtime_suppress_asian": new_config.get("realtime_suppress_asian", True),
-                    "realtime_level_reset_atr_multiple": new_config.get("realtime_level_reset_atr_multiple", 2.0),
-                    "indicator_rsi_length": new_config.get("indicator_rsi_length", 14),
-                    "indicator_ema_fast": new_config.get("indicator_ema_fast", 12),
-                    "indicator_ema_slow": new_config.get("indicator_ema_slow", 26),
-                    "realtime_use_pinpoint_price": new_config.get("realtime_use_pinpoint_price", False),
-                    "realtime_correct_rule_a_direction": new_config.get("realtime_correct_rule_a_direction", False),
-                    "realtime_cooldown_bypass_better_peak": new_config.get("realtime_cooldown_bypass_better_peak", False),
-                }}
+                
+                self.fallback_config.update(new_config)
+                return {"status": "success", "config": self.fallback_config}
 
         @self.app.post("/trigger")
         def trigger_event(event_type: str = "level_breach", peak_type: str = "microstructure_exhaustion"):
@@ -153,18 +137,8 @@ class DashboardServer:
                             "peak_confidence": 0.85
                         }
                     
-                    event = MarketEvent(
-                        event_type=ev_type,
-                        priority=EventPriority.CRITICAL,
-                        timestamp=datetime.now(),
-                        symbol=self.daemon.yf_symbol,
-                        price=price,
-                        details=details
-                    )
-                    # Bypass cooldown so it fires immediately
-                    self.daemon.event_detector._cooldown_until = datetime.min
-                    self.daemon.event_detector.event_queue.put_nowait(event)
-                    return {"status": "triggered", "event": str(event)}
+                    # Trigger endpoint currently unsupported without EventDetector
+                    return {"status": "error", "message": "Trigger via API disabled on pure-math engine"}
                 return {"status": "error", "message": "Daemon not registered"}
         @self.app.post("/api/emergency_stop")
         def emergency_stop():
@@ -185,11 +159,17 @@ class DashboardServer:
         @self.app.post("/api/pause_llm")
         def pause_llm():
             with self._lock:
-                if self.daemon and hasattr(self.daemon, "llm"):
-                    self.daemon.llm.paused = not getattr(self.daemon.llm, "paused", False)
-                    state = "paused" if self.daemon.llm.paused else "resumed"
-                    return {"status": "success", "message": f"LLM operations {state}"}
-                return {"status": "error", "message": "LLM bridge not available"}
+                if self.daemon:
+                    if hasattr(self.daemon, "paused"):
+                        self.daemon.paused = not self.daemon.paused
+                        state = "paused" if self.daemon.paused else "resumed"
+                        return {"status": "success", "message": f"Trading operations {state}", "paused": self.daemon.paused}
+                    elif hasattr(self.daemon, "llm"):
+                        self.daemon.llm.paused = not getattr(self.daemon.llm, "paused", False)
+                        state = "paused" if self.daemon.llm.paused else "resumed"
+                        return {"status": "success", "message": f"LLM operations {state}"}
+                return {"status": "error", "message": "Daemon not registered or not pausable"}
+
 
         @self.app.get("/api/logs/decisions")
         def get_decisions_log():
@@ -623,8 +603,12 @@ class DashboardServer:
             trace_data = list(self.history["agent_trace"])
             decision_data = self.history["decision"]
             news_data = self.history["news_data"]
+            mode_data = self.history["mode"]
 
         # 2. Perform all asynchronous sends safely OUTSIDE the lock block!
+        # 0. Execution mode badge (send first so the header reflects mode immediately)
+        if mode_data:
+            await websocket.send_json(mode_data)
         # 1. Account details
         if account_data:
             await websocket.send_json(account_data)
@@ -663,7 +647,7 @@ class DashboardServer:
         with self._lock:
             # Update cache history
             save_needed = False
-            if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data"]:
+            if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data", "mode"]:
                 self.history[msg_type] = message
                 if msg_type in ["decision", "news_data"]:
                     save_needed = True

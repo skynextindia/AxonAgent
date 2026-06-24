@@ -208,8 +208,11 @@ class TickEngine(threading.Thread):
         """Lazy-load and initialize MT5."""
         try:
             import MetaTrader5 as mt5
-            self._mt5 = mt5
-            if not mt5.initialize():
+            kwargs = {}
+            term_path = self.config.get("mt5_terminal_path")
+            if term_path:
+                kwargs["path"] = term_path
+            if not mt5.initialize(**kwargs):
                 logger.error("TickEngine: MT5 init failed: %s", mt5.last_error())
                 return False
             # Ensure symbol visible

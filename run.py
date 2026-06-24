@@ -70,9 +70,25 @@ def main():
                         help="Dashboard host")
     parser.add_argument("--port", type=int, default=8000,
                         help="Dashboard port")
-    parser.add_argument("--symbol", type=str, default="EURUSDm",
+    parser.add_argument("--symbol", type=str, default="EURUSD",
                         help="Symbol to trade")
+    parser.add_argument("--enable-llm", action="store_true",
+                        help="Enable the LLM/LangGraph agent layer (requires DEEPSEEK_API_KEY). "
+                             "Default is pure-math mode: Rule A+B signals only, no LLM.")
+    parser.add_argument("--paper", action="store_true",
+                        help="Paper-trade mode: simulate fills internally, never send orders to MT5. "
+                             "Safe for testing; dry-run (default) still places real demo orders.")
+    parser.add_argument("--live", action="store_true",
+                        help="Live execution mode: disables dry-run (fixed 1.00 lot size) and enables dynamic position sizing.")
+    parser.add_argument("--feed-path", type=str, default=None,
+                        help="Path to feed MT5 terminal64.exe (e.g. Exness)")
+    parser.add_argument("--exec-path", type=str, default=None,
+                        help="Path to execution MT5 terminal64.exe (e.g. MetaQuotes)")
     args = parser.parse_args()
+
+    if args.feed_path:
+        from axonai.dataflows.mt5_data import set_feed_terminal_path
+        set_feed_terminal_path(args.feed_path)
 
     env = "wsl" if is_wsl() else "windows" if is_windows() else "linux"
     bridge_mode = args.bridge or (env == "wsl" and not args.direct)
@@ -139,7 +155,13 @@ def main():
         from axonai.default_config import DEFAULT_CONFIG
         config = DEFAULT_CONFIG.copy()
         config["symbol"] = args.symbol
-        config["realtime_dry_run"] = True
+        config["realtime_dry_run"] = not args.live
+        # Pure-math mode by default (Rule A+B signals, no LLM/API key). Pass --enable-llm to turn the agent layer on.
+        config["disable_llm"] = not args.enable_llm
+        # Paper-trade: simulate fills (no MT5 send). Default dry-run still sends real demo orders.
+        config["paper_trade"] = args.paper
+        if args.feed_path:
+            config["mt5_terminal_path"] = args.feed_path
         daemon = AxonDaemon(symbol=args.symbol, config=config)
         daemon.start()
 

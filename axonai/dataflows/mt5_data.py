@@ -22,10 +22,9 @@ logger = logging.getLogger(__name__)
 # Lazy import so the module loads even when MetaTrader5 isn't installed
 _mt5 = None
 _initialized = False
+_feed_terminal_path: Optional[str] = None
 
-# ── MT5 timeframe constants ──────────────────────────────────────────────
-# Mapping from human-readable labels to MT5 TIMEFRAME_* constants.
-# Populated on first successful mt5_initialize().
+# Timeframe period in seconds
 _TF_MAP: Dict[str, int] = {}
 _cached_tz_offset: Optional[int] = None
 
@@ -44,16 +43,23 @@ def _load_mt5():
     return _mt5
 
 
+def set_feed_terminal_path(path: str):
+    """Set the global fallback path for the feed terminal (e.g. Exness)."""
+    global _feed_terminal_path
+    _feed_terminal_path = path
+
+
 def mt5_initialize(terminal_path: Optional[str] = None) -> bool:
     """Connect to the MT5 terminal. Cached — safe to call repeatedly."""
-    global _initialized, _TF_MAP
+    global _initialized, _TF_MAP, _feed_terminal_path
     if _initialized:
         return True
     mt5 = _load_mt5()
 
     kwargs = {}
-    if terminal_path:
-        kwargs["path"] = terminal_path
+    path_to_use = terminal_path or _feed_terminal_path
+    if path_to_use:
+        kwargs["path"] = path_to_use
 
     if not mt5.initialize(**kwargs):
         err = mt5.last_error()
@@ -344,7 +350,7 @@ def get_mt5_atr(yf_symbol: str, period: int = 14,
     return float(atr) if pd.notna(atr) else None
 
 
-def get_broker_tz_offset(symbol: str = "EURUSDm") -> int:
+def get_broker_tz_offset(symbol: str = "EURUSD") -> int:
     """Get broker timezone offset from UTC in hours. Cached to prevent repeated MT5 calls.
     
     If the market is open, computes it dynamically by comparing the latest tick time

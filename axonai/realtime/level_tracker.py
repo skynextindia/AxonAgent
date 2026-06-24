@@ -15,7 +15,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -88,6 +88,7 @@ class LevelBehaviorTracker:
 
         # State keyed by level price (float)
         self._behaviors: Dict[float, LevelBehavior] = {}
+        self._last_tick_time: Optional[datetime] = None
 
     # ── Public API ──────────────────────────────────────────────────────
 
@@ -103,6 +104,15 @@ class LevelBehaviorTracker:
         """Process one tick across all active levels. O(n) where n = levels."""
         if not active_levels:
             return
+
+        # Gap adjustment for backtester tick gaps
+        if self._last_tick_time is not None:
+            gap = (timestamp - self._last_tick_time).total_seconds()
+            if gap > 5.0:
+                for bhv in self._behaviors.values():
+                    if bhv.in_approach and bhv.approach_start_time:
+                        bhv.approach_start_time += timedelta(seconds=gap)
+        self._last_tick_time = timestamp
 
         # 1. Update existing behaviors for all tracked levels
         self._update_current_approaches(mid, timestamp)

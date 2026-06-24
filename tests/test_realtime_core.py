@@ -205,6 +205,7 @@ class TestSessionDetection:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.skip(reason="LLM/Graph components removed")
 class TestCompressEvidence:
     """Feed 2000-word analyst output, verify compression ratio > 0.70."""
 
