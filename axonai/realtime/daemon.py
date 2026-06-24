@@ -697,6 +697,7 @@ class AxonDaemon:
         dashboard = get_dashboard()
         if dashboard:
             # Broadcast trigger metrics for real-time visualization
+            logger.debug(f"Broadcasting trigger_metrics: state={snapshot.entry_decision.state} disp_class={snapshot.displacement.classification}")
             dashboard.broadcast({
                 "type": "trigger_metrics",
                 "state": snapshot.entry_decision.state,
