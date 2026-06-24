@@ -277,8 +277,8 @@ class DashboardServer:
                         rates = mt5.copy_rates_range(symbol, mt5.TIMEFRAME_M1, entry_dt, exit_dt)
                         if rates is not None:
                             bars = [{"high": float(r["high"]), "low": float(r["low"])} for r in rates]
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("DashboardServer: Failed to fetch MT5 historical rates: %s", e)
                     
                 # 2. Bridge Client mode
                 if not bars:
@@ -294,10 +294,10 @@ class DashboardServer:
                             client.request_historical(symbol, "M1", from_ts, to_ts, request_id=request_id)
                             try:
                                 bars = fut.result(timeout=1.5)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                            except Exception as e:
+                                logger.warning("DashboardServer: Bridge historical data timeout: %s", e)
+                    except Exception as e:
+                        logger.warning("DashboardServer: Bridge historical request failed: %s", e)
                         
                 if bars:
                     try:
@@ -315,8 +315,8 @@ class DashboardServer:
                                 peak_pips = (entry_price - min_low) / pip_multiplier
                                 
                             return round(max(0.0, drawdown_pips), 1), round(max(0.0, peak_pips), 1)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("DashboardServer: Failed to calculate drawdown/peak: %s", e)
                         
                 # Fallback to estimate
                 drawdown_pips = 0.0
@@ -385,13 +385,16 @@ class DashboardServer:
                     if close_evt:
                         base.update(close_evt)
 
+                    # Safe access to trade_result fields
+                    trade_result = open_evt.get("trade_result") if open_evt and isinstance(open_evt.get("trade_result"), dict) else None
+
                     trade = {
                         "ticket": ticket,
                         "symbol": base.get("symbol") or base.get("mt5_symbol") or "EURUSD",
                         "system": base.get("system") or (open_evt and open_evt.get("system")) or (close_evt and close_evt.get("system")) or "optimized",
                         "direction": base.get("direction") or (open_evt and open_evt.get("decision", "").upper()) or "BUY",
-                        "volume": base.get("volume") or (open_evt and isinstance(open_evt.get("trade_result"), dict) and open_evt["trade_result"].get("volume")),
-                        "entry_price": base.get("entry_price") or (open_evt and isinstance(open_evt.get("trade_result"), dict) and open_evt["trade_result"].get("price")),
+                        "volume": base.get("volume") or (trade_result and trade_result.get("volume")),
+                        "entry_price": base.get("entry_price") or (trade_result and trade_result.get("price")),
                         "exit_price": base.get("exit_price"),
                         "profit": base.get("profit"),
                         "pips": base.get("pips"),

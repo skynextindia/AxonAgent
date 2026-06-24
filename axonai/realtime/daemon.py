@@ -452,6 +452,12 @@ class AxonDaemon:
 
 
     def _get_candles_payload(self, timeframe: str) -> dict:
+        # Validate timeframe to prevent crashes from invalid input
+        valid_timeframes = {"M15", "H1", "H4"}
+        if timeframe not in valid_timeframes:
+            logger.warning("AxonDaemon: Invalid timeframe '%s', using M15 as fallback", timeframe)
+            timeframe = "M15"
+
         if timeframe == "M15":
             target_deque = self.live_evidence._m15_candles
         elif timeframe == "H1":
