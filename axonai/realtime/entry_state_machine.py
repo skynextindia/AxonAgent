@@ -221,10 +221,10 @@ class EntryStateMachine:
         )
 
         is_trigger = False
-        # Relaxed thresholds for live market microstructure (was 1.5 pips, 0.5 ratio)
-        if self._anomaly_direction == "SELL" and dist < -0.5 and is_impulse:
+        # Relaxed thresholds for live market microstructure (was 1.5 pips, now 0.3 for Exness)
+        if self._anomaly_direction == "SELL" and dist < -0.3 and is_impulse:
             is_trigger = True
-        elif self._anomaly_direction == "BUY" and dist > 0.5 and is_impulse:
+        elif self._anomaly_direction == "BUY" and dist > 0.3 and is_impulse:
             is_trigger = True
 
         # Debug logging for trigger condition
