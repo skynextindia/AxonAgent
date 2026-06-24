@@ -46,13 +46,13 @@ parser.add_argument("--cooldown", type=int, default=300, help="Entry cooldown (s
 args = parser.parse_args()
 
 logger.info("="*70)
-logger.info("🚀 AxonAI VELOCITY INTELLIGENCE DAEMON")
+logger.info(">> AxonAI VELOCITY INTELLIGENCE DAEMON")
 logger.info("="*70)
-logger.info(f"📊 Symbol: {args.symbol}")
-logger.info(f"🎯 Mode: {args.mode.upper()}")
-logger.info(f"💰 Lot Size: {args.lot_size}")
-logger.info(f"⏱️  Cooldown: {args.cooldown}s")
-logger.info(f"✨ Magic Number: {args.magic_number}")
+logger.info(f"Symbol: {args.symbol}")
+logger.info(f"Mode: {args.mode.upper()}")
+logger.info(f"Lot Size: {args.lot_size}")
+logger.info(f"Cooldown: {args.cooldown}s")
+logger.info(f"Magic Number: {args.magic_number}")
 
 # ───────────────────────────────────────────────────────────────────────────
 # LOAD CONFIGURATION WITH VELOCITY INTELLIGENCE
@@ -77,8 +77,8 @@ config.update({
     "realtime_velocity_min_profit_tight_trail": 0.25,
 })
 
-logger.info("\n✅ Configuration loaded with Velocity Intelligence")
-logger.info("  - Entry z-score threshold: 2.0σ")
+logger.info("\n[OK] Configuration loaded with Velocity Intelligence")
+logger.info("  - Entry z-score threshold: 2.0 sigma")
 logger.info("  - Health exit threshold: 0.40")
 logger.info("  - Health trail threshold: 0.70")
 logger.info("  - Reversal risk threshold: 0.70")
@@ -93,36 +93,36 @@ try:
         logger.error("❌ Failed to initialize MT5")
         sys.exit(1)
 
-    logger.info("\n✅ MT5 Connection Established")
+    logger.info("\n[OK] MT5 Connection Established")
 
     # Get account info
     acc_info = mt5.account_info()
     if acc_info:
-        logger.info(f"  💳 Account: {acc_info.name}")
-        logger.info(f"  💰 Balance: ${acc_info.balance:,.2f}")
-        logger.info(f"  📈 Equity: ${acc_info.equity:,.2f}")
-        logger.info(f"  📊 Leverage: 1:{acc_info.leverage}")
+        logger.info(f"  Account: {acc_info.name}")
+        logger.info(f"  Balance: ${acc_info.balance:,.2f}")
+        logger.info(f"  Equity: ${acc_info.equity:,.2f}")
+        logger.info(f"  Leverage: 1:{acc_info.leverage}")
 
     # Select symbol
     symbol = f"{args.symbol}" if "=" not in args.symbol else args.symbol
     if not mt5.symbol_select(symbol, True):
-        logger.error(f"❌ Failed to select symbol {symbol}")
+        logger.error(f"[FAILED] Symbol selection: {symbol}")
         sys.exit(1)
 
-    logger.info(f"  ✓ Symbol selected: {symbol}")
+    logger.info(f"  [OK] Symbol selected: {symbol}")
 
 except ImportError:
-    logger.warning("⚠️  MetaTrader5 module not found. Running in simulation mode.")
+    logger.warning("[WARNING] MetaTrader5 module not found. Running in simulation mode.")
     logger.warning("    Connect to MT5 terminal manually before starting daemon.")
     mt5 = None
 except Exception as e:
-    logger.error(f"❌ MT5 initialization error: {e}")
+    logger.error(f"[ERROR] MT5 initialization failed: {e}")
     sys.exit(1)
 
 # ───────────────────────────────────────────────────────────────────────────
 # INITIALIZE DAEMON
 # ───────────────────────────────────────────────────────────────────────────
-logger.info("\n🔧 Initializing AxonAI Daemon...")
+logger.info("\n[INIT] Initializing AxonAI Daemon...")
 
 from axonai.realtime.daemon import AxonDaemon
 
@@ -131,9 +131,9 @@ try:
         symbol=args.symbol,
         config=config
     )
-    logger.info("✅ Daemon initialized successfully")
+    logger.info("[OK] Daemon initialized successfully")
 except Exception as e:
-    logger.error(f"❌ Daemon initialization failed: {e}")
+    logger.error(f"[ERROR] Daemon initialization failed: {e}")
     import traceback
     traceback.print_exc()
     sys.exit(1)
@@ -142,20 +142,20 @@ except Exception as e:
 # START DAEMON
 # ───────────────────────────────────────────────────────────────────────────
 logger.info("\n" + "="*70)
-logger.info("▶️  STARTING VELOCITY INTELLIGENCE TRADING DAEMON")
+logger.info(">> STARTING VELOCITY INTELLIGENCE TRADING DAEMON")
 logger.info("="*70)
-logger.info("\n📊 LIVE DASHBOARD: http://127.0.0.1:8000/")
+logger.info("\nLIVE DASHBOARD: http://127.0.0.1:8000/")
 logger.info("   (Open in browser to monitor trades in real-time)")
-logger.info("\n🛑 Press Ctrl+C to stop daemon gracefully\n")
+logger.info("\nPress Ctrl+C to stop daemon gracefully\n")
 
 try:
     daemon.start()
 except KeyboardInterrupt:
-    logger.info("\n\n⏹️  STOPPING DAEMON...")
+    logger.info("\n\n[STOP] STOPPING DAEMON...")
     daemon.shutdown()
-    logger.info("✅ Daemon stopped cleanly")
+    logger.info("[OK] Daemon stopped cleanly")
 except Exception as e:
-    logger.error(f"\n❌ DAEMON ERROR: {e}")
+    logger.error(f"\n[ERROR] DAEMON ERROR: {e}")
     import traceback
     traceback.print_exc()
     daemon.shutdown()
@@ -163,7 +163,7 @@ except Exception as e:
 
 if mt5:
     mt5.shutdown()
-    logger.info("✅ MT5 connection closed")
+    logger.info("[OK] MT5 connection closed")
 
 logger.info("="*70)
 logger.info("DAEMON SESSION ENDED")
