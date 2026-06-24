@@ -1,0 +1,211 @@
+================================================================================
+  AXONAI VELOCITY INTELLIGENCE SYSTEM - READY FOR LIVE TRADING
+================================================================================
+
+Your velocity intelligence system is fully implemented, tested, and ready to execute
+trades on your MT5 demo account.
+
+================================================================================
+QUICK START (3 STEPS)
+================================================================================
+
+1. ENSURE MT5 TERMINAL IS RUNNING & LOGGED IN
+   └─ Open your MetaTrader 5 terminal
+   └─ Login to your demo account (or live if you're confident)
+   └─ Keep terminal open - daemon connects to it
+
+2. START THE DAEMON
+   └─ Open command prompt in this directory (D:\AXON.AI\AxonAgent)
+   └─ Run: python start_velocity_daemon.py --mode demo --symbol EURUSD
+   └─ Wait for: "▶️  STARTING VELOCITY INTELLIGENCE TRADING DAEMON"
+
+3. OPEN DASHBOARD
+   └─ Open browser: http://127.0.0.1:8000/
+   └─ Watch trades execute in real-time
+   └─ Monitor health scores and exit reasons
+
+================================================================================
+WHAT YOU'LL SEE
+================================================================================
+
+STARTUP:
+  ✅ MT5 Connection Established
+  ✅ Account: [Your Account]
+  ✅ Balance: $[amount]
+  ✅ Daemon initialized successfully
+  ▶️  STARTING VELOCITY INTELLIGENCE TRADING DAEMON
+  📊 LIVE DASHBOARD: http://127.0.0.1:8000/
+
+DURING TRADING:
+  - Ticks flowing in real-time
+  - Entry signals being evaluated
+  - Velocity z-scores calculated
+  - Qualified trades executing
+  - Trade health being monitored
+  - Exits triggered when conditions met
+
+SAMPLE LOG OUTPUT:
+  [Entry Detected] Z-Score: 2.1σ (qualified) → ACCEPT
+  [Trade Opened] BUY 0.01 lots at 1.14520, SL: 1.14400, TP: 1.14650
+  [Health Monitoring] Health: 0.95, Trend: STABLE, Risk: 0.05
+  [Trail Adjusted] Health degrading: 0.75 → Tightened SL
+  [Exit Triggered] Health < 0.40 → Closed trade
+
+================================================================================
+VELOCITY INTELLIGENCE SYSTEM PARAMETERS
+================================================================================
+
+Default Configuration (Good Starting Point):
+  ✅ Entry Z-Score Threshold: 2.0 (only true impulses)
+  ✅ Health Exit Threshold: 0.40 (closes when health dies)
+  ✅ Health Trail Threshold: 0.70 (tightens trail as health drops)
+  ✅ Reversal Risk Threshold: 0.70 (closes on reversal factors)
+  ✅ Entry Cooldown: 300 seconds (5 minutes between entries)
+
+TO ADJUST SETTINGS:
+  1. Open: axonai/default_config.py
+  2. Find lines starting with: "realtime_"
+  3. Modify the values
+  4. Restart daemon (Ctrl+C then re-run)
+
+================================================================================
+MONITORING DASHBOARD
+================================================================================
+
+URL: http://127.0.0.1:8000/
+
+Shows in Real-Time:
+  📊 Price & Volume
+  💹 Velocity Metrics (current, baseline, z-score)
+  🎯 Entry Signals (accepted/rejected with reason)
+  📈 Trade Health (health_score, reversal_risk, trend)
+  🚪 Exit Reasons (when trades close and why)
+  ⏱️  Trade Duration & P&L
+  🔄 Account Status (balance, equity, margin)
+
+Key Numbers to Watch:
+  - Health Score > 0.6 = Good trade
+  - Health Score < 0.4 = Closing soon
+  - Velocity Z-Score > 2.0 = Entry qualified
+  - Entry Rejection Rate 20-40% = Normal (system being picky)
+
+================================================================================
+STOP THE DAEMON
+================================================================================
+
+To stop gracefully:
+  1. Press Ctrl+C in the terminal running the daemon
+  2. Wait for: "✅ Daemon stopped cleanly"
+  3. MT5 connection closes automatically
+
+Do NOT:
+  ❌ Kill the process forcefully (use Ctrl+C instead)
+  ❌ Close terminal while daemon is running
+  ❌ Disconnect MT5 without stopping daemon first
+
+================================================================================
+LOGS & MONITORING
+================================================================================
+
+Real-Time Log (while daemon runs):
+  └─ Visible in terminal window
+
+Complete Log File:
+  └─ velocity_daemon.log (in this directory)
+  └─ Review with: tail -f velocity_daemon.log
+
+Daily Reports (after daemon stops):
+  └─ reports/trades_YYYYMMDD.json (all trades)
+  └─ reports/health_YYYYMMDD.csv (health scores)
+  └─ reports/metrics_YYYYMMDD.json (aggregated stats)
+
+================================================================================
+SAFETY FEATURES ACTIVE
+================================================================================
+
+✅ Position Limit: Max 1 open position at a time
+✅ Cooldown: 5-minute wait between entries
+✅ Spread Check: Rejects if spread too wide
+✅ Session Filter: Only trades London & NY hours
+✅ Circuit Breaker: Stops if drawdown > 5% daily
+✅ Health Monitor: Exits before reversal (proactive, not reactive)
+
+================================================================================
+FIRST TIME? START WITH THESE STEPS
+================================================================================
+
+1. START IN DEMO MODE
+   python start_velocity_daemon.py --mode demo --symbol EURUSD
+
+2. RUN FOR 2-4 HOURS
+   └─ Watch dashboard
+   └─ Observe entry/exit behavior
+   └─ Check if metrics make sense
+
+3. REVIEW RESULTS
+   └─ Open velocity_daemon.log
+   └─ Check trade P&L
+   └─ Verify health scores matched expectations
+
+4. FINE-TUNE IF NEEDED
+   └─ Too many entries? Raise z-score threshold to 2.5
+   └─ Too few entries? Lower to 1.8
+   └─ Exiting too early? Raise health exit to 0.50
+   └─ Exiting too late? Lower to 0.30
+
+5. SWITCH TO LIVE (ONLY IF CONFIDENT)
+   python start_velocity_daemon.py --mode live --symbol EURUSD
+
+================================================================================
+TROUBLESHOOTING
+================================================================================
+
+"MT5 Connection Failed"
+  → Open MetaTrader 5 and login
+  → Make sure terminal stays open while daemon runs
+
+"No trades firing"
+  → Check dashboard for velocity z-score
+  → If z-score < 2.0, market velocity is weak
+  → Check session (should be London or NY hours)
+
+"Dashboard not loading"
+  → Make sure daemon is fully started (look for "▶️  STARTING")
+  → Try browser refresh
+  → Check firewall isn't blocking port 8000
+
+"Too many rejections"
+  → Increase z-score threshold in default_config.py
+  → Market may just be weak at that moment
+
+"Trades staying open too long"
+  → Lower health_health_threshold_exit in config
+  → Or lower reversal_risk_threshold
+
+================================================================================
+DOCUMENTATION
+================================================================================
+
+📚 Full Details:
+  └─ VELOCITY_LIVE_TRADING_GUIDE.md (comprehensive guide)
+  └─ plan.md (implementation details)
+  └─ IMPLEMENTATION_SUMMARY.md (architecture overview)
+
+🔧 For Developers:
+  └─ axonai/realtime/pretrade_velocity_analyzer.py
+  └─ axonai/realtime/trade_velocity_health.py
+  └─ axonai/realtime/intelligent_trade_exit.py
+
+================================================================================
+READY? LET'S GO!
+================================================================================
+
+1. Make sure MT5 terminal is running
+2. Open this directory in command prompt
+3. Type: python start_velocity_daemon.py --mode demo --symbol EURUSD
+4. Open browser: http://127.0.0.1:8000/
+5. Watch your trades execute!
+
+Questions? Check VELOCITY_LIVE_TRADING_GUIDE.md for detailed instructions.
+
+Good luck! 🚀
