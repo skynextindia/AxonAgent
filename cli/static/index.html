@@ -169,6 +169,53 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
       </div>
     </div>
   </div>
+  <!-- TRIGGER METRICS PANEL -->
+  <div style="display:grid;grid-template-columns:12fr;gap:3px;flex-shrink:0;">
+    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-left:3px solid var(--green);background:#040406;">
+      <span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">TRIGGER_METRICS</span>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:2px;font-size:6.5px;">
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">STATE</span>
+          <span id="trigger-state" style="color:var(--cyan);font-weight:900;font-size:7px;">IDLE</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">DIRECTION</span>
+          <span id="trigger-direction" style="color:var(--amber);font-weight:900;font-size:7px;">--</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">QUALITY</span>
+          <span id="trigger-quality" style="color:var(--text-dim);font-weight:700;font-size:7px;">0.00</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">DISPLACEMENT</span>
+          <span id="trigger-disp-class" style="color:var(--text-dim);font-weight:700;font-size:7px;">--</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">RATIO</span>
+          <span id="trigger-disp-ratio" style="color:var(--text-dim);font-weight:700;font-size:7px;">0.00</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">VELOCITY_Z</span>
+          <span id="trigger-vel-z" style="color:var(--text-dim);font-weight:700;font-size:7px;">0.00</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">REGIME</span>
+          <span id="trigger-regime" style="color:var(--text-dim);font-weight:700;font-size:7px;">--</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">H1_BIAS</span>
+          <span id="trigger-h1-bias" style="color:var(--text-dim);font-weight:700;font-size:7px;">0.00</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">H4_BIAS</span>
+          <span id="trigger-h4-bias" style="color:var(--text-dim);font-weight:700;font-size:7px;">0.00</span>
+        </div>
+      </div>
+      <div style="margin-top:2px;padding-top:2px;border-top:1px solid rgba(31,31,46,.4);">
+        <span id="trigger-reason" style="font-size:6px;color:var(--text-dim);font-style:italic;">Awaiting trigger metrics...</span>
+      </div>
+    </div>
+  </div>
   <!-- LEVEL BEHAVIOR + TACTICAL OVERRIDES -->
   <div style="display:grid;grid-template-columns:12fr;gap:3px;flex-shrink:0;">
     <div class="cyber-panel" style="padding:3px 8px;display:flex;align-items:center;gap:8px;border-left:3px solid var(--amber);background:#040406;"><span style="font-size:7px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">BEHAVIOR</span><span id="bhv-placeholder" style="font-size:7px;color:var(--text-dim);font-style:italic;">Awaiting tick-level interaction data...</span></div>
@@ -627,6 +674,39 @@ class DashboardController {
       case"event":this.handleEvent(d);break;case"agent":this.handleAgent(d);break;case"decision":this.handleDecision(d);break;
       case"news_data":this.handleNewsData(d);break;
       case"mode":this.handleMode(d);break;
+      case"trigger_metrics":this.handleTriggerMetrics(d);break;
+    }
+  }
+  handleTriggerMetrics(d) {
+    const updateEl = (id, value, color) => {
+      const el = document.getElementById(id);
+      if(!el) return;
+      el.textContent = value;
+      if(color) el.style.color = color;
+    };
+
+    // Color coding based on state
+    let stateColor = "var(--text-dim)";
+    if(d.state === "IDLE") stateColor = "var(--text-dim)";
+    else if(d.state === "ANOMALY") stateColor = "var(--amber)";
+    else if(d.state === "ARMING") stateColor = "var(--purple)";
+    else if(d.state === "TRIGGERED") stateColor = "var(--green)";
+
+    updateEl("trigger-state", d.state || "IDLE", stateColor);
+    updateEl("trigger-direction", d.direction || "--", d.direction === "BUY" ? "var(--green)" : d.direction === "SELL" ? "var(--red)" : "var(--amber)");
+    updateEl("trigger-quality", (d.signal_quality || 0).toFixed(2));
+    updateEl("trigger-disp-class", d.displacement_class || "--");
+    updateEl("trigger-disp-ratio", (d.displacement_ratio || 0).toFixed(3));
+    updateEl("trigger-vel-z", (d.velocity_z_score || 0).toFixed(2));
+    updateEl("trigger-regime", d.regime || "--");
+    updateEl("trigger-h1-bias", (d.mtf_h1_bias || 0).toFixed(2));
+    updateEl("trigger-h4-bias", (d.mtf_h4_bias || 0).toFixed(2));
+
+    const reasonEl = document.getElementById("trigger-reason");
+    if(reasonEl) {
+      reasonEl.textContent = d.reason || "Awaiting conditions...";
+      reasonEl.style.color = d.is_valid ? "var(--green)" : "var(--text-dim)";
+      reasonEl.style.fontWeight = d.is_valid ? "900" : "700";
     }
   }
   handleMode(d) {
