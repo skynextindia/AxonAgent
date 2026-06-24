@@ -157,6 +157,15 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_velocity_decay_threshold_aligned": 0.20,
     "realtime_velocity_decay_threshold_unaligned": 0.40,
 
+    # Velocity intelligence system (new)
+    "realtime_entry_zscore_threshold": 2.0,              # Only enter on velocity spike > 2σ
+    "realtime_velocity_health_threshold_exit": 0.40,     # Close if health < this
+    "realtime_velocity_health_threshold_trail": 0.70,    # Tighten trail if health < this
+    "realtime_reversal_risk_threshold": 0.70,            # Close if reversal risk > this
+    "realtime_velocity_window_size": 30,                 # Ticks in trade health window
+    "realtime_pre_entry_baseline_window": 100,           # Velocity samples for baseline
+    "realtime_velocity_min_profit_tight_trail": 0.25,    # Min profit (× ATR) before tight trailing
+
     "sl_atr_multiple": 1.0,
     "tp_atr_multiple": 1.5,
     "loss_cooldown_minutes": 45,

@@ -28,6 +28,9 @@ from axonai.realtime.reversal_model import ReversalModel
 from axonai.realtime.trade_analytics import TradeAnalytics
 from axonai.realtime.trade_executor import MT5TradeExecutor
 from axonai.realtime.api_server import get_dashboard
+from axonai.realtime.pretrade_velocity_analyzer import PreTradeVelocityAnalyzer
+from axonai.realtime.trade_velocity_health import TradeVelocityHealthMonitor
+from axonai.realtime.intelligent_trade_exit import IntelligentTradeExitManager
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +84,25 @@ class AxonDaemon:
         self.trade_executor_opt = MT5TradeExecutor(config_opt)
 
         self.trade_executor = self.trade_executor_opt  # Default fallback reference
+
+        # Velocity Intelligence System
+        pip_mult = 0.0001 if "JPY" not in symbol.upper() else 0.01
+        self.pretrade_analyzer = PreTradeVelocityAnalyzer(
+            window_size=config.get("realtime_pre_entry_baseline_window", 100),
+            pip_mult=pip_mult
+        )
+        self.trade_velocity_health = TradeVelocityHealthMonitor(
+            pip_mult=pip_mult,
+            window_size=config.get("realtime_velocity_window_size", 30)
+        )
+        self.trade_exit_manager = IntelligentTradeExitManager(pip_mult=pip_mult)
+        self.trade_exit_manager.exit_health_threshold = config.get("realtime_velocity_health_threshold_exit", 0.40)
+        self.trade_exit_manager.trail_health_threshold = config.get("realtime_velocity_health_threshold_trail", 0.70)
+        self.trade_exit_manager.reversal_risk_exit = config.get("realtime_reversal_risk_threshold", 0.70)
+        self.trade_exit_manager.min_profit_threshold = config.get("realtime_velocity_min_profit_tight_trail", 0.25)
+
+        # Tracking for registered trade velocity baseline
+        self._trade_velocity_baseline = None
 
         # Trailing stop and trade outcome tracking
         self._tracked_positions: set[int] = set()
@@ -692,7 +714,55 @@ class AxonDaemon:
         # 1. Update pure-math reversal engine
         snapshot = self.reversal_model.on_tick(mid, timestamp, volume)
         self._last_snapshot = snapshot
-        
+
+        # Velocity Intelligence: Track velocity baseline every tick
+        if hasattr(snapshot, "velocity") and snapshot.velocity:
+            self.pretrade_analyzer.add_velocity_sample(snapshot.velocity.abs_velocity)
+
+        # Monitor trade health if position is open
+        if len(self._tracked_positions) > 0:
+            current_price = mid
+            current_velocity = snapshot.velocity.abs_velocity if hasattr(snapshot, "velocity") else 0.0
+            displacement_type = snapshot.displacement.classification if hasattr(snapshot, "displacement") else "NEUTRAL"
+            mtf_alignment = snapshot.mtf.alignment_score if hasattr(snapshot, "mtf") else 0.0
+
+            health = self.trade_velocity_health.evaluate(
+                current_velocity=current_velocity,
+                displacement_type=displacement_type,
+                regime_shift=False,  # TODO: track regime changes
+                mtf_alignment=mtf_alignment
+            )
+            # Store for use in exit decisions
+            self._last_health = health
+
+            # Check if velocity health triggers an exit
+            # Get trade info (direction, entry_price from reversal_model)
+            open_trade = list(self._tracked_positions)[0] if self._tracked_positions else None
+            if open_trade and hasattr(self.reversal_model, "_active_trade"):
+                direction = self.reversal_model._active_trade.get("direction", "BUY")
+                entry_price = self.reversal_model._active_trade.get("entry_price", 0.0)
+                atr_pips = (self.live_state.atr_14_h1 / (0.01 if "JPY" in self.mt5_symbol else 0.0001)) if self.live_state.atr_14_h1 else 12.0
+
+                pips_profit = (current_price - entry_price) / (0.01 if "JPY" in self.mt5_symbol else 0.0001)
+
+                exit_decision = self.trade_exit_manager.decide_exit(
+                    velocity_health=health,
+                    current_price=current_price,
+                    entry_price=entry_price,
+                    direction=direction,
+                    pips_profit=pips_profit,
+                    atr_pips=atr_pips
+                )
+
+                # Emit exit event if decision is to close
+                if exit_decision.should_close:
+                    self.event_queue.put({
+                        "type": "exit_velocity",
+                        "snapshot": snapshot,
+                        "reason": exit_decision.reason,
+                        "health": health
+                    })
+
         # 2. Check for entry triggers
         if snapshot.entry_decision.is_valid_entry:
             self.event_queue.put({"type": "entry", "snapshot": snapshot})
@@ -862,7 +932,21 @@ class AxonDaemon:
 
                 signal = "Buy" if snapshot.entry_decision.direction == "BUY" else "Sell"
                 system_name = "reversal_model"
-                logger.info("EXECUTING: ReversalModel Triggered → signal: %s", signal)
+
+                # Velocity Intelligence: Qualify entry on impulse strength
+                entry_velocity = snapshot.velocity.abs_velocity if hasattr(snapshot, "velocity") else 0.0
+                qualifies, entry_zscore = self.pretrade_analyzer.qualifies_for_entry(entry_velocity)
+
+                if not qualifies:
+                    self._events_skipped += 1
+                    logger.info("SKIPPED: Entry velocity too weak (z-score=%.2f, threshold=%.2f)",
+                               entry_zscore, self.config.get("realtime_entry_zscore_threshold", 2.0))
+                    continue
+
+                # Store baseline for trade health monitoring
+                self._trade_velocity_baseline = self.pretrade_analyzer.get_baseline()
+
+                logger.info("EXECUTING: ReversalModel Triggered → signal: %s (velocity z-score=%.2f)", signal, entry_zscore)
 
                 # Broadcast decision status
                 dashboard = get_dashboard()
@@ -894,6 +978,15 @@ class AxonDaemon:
                             trade_result.get("sl"), trade_result.get("tp"),
                             reason=snapshot.entry_decision.reason
                         )
+
+                        # Register with velocity health monitor
+                        if self._trade_velocity_baseline:
+                            self.trade_velocity_health.register_trade(
+                                entry_velocity=entry_velocity,
+                                baseline_mean=self._trade_velocity_baseline.mean_velocity,
+                                baseline_std=self._trade_velocity_baseline.std_velocity
+                            )
+
                         self.trade_analytics.record_entry(
                             ticket, self.mt5_symbol, snapshot.entry_decision.direction,
                             snapshot.price, trade_result.get("sl"), trade_result.get("tp"), snapshot
@@ -903,6 +996,19 @@ class AxonDaemon:
 
                 self._last_execution_time = datetime.now()
                 self._events_fired += 1
+
+            # Handle velocity-based exit signals
+            elif event_type == "exit_velocity":
+                reason = event.get("reason", "Velocity health deteriorated")
+                health = event.get("health")
+                logger.warning("VELOCITY EXIT TRIGGERED: %s (health_score=%.2f, reversal_risk=%.2f)",
+                              reason, health.health_score if health else 0, health.reversal_risk if health else 0)
+
+                # Close the position
+                if self._tracked_positions:
+                    # This would trigger the actual close through MT5
+                    # For now, just log it
+                    self._events_fired += 1
                 
                 # We can mock a log here if needed
                 if hasattr(self, '_log_dry_run_event'):

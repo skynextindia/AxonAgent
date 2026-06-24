@@ -24,6 +24,8 @@ from axonai.realtime.displacement_engine import (
 from axonai.realtime.trade_phase import TradePhase
 from axonai.realtime.exit_stats import ExitStats
 from axonai.realtime.mtf_context import MTFState
+from axonai.realtime.trade_velocity_health import TradeVelocityHealth
+from axonai.realtime.intelligent_trade_exit import IntelligentTradeExitManager
 
 
 @dataclass
@@ -42,7 +44,10 @@ class AdaptiveExitManager:
     def __init__(self, pip_mult: float = 0.0001, config: Optional[dict] = None):
         self._pip = pip_mult
         self.config = config or {}
-        
+
+        # Intelligent exit manager (velocity-based)
+        self.intelligent_exit = IntelligentTradeExitManager(pip_mult=pip_mult)
+
         # Current Trade Context
         self._ticket: int = 0
         self._direction: str = ""
@@ -204,10 +209,41 @@ class AdaptiveExitManager:
         exit_stats: ExitStats | None = None,
         mtf: Optional[MTFState] = None,
         atr: Optional[float] = None,
+        velocity_health: Optional[TradeVelocityHealth] = None,
     ) -> ExitDecision:
         """Evaluate if we should hold, adjust SL/TP, or force close."""
         if self._ticket == 0:
             return ExitDecision()
+
+        # Convert H1 ATR to pips (needed for intelligent exit)
+        atr_pips = (atr / self._pip) if (atr is not None and atr > 0) else 12.0
+
+        # ── PRIORITY 0: Intelligent Velocity-Based Exit (NEW) ──
+        if velocity_health is not None:
+            pips_profit = (current_price - self._entry_price) / self._pip
+            if self._direction == "SELL":
+                pips_profit = -pips_profit
+
+            intelligent_decision = self.intelligent_exit.decide_exit(
+                velocity_health=velocity_health,
+                current_price=current_price,
+                entry_price=self._entry_price,
+                direction=self._direction,
+                pips_profit=pips_profit,
+                atr_pips=atr_pips
+            )
+
+            # Convert intelligent exit decision to ExitDecision format
+            if intelligent_decision.should_close:
+                return self._close(intelligent_decision.reason)
+            elif intelligent_decision.signal.value == "TIGHT_TRAIL" and intelligent_decision.suggested_sl:
+                self._current_sl = intelligent_decision.suggested_sl
+                return ExitDecision(
+                    should_exit=False,
+                    action="ADJUST_SL",
+                    reason=intelligent_decision.reason,
+                    suggested_sl=intelligent_decision.suggested_sl
+                )
             
         pips_profit = (current_price - self._entry_price) / self._pip
         if self._direction == "SELL":
