@@ -693,10 +693,32 @@ class AxonDaemon:
         snapshot = self.reversal_model.on_tick(mid, timestamp, volume)
         self._last_snapshot = snapshot
         
-        # 2. Check for entry triggers
+        # 2. Check for entry triggers + broadcast trigger metrics to dashboard
+        dashboard = get_dashboard()
+        if dashboard:
+            # Broadcast trigger metrics for real-time visualization
+            dashboard.broadcast({
+                "type": "trigger_metrics",
+                "state": snapshot.entry_decision.state,
+                "direction": snapshot.entry_decision.direction,
+                "signal_quality": snapshot.entry_decision.signal_quality,
+                "is_valid": snapshot.entry_decision.is_valid_entry,
+                "reason": snapshot.entry_decision.reason,
+                # Displacement metrics
+                "displacement_class": snapshot.displacement.classification,
+                "displacement_ratio": round(snapshot.displacement.displacement_ratio, 3),
+                "velocity_z_score": round(snapshot.velocity.z_score, 2),
+                "velocity_is_unusual": snapshot.velocity.is_unusual,
+                "velocity_tick_efficiency": round(snapshot.velocity.tick_efficiency, 3),
+                # Market context
+                "regime": snapshot.regime.regime if snapshot.regime else "UNKNOWN",
+                "mtf_h1_bias": round(snapshot.mtf.h1_bias, 2) if snapshot.mtf else 0.0,
+                "mtf_h4_bias": round(snapshot.mtf.h4_bias, 2) if snapshot.mtf else 0.0,
+            })
+
         if snapshot.entry_decision.is_valid_entry:
             self.event_queue.put({"type": "entry", "snapshot": snapshot})
-            
+
         # 3. Check for exit triggers
         if snapshot.exit_decision.should_exit or snapshot.exit_decision.action == "ADJUST_SL":
             self.event_queue.put({"type": "exit", "snapshot": snapshot})
