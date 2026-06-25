@@ -596,6 +596,7 @@ class DashboardServer:
 
             # Copy cached states to local variables under lock
             account_data = self.history["account"]
+            logger.info("Hydrating client: account_data=%s", account_data if account_data else "None")
             tick_data = self.history["tick"]
             regime_data = self.history["regime"]
             levels_data = self.history["levels"]
