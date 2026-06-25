@@ -6,25 +6,33 @@ Trails SL based on:
   2. Price move away from SL (directional confirmation)
   3. Retest detection (price touched SL area, bounced back up = trail it as support)
 
-NOT a fixed profit threshold. Responds to live market structure.
+Uses dynamic market buffer (MarketBufferEngine) instead of fixed thresholds.
+Adapts SL trail distance to market regime and volatility.
 """
 
 import logging
 from typing import Dict, Optional
+
+from axonai.realtime.market_buffer_engine import MarketBufferEngine
+from axonai.realtime.velocity_normalizer import NormalizedVelocity
+from axonai.realtime.displacement_engine import DisplacementState
+from axonai.realtime.regime_engine import RegimeState
 
 logger = logging.getLogger(__name__)
 
 
 class VelocityTrailingManager:
     """
-    Real-time velocity trailing with retest detection.
+    Real-time velocity trailing with dynamic market buffer adaptation.
 
     Key insight: SL trails when price accelerates AWAY from it + retests show it's support.
+    Trail distance adapts to market regime (tight in compression, loose in expansion).
     """
 
     def __init__(self, config: Optional[dict] = None):
         self.config = config or {}
         self._trail_state: Dict[int, dict] = {}
+        self._buffer_engine = MarketBufferEngine(config=config)
 
         # Velocity tracking
         self.velocity_acceleration_threshold = 1.2  # 20% velocity increase = acceleration
@@ -33,7 +41,7 @@ class VelocityTrailingManager:
         self.retest_window_pips = 3.0  # How close to SL counts as "touching" support
         self.retest_bounce_pips = 1.0   # Minimum bounce off support to count as retest
 
-        # Trailing parameters
+        # Trailing parameters (these now have dynamic alternatives)
         self.min_price_distance_to_trail = 2.0  # Minimum 2 pips away from SL to trail
         self.max_trail_distance = 15.0  # Never trail more than 15 pips from price
 
@@ -47,18 +55,37 @@ class VelocityTrailingManager:
         initial_sl: float,
         current_sl: float,
         velocity_percentile: float,
-        velocity_acceleration: float,  # NEW: velocity change rate
+        velocity_acceleration: float,
         displacement_ratio: float,
         health_score: float,
         at_structure: bool,
-        lowest_price: float,  # NEW: lowest price since entry
+        lowest_price: float,
+        velocity: Optional[NormalizedVelocity] = None,
+        displacement: Optional[DisplacementState] = None,
+        regime: Optional[RegimeState] = None,
+        ticks_in_trade: int = 0,
+        is_htf_aligned: bool = False,
     ) -> Optional[dict]:
         """
-        Real-time velocity trailing with retest detection.
+        Real-time velocity trailing with retest detection and dynamic market buffer.
 
         Args:
-            velocity_acceleration: ratio of current_velocity / previous_velocity (1.0 = no change, 1.2 = 20% faster)
-            lowest_price: lowest price reached since entry (for retest detection)
+            ticket: Trade ticket number
+            bid/ask: Current bid/ask prices
+            position_type: "BUY" or "SELL"
+            entry_price: Entry price
+            initial_sl/current_sl: Stop loss prices
+            velocity_percentile: Velocity percentile (0-100)
+            velocity_acceleration: Velocity change rate (1.0 = no change, 1.2 = 20% faster)
+            displacement_ratio: Displacement ratio for the move
+            health_score: Trade health score (0-100)
+            at_structure: True if at support/resistance
+            lowest_price: Lowest price since entry (for retest detection)
+            velocity: Optional NormalizedVelocity object (for dynamic buffer)
+            displacement: Optional DisplacementState object (for dynamic buffer)
+            regime: Optional RegimeState object (for dynamic buffer)
+            ticks_in_trade: How many ticks in this trade
+            is_htf_aligned: True if higher timeframe aligned with trade
 
         Returns:
             dict with new_sl if trail triggered, else None
@@ -73,9 +100,23 @@ class VelocityTrailingManager:
                 "last_trail_price": entry_price,
                 "retest_count": 0,
                 "support_level": None,
+                "dynamic_buffer": None,
             }
 
         state = self._trail_state[ticket]
+
+        # Compute dynamic market buffer (replaces static thresholds)
+        if velocity and displacement and regime:
+            dyn_buffer = self._buffer_engine.compute(
+                regime=regime,
+                velocity=velocity,
+                displacement=displacement,
+                ticks_in_trade=ticks_in_trade,
+                is_htf_aligned=is_htf_aligned,
+            )
+            state["dynamic_buffer"] = dyn_buffer
+        else:
+            dyn_buffer = None
 
         # Current profit
         if position_type == "BUY":
@@ -126,33 +167,38 @@ class VelocityTrailingManager:
             current_profit, displacement_ratio, agg, distance_from_sl
         )
 
+        # Include dynamic buffer info in log
+        buffer_info = f" [buffer={dyn_buffer.threshold:.3f} regime={dyn_buffer.regime_name}]" if dyn_buffer else ""
+
         if position_type == "BUY":
             new_sl = bid - (trail_distance * pip)
             if new_sl > current_sl:  # Only move SL up
                 state["last_trail_price"] = bid
                 logger.info(
-                    "VelocityTrail BUY #%d: SL %.5f -> %.5f (agg=%.2f, vel_accel=%.2f, retest=%s)",
-                    ticket, current_sl, new_sl, agg, velocity_acceleration, retest_detected
+                    "VelocityTrail BUY #%d: SL %.5f -> %.5f (agg=%.2f, vel_accel=%.2f, retest=%s)%s",
+                    ticket, current_sl, new_sl, agg, velocity_acceleration, retest_detected, buffer_info
                 )
                 return {
                     "new_sl": new_sl,
-                    "reason": f"Velocity trail (agg={agg:.2f}, accel={velocity_acceleration:.2f}, retest={retest_detected})",
+                    "reason": f"Velocity trail (agg={agg:.2f}, accel={velocity_acceleration:.2f}, retest={retest_detected}, regime={dyn_buffer.regime_name if dyn_buffer else 'static'})",
                     "aggressiveness": agg,
                     "profit_locked": (new_sl - entry_price) / pip,
+                    "dynamic_buffer": dyn_buffer.threshold if dyn_buffer else None,
                 }
         else:
             new_sl = ask + (trail_distance * pip)
             if new_sl < current_sl or current_sl == 0.0:  # Only move SL down
                 state["last_trail_price"] = ask
                 logger.info(
-                    "VelocityTrail SELL #%d: SL %.5f -> %.5f (agg=%.2f, vel_accel=%.2f, retest=%s)",
-                    ticket, current_sl, new_sl, agg, velocity_acceleration, retest_detected
+                    "VelocityTrail SELL #%d: SL %.5f -> %.5f (agg=%.2f, vel_accel=%.2f, retest=%s)%s",
+                    ticket, current_sl, new_sl, agg, velocity_acceleration, retest_detected, buffer_info
                 )
                 return {
                     "new_sl": new_sl,
-                    "reason": f"Velocity trail (agg={agg:.2f}, accel={velocity_acceleration:.2f}, retest={retest_detected})",
+                    "reason": f"Velocity trail (agg={agg:.2f}, accel={velocity_acceleration:.2f}, retest={retest_detected}, regime={dyn_buffer.regime_name if dyn_buffer else 'static'})",
                     "aggressiveness": agg,
                     "profit_locked": (entry_price - new_sl) / pip,
+                    "dynamic_buffer": dyn_buffer.threshold if dyn_buffer else None,
                 }
 
         return None
