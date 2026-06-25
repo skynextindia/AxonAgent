@@ -193,8 +193,11 @@ class TradeStateEngine:
         if location_context:
             self._state.location_context = {
                 "distance_to_sr": location_context.distance_to_sr,
-                "at_structure": location_context.at_structure,
+                "distance_to_liquidity": location_context.distance_to_liquidity,
                 "room_available": location_context.room_available,
+                "at_structure": location_context.at_structure,
+                "nearest_level_type": location_context.nearest_level_type,
+                "nearest_level_price": location_context.nearest_level_price,
             }
         self._state.htf_context = htf_context
 

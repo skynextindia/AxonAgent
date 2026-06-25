@@ -216,6 +216,11 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
       </div>
     </div>
   </div>
+  <!-- TRADE STATE + LOCATION CONTEXT -->
+  <div style="display:grid;grid-template-columns:6fr 6fr;gap:3px;flex-shrink:0;">
+    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-left:3px solid var(--purple);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">TRADE_STATE</span><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:2px;font-size:6.5px;"><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">PHASE</span><span id="ts-phase" style="color:var(--cyan);font-weight:900;font-size:7px;">--</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">HEALTH%</span><span id="ts-health" style="color:var(--green);font-weight:900;font-size:7px;">0.0</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">THESIS</span><span id="ts-thesis" style="color:var(--text-dim);font-weight:700;font-size:7px;">--</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">MFE (pips)</span><span id="ts-mfe" style="color:var(--green);font-weight:900;font-size:7px;">0.0</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">MAE (pips)</span><span id="ts-mae" style="color:var(--red);font-weight:900;font-size:7px;">0.0</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">PROFIT (pips)</span><span id="ts-profit" style="color:var(--cyan);font-weight:900;font-size:7px;">0.0</span></div></div></div>
+    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-left:3px solid var(--green);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">LOCATION_CONTEXT</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:2px;font-size:6.5px;"><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">AT_STRUCTURE</span><span id="lc-at-struct" style="color:var(--amber);font-weight:900;font-size:7px;">FALSE</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">DIST_TO_SR (ATR)</span><span id="lc-dist-sr" style="color:#fff;font-weight:900;font-size:7px;">0.0</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">DIST_TO_LIQ (ATR)</span><span id="lc-dist-liq" style="color:#fff;font-weight:900;font-size:7px;">0.0</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">ROOM (pips)</span><span id="lc-room" style="color:#fff;font-weight:900;font-size:7px;">0.0</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">LEVEL</span><span id="lc-level-type" style="color:var(--text-secondary);font-weight:700;font-size:7px;">--</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">LEVEL_PRICE</span><span id="lc-level-price" style="color:#fff;font-weight:700;font-size:7px;">--</span></div></div></div>
+  </div>
   <!-- LEVEL BEHAVIOR + TACTICAL OVERRIDES -->
   <div style="display:grid;grid-template-columns:12fr;gap:3px;flex-shrink:0;">
     <div class="cyber-panel" style="padding:3px 8px;display:flex;align-items:center;gap:8px;border-left:3px solid var(--amber);background:#040406;"><span style="font-size:7px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">BEHAVIOR</span><span id="bhv-placeholder" style="font-size:7px;color:var(--text-dim);font-style:italic;">Awaiting tick-level interaction data...</span></div>
@@ -675,7 +680,27 @@ class DashboardController {
       case"news_data":this.handleNewsData(d);break;
       case"mode":this.handleMode(d);break;
       case"trigger_metrics":this.handleTriggerMetrics(d);break;
+      case"trade_state":this.handleTradeState(d);break;
+      case"location_context":this.handleLocationContext(d);break;
     }
+  }
+  handleTradeState(d) {
+    const upd = (id,val) => {const el=g(id);if(el)el.textContent=val};
+    upd("ts-phase", d.current_phase || "--");
+    upd("ts-health", (d.health_score || 0).toFixed(1) + "%");
+    upd("ts-thesis", d.thesis_status || "--");
+    upd("ts-mfe", (d.mfe || 0).toFixed(1));
+    upd("ts-mae", (d.mae || 0).toFixed(1));
+    upd("ts-profit", (d.current_profit_pips || 0).toFixed(1));
+  }
+  handleLocationContext(d) {
+    const upd = (id,val) => {const el=g(id);if(el)el.textContent=val};
+    upd("lc-at-struct", d.at_structure ? "TRUE" : "FALSE");
+    upd("lc-dist-sr", (d.distance_to_sr || 0).toFixed(2));
+    upd("lc-dist-liq", (d.distance_to_liquidity || 0).toFixed(2));
+    upd("lc-room", (d.room_available || 0).toFixed(1));
+    upd("lc-level-type", d.nearest_level_type || "--");
+    upd("lc-level-price", d.nearest_level_price ? parseFloat(d.nearest_level_price).toFixed(5) : "--");
   }
   handleTriggerMetrics(d) {
     console.log('handleTriggerMetrics called with:', d);

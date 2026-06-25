@@ -706,12 +706,20 @@ class DashboardServer:
                 self._save_session()
 
             if not self.active_connections:
+                if msg_type == "account":
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning("broadcast(%s): no active WebSocket connections! Loop=%s", msg_type, bool(self._loop))
                 return
 
         # Uvicorn and FastAPI run inside an asyncio event loop.
         # Since daemon operates in a regular thread, we bridge the call to the loop.
         if hasattr(self, "_loop") and self._loop:
             asyncio.run_coroutine_threadsafe(self._async_broadcast(message), self._loop)
+        elif msg_type == "account":
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("broadcast(%s): event loop not available!", msg_type)
 
     async def _async_broadcast(self, message: Dict[str, Any]):
         """Asynchronously send message to all sockets."""
