@@ -125,6 +125,7 @@ class ReversalModel:
         timestamp: datetime,
         volume: float = 1.0,
         location_context: Optional[LocationContext] = None,  # NEW: FIX 2 - optional param
+        displacement_normalizer=None,  # Optional: DisplacementNormalizer instance
     ) -> EngineSnapshot:
         """
         Process a new tick through the entire pipeline.
@@ -140,7 +141,7 @@ class ReversalModel:
         # --- TIER 1: DATA PIPELINE ---
         vel_state = self.velocity.update(price, timestamp, volume)
         self._last_vel_state = vel_state
-        disp_state = self.displacement.update(price, timestamp, volume, vel_state)
+        disp_state = self.displacement.update(price, timestamp, volume, vel_state, displacement_normalizer=displacement_normalizer)
         self._last_disp_state = disp_state
 
         # --- TIER 2: ANALYSIS PIPELINE ---

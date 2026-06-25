@@ -26,6 +26,7 @@ from axonai.realtime.event_types import EventPriority, LiveCandle, MarketEvent, 
 from axonai.realtime.tick_engine import TickEngine
 from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
 from axonai.realtime.reversal_model import ReversalModel
+from axonai.realtime.displacement_normalizer import DisplacementNormalizer
 from axonai.realtime.trade_analytics import TradeAnalytics
 from axonai.realtime.trade_executor import MT5TradeExecutor
 from axonai.realtime.api_server import get_dashboard
@@ -87,6 +88,9 @@ class AxonDaemon:
         self.velocity_trailing = VelocityTrailingManager()
         self._lowest_price_since_entry = {}  # Track lowest price for retest detection
         self._last_velocity_percentile = 0.0
+
+        # Layer 6: Displacement Normalization
+        self.displacement_normalizer = DisplacementNormalizer(window_sec=300.0)
 
         self.trade_executor = self.trade_executor_opt  # Default fallback reference
 
@@ -790,7 +794,8 @@ class AxonDaemon:
         # 1. Update pure-math reversal engine
         _t0 = time.perf_counter()
         snapshot = self.reversal_model.on_tick(
-            mid, timestamp, volume, location_context=location_context
+            mid, timestamp, volume, location_context=location_context,
+            displacement_normalizer=self.displacement_normalizer
         )
         _t1 = time.perf_counter()
         self._last_snapshot = snapshot
