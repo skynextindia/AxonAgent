@@ -21,6 +21,8 @@ from axonai.realtime.displacement_normalizer import (
     Z_SCORE_IMPULSE_THRESHOLD,
     Z_SCORE_TRAP_THRESHOLD,
 )
+from axonai.realtime.displacement_buffer_engine import DisplacementBufferEngine
+from axonai.realtime.regime_engine import RegimeState
 
 
 # ── Classification constants ────────────────────────────────────────
@@ -83,10 +85,15 @@ class DisplacementEngine:
         self._config = config or {}
         self._backtest_mode = self._config.get("backtest_mode", False)
 
-        # Thresholds
+        # Base thresholds (will be overridden by dynamic buffer if regime provided)
         self._impulse_threshold = impulse_ratio_threshold
         self._trap_threshold = trap_ratio_threshold
         self._compression_z = compression_velocity_z
+
+        # Dynamic threshold engine
+        self._buffer_engine = DisplacementBufferEngine(config=config)
+        self._last_regime: Optional[RegimeState] = None
+        self._regime_start_time: float = 0.0
 
         # Rolling tick history: (price, timestamp_sec, volume)
         self._ticks: deque[tuple[float, float, float]] = deque(maxlen=window_ticks)
@@ -102,6 +109,7 @@ class DisplacementEngine:
         volume: float,
         velocity: NormalizedVelocity,
         displacement_normalizer=None,  # Optional: DisplacementNormalizer instance
+        regime: Optional[RegimeState] = None,  # Optional: RegimeState for dynamic thresholds
     ) -> DisplacementState:
         """Process one tick and return displacement state.
 
@@ -117,6 +125,23 @@ class DisplacementEngine:
         """
         ts = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
         self._ticks.append((price, ts, volume))
+
+        # Compute dynamic thresholds based on regime (if provided)
+        if regime and regime != self._last_regime:
+            self._last_regime = regime
+            self._regime_start_time = ts
+
+        time_in_regime = int(ts - self._regime_start_time) if self._last_regime else 0
+
+        if regime:
+            dyn_thresh = self._buffer_engine.compute(
+                regime=regime,
+                regime_confidence=regime.confidence if regime else 0.5,
+                time_in_regime_seconds=time_in_regime,
+            )
+            # Apply dynamic thresholds
+            self._impulse_threshold = dyn_thresh.impulse_threshold
+            self._trap_threshold = dyn_thresh.trap_threshold
 
         cutoff = ts - 300.0  # limit to 5 minutes to avoid spanning M15 candle gaps in backtests
         ticks = [t for t in self._ticks if t[1] >= cutoff]
