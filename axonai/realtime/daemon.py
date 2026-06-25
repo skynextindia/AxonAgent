@@ -120,17 +120,32 @@ class AxonDaemon:
         """Poll slow MT5 endpoints every 1s via bridge. Never blocks tick thread."""
         from axonai.dataflows.mt5_order_bridge import get_account_info_via_bridge, get_positions_via_bridge
         poll_interval = self.config.get("dashboard_mt5_poll_interval_seconds", 1.0)
+        first_run = True
         while self._slow_poll_running:
             try:
-                if self._trade_terminal_path:
-                    acc = get_account_info_via_bridge(self._trade_terminal_path)
-                    if acc and acc.get("success"):
+                if not self._trade_terminal_path:
+                    if first_run:
+                        logger.warning("SlowPollLoop: _trade_terminal_path is None/empty - account data unavailable")
+                        first_run = False
+                    time.sleep(poll_interval)
+                    continue
+
+                acc = get_account_info_via_bridge(self._trade_terminal_path)
+                if acc:
+                    if acc.get("success"):
                         self._account_info_cache = acc
-                    pos = get_positions_via_bridge(self._trade_terminal_path, self.mt5_symbol)
-                    if pos and pos.get("success"):
-                        self._position_cache = pos.get("positions", [])
+                        logger.debug("SlowPollLoop: Account cached - balance=%.2f equity=%.2f", acc.get("balance", 0), acc.get("equity", 0))
+                    else:
+                        logger.warning("SlowPollLoop: Bridge returned success=False: %s", acc)
+                else:
+                    logger.warning("SlowPollLoop: get_account_info_via_bridge returned None")
+
+                pos = get_positions_via_bridge(self._trade_terminal_path, self.mt5_symbol)
+                if pos and pos.get("success"):
+                    self._position_cache = pos.get("positions", [])
+                    logger.debug("SlowPollLoop: Positions cached - count=%d", len(self._position_cache))
             except Exception as e:
-                logger.warning(f"Slow poll failed: {e}")
+                logger.warning(f"SlowPollLoop failed: {e}", exc_info=True)
             time.sleep(poll_interval)
 
     @staticmethod
@@ -525,6 +540,7 @@ class AxonDaemon:
             try:
                 acc_res = send_execution_command(self.config, {"action": "account_info"})
                 if not acc_res.get("success", False):
+                    logger.debug("Bridge execution_client returned success=False")
                     return None
                 pos_res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol})
                 pos_list = pos_res.get("positions", [])
@@ -574,6 +590,9 @@ class AxonDaemon:
             logger.debug("Account payload from cache: balance=%.2f equity=%.2f profit=%.2f", payload["balance"], payload["equity"], payload["profit"])
             return payload
 
+        # Cache is empty - log diagnostic info
+        logger.warning("_get_account_payload: Cache empty. is_bridge=%s, cache=%s, trade_terminal_path=%s",
+                      is_bridge, self._account_info_cache is not None, self._trade_terminal_path)
         return None
 
     def start(self):
