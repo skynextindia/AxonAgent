@@ -17,6 +17,10 @@ from datetime import datetime
 from typing import Optional
 
 from axonai.realtime.velocity_normalizer import NormalizedVelocity
+from axonai.realtime.displacement_normalizer import (
+    Z_SCORE_IMPULSE_THRESHOLD,
+    Z_SCORE_TRAP_THRESHOLD,
+)
 
 
 # ── Classification constants ────────────────────────────────────────
@@ -97,6 +101,7 @@ class DisplacementEngine:
         timestamp: datetime,
         volume: float,
         velocity: NormalizedVelocity,
+        displacement_normalizer=None,  # Optional: DisplacementNormalizer instance
     ) -> DisplacementState:
         """Process one tick and return displacement state.
 
@@ -105,6 +110,7 @@ class DisplacementEngine:
             timestamp: Tick timestamp
             volume: Tick volume
             velocity: NormalizedVelocity from VelocityNormalizer
+            displacement_normalizer: Optional DisplacementNormalizer to compute z-scores
 
         Returns:
             DisplacementState for this tick.
@@ -148,9 +154,15 @@ class DisplacementEngine:
         volume_imbalance = (buy_vol - sell_vol) / total_vol if total_vol > 0 else 0.0
         vw_disp = net_move * (total_vol / max(len(ticks), 1))
 
+        # ── Extract z-score from normalizer if available ─────────
+        disp_z_score = 0.0
+        if displacement_normalizer is not None:
+            disp_norm = displacement_normalizer.update(displacement_ratio, ts)
+            disp_z_score = disp_norm.z_score
+
         # ── Classification ──────────────────────────────────────
         classification = self._classify(
-            velocity, displacement_ratio, net_move, total_move
+            velocity, displacement_ratio, net_move, total_move, disp_z_score
         )
 
         self._displacement_history.append(net_move)
@@ -210,15 +222,18 @@ class DisplacementEngine:
         disp_ratio: float,
         net_move: float,
         total_move: float,
+        disp_z_score: float = 0.0,
     ) -> str:
         """Multi-factor displacement classification.
 
         Decision matrix:
-          High velocity (z>2) + High displacement (ratio>0.6) = IMPULSE
-          High velocity (z>2) + Low displacement  (ratio<0.25) = TRAP/ABSORPTION
+          High velocity (z>2) + Unusual displacement (z_score>=1.5) = IMPULSE
+          High velocity (z>2) + Low displacement (z_score<=-1.5) = TRAP/ABSORPTION
           Low velocity + Low displacement + low efficiency = COMPRESSION
           Decaying velocity (decay<0.5) = EXHAUSTION
           Otherwise = NEUTRAL
+
+        When z_score unavailable (z_score=0.0), falls back to static ratio thresholds.
         """
         z = velocity.z_score
         is_high_vel = velocity.is_unusual or z > 1.5
@@ -229,16 +244,34 @@ class DisplacementEngine:
         if is_decaying and total_move > 3.0:
             return DISPLACEMENT_EXHAUSTION
 
-        # Priority 2: Impulse (high velocity + high displacement)
-        if is_high_vel and disp_ratio >= self._impulse_threshold:
-            return DISPLACEMENT_IMPULSE
+        # Priority 2: Impulse (high velocity + unusual displacement)
+        # Use z-score if available (disp_z_score > 0); fall back to static ratio
+        if is_high_vel:
+            if disp_z_score > 0.0:
+                # Z-score available (>=50 ticks in window)
+                if disp_z_score >= Z_SCORE_IMPULSE_THRESHOLD:  # 1.5
+                    return DISPLACEMENT_IMPULSE
+            elif disp_ratio >= self._impulse_threshold:
+                # Z-score unavailable (cold start), use static threshold
+                return DISPLACEMENT_IMPULSE
 
         # Priority 3: Trap / Absorption (high velocity + LOW displacement)
-        if (is_high_vel or self._backtest_mode) and disp_ratio < self._trap_threshold:
-            # Distinguish trap from absorption by tick density
-            if velocity.tick_efficiency < 0.15:
-                return DISPLACEMENT_ABSORPTION
-            return DISPLACEMENT_TRAP
+        # Use z-score if available; fall back to static ratio
+        if is_high_vel or self._backtest_mode:
+            should_be_trap = False
+            if disp_z_score > 0.0:
+                # Z-score available
+                if disp_z_score <= Z_SCORE_TRAP_THRESHOLD:  # -1.5
+                    should_be_trap = True
+            elif disp_ratio < self._trap_threshold:
+                # Z-score unavailable, use static threshold
+                should_be_trap = True
+
+            if should_be_trap:
+                # Distinguish trap from absorption by tick density
+                if velocity.tick_efficiency < 0.15:
+                    return DISPLACEMENT_ABSORPTION
+                return DISPLACEMENT_TRAP
 
         # Priority 4: Compression (low velocity + low everything)
         if is_low_vel and disp_ratio < 0.3 and velocity.tick_efficiency < 0.3:
