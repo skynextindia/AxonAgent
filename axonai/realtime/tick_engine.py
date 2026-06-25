@@ -210,13 +210,16 @@ class TickEngine(threading.Thread):
         """Lazy-load and initialize MT5."""
         try:
             import MetaTrader5 as mt5
-            kwargs = {}
+
+            # Use the wrapper function instead of calling mt5.initialize() directly
+            # This ensures we use the correct feed terminal path and caching logic
+            from axonai.dataflows.mt5_data import mt5_initialize
             term_path = self.config.get("mt5_terminal_path")
-            if term_path:
-                kwargs["path"] = term_path
-            if not mt5.initialize(**kwargs):
-                logger.error("TickEngine: MT5 init failed: %s", mt5.last_error())
+            logger.info("[TICKENGINE] _init_mt5: Calling mt5_initialize with term_path=%s", term_path)
+            if not mt5_initialize(term_path):
+                logger.error("TickEngine: MT5 init failed")
                 return False
+
             # Bind the live MT5 handle so _poll_ticks / _preseed read real data.
             # Without this, self._mt5 stays None and the engine silently falls
             # back to the simulated stale-feed loop (~1 mock tick / 10s).
