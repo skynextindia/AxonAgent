@@ -139,7 +139,7 @@ class ReversalModel:
         ts_float = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
 
         # --- TIER 1: DATA PIPELINE ---
-        vel_state = self.velocity.update(price, timestamp, volume)
+        vel_state = self.velocity.update(price, timestamp, volume, regime=self._last_regime_state)
         self._last_vel_state = vel_state
         disp_state = self.displacement.update(
             price, timestamp, volume, vel_state,

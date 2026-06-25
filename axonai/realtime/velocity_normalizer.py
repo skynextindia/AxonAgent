@@ -14,7 +14,10 @@ import math
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from axonai.realtime.regime_engine import RegimeState
 
 
 @dataclass
@@ -73,6 +76,14 @@ class VelocityNormalizer:
         self._config = config or {}
         self._backtest_mode = self._config.get("backtest_mode", False)
 
+        # Dynamic velocity threshold engine
+        from axonai.realtime.velocity_threshold_engine import VelocityThresholdEngine
+        self._threshold_engine = VelocityThresholdEngine(config=config)
+        self._last_regime: Optional["RegimeState"] = None
+        self._regime_start_time: float = 0.0
+        self._pct_threshold: float = 90.0
+        self._z_threshold: float = 2.0
+
         # Rolling tick history: (price, timestamp_sec, volume)
         self._ticks: deque[tuple[float, float, float]] = deque(maxlen=window)
 
@@ -95,18 +106,42 @@ class VelocityNormalizer:
         self._session_sum: float = 0.0
         self._session_sum_sq: float = 0.0
 
-    def update(self, price: float, timestamp: datetime, volume: float = 1.0) -> NormalizedVelocity:
+    def update(
+        self,
+        price: float,
+        timestamp: datetime,
+        volume: float = 1.0,
+        regime: Optional["RegimeState"] = None,
+    ) -> NormalizedVelocity:
         """Process one tick and return normalized velocity state.
 
         Args:
             price: Mid price (bid+ask)/2
             timestamp: Tick timestamp (naive UTC or aware)
             volume: Tick volume (default 1)
+            regime: Optional RegimeState for dynamic thresholds
 
         Returns:
             NormalizedVelocity snapshot for this tick.
         """
         ts = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
+
+        # Compute dynamic velocity thresholds based on regime (if provided)
+        if regime and regime != self._last_regime:
+            self._last_regime = regime
+            self._regime_start_time = ts
+
+        time_in_regime = int(ts - self._regime_start_time) if self._last_regime else 0
+
+        if regime:
+            dyn_thresh = self._threshold_engine.compute(
+                regime=regime,
+                regime_confidence=regime.confidence if regime else 0.5,
+                time_in_regime_seconds=time_in_regime,
+            )
+            # Apply dynamic thresholds
+            self._pct_threshold = dyn_thresh.percentile_threshold
+            self._z_threshold = dyn_thresh.z_score_threshold
         
         # Reset peak on large tick gap (context transition)
         dt = ts - self._prev_timestamp if self._prev_timestamp > 0 else 1.0
@@ -190,7 +225,7 @@ class VelocityNormalizer:
         vel_ratio = abs_vel / avg_300 if avg_300 > 0 else 1.0
 
         # ── Composite flags ─────────────────────────────────────
-        is_unusual = pct > 90.0 or z > 2.0
+        is_unusual = pct > self._pct_threshold or z > self._z_threshold
         decay_ticks_threshold = 3 if self._backtest_mode else 10
         is_decaying = decay_ratio < 0.5 and self._peak_decay_ticks > decay_ticks_threshold
         is_accelerating = self._accel_direction_count >= 3
