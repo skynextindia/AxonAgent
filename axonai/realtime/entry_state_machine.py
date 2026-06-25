@@ -138,15 +138,17 @@ class EntryStateMachine:
         # 3. Decision generation
         is_trigger = self._current_state == STATE_TRIGGERED
         quality = self._calculate_quality(regime, mtf) if is_trigger else 0.0
-        
+
         reason = self._last_reason
         if is_trigger:
             reason = f"Displacement away from trap confirmed ({self._anomaly_type})"
-            
+
+        # Include direction when actively tracking an anomaly (not in IDLE or INVALIDATED)
+        tracking_anomaly = self._current_state in (STATE_ANOMALY, STATE_ARMING, STATE_TRIGGERED)
         return EntryDecision(
             state=self._current_state,
             is_valid_entry=is_trigger,
-            direction=self._anomaly_direction if is_trigger else None,
+            direction=self._anomaly_direction if tracking_anomaly else None,
             signal_quality=round(quality, 2),
             reason=reason
         )
