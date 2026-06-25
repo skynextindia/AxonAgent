@@ -12,17 +12,10 @@ Key insight: What counts as "impulse" depends on market context:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
-from axonai.realtime.regime_engine import (
-    RegimeState,
-    REGIME_COMPRESSION,
-    REGIME_BREAKOUT,
-    REGIME_TREND_EXPANSION,
-    REGIME_TREND_CONTINUATION,
-    REGIME_EXHAUSTION,
-    REGIME_RANGE_CHOP,
-)
+if TYPE_CHECKING:
+    from axonai.realtime.regime_engine import RegimeState
 
 
 @dataclass
@@ -52,7 +45,25 @@ class DisplacementBufferEngine:
               - impulse_ratio_threshold (default 0.40)
               - trap_ratio_threshold (default 0.15)
         """
+        # Late import to avoid circular dependency
+        from axonai.realtime.regime_engine import (
+            REGIME_COMPRESSION,
+            REGIME_BREAKOUT,
+            REGIME_TREND_EXPANSION,
+            REGIME_TREND_CONTINUATION,
+            REGIME_EXHAUSTION,
+            REGIME_RANGE_CHOP,
+        )
+
         self.config = config or {}
+
+        # Store regime constants for use in other methods
+        self.REGIME_COMPRESSION = REGIME_COMPRESSION
+        self.REGIME_BREAKOUT = REGIME_BREAKOUT
+        self.REGIME_TREND_EXPANSION = REGIME_TREND_EXPANSION
+        self.REGIME_TREND_CONTINUATION = REGIME_TREND_CONTINUATION
+        self.REGIME_EXHAUSTION = REGIME_EXHAUSTION
+        self.REGIME_RANGE_CHOP = REGIME_RANGE_CHOP
 
         # Base thresholds (lowered for demo, will be replaced by dynamic)
         self._base_impulse = self.config.get("impulse_ratio_threshold", 0.40)
@@ -88,7 +99,7 @@ class DisplacementBufferEngine:
 
     def compute(
         self,
-        regime: Optional[RegimeState] = None,
+        regime: Optional["RegimeState"] = None,
         regime_confidence: float = 0.5,
         time_in_regime_seconds: int = 0,
     ) -> DynamicDisplacementThresholds:
@@ -103,9 +114,8 @@ class DisplacementBufferEngine:
         Returns:
             DynamicDisplacementThresholds with adapted impulse/trap thresholds
         """
-
         # Default regime if none provided
-        regime_name = regime.regime if regime else REGIME_RANGE_CHOP
+        regime_name = regime.regime if regime else self.REGIME_RANGE_CHOP
         confidence = regime.confidence if regime else regime_confidence
 
         # Get regime multipliers

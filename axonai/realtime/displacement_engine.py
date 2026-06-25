@@ -14,7 +14,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from axonai.realtime.velocity_normalizer import NormalizedVelocity
 from axonai.realtime.displacement_normalizer import (
@@ -22,7 +22,9 @@ from axonai.realtime.displacement_normalizer import (
     Z_SCORE_TRAP_THRESHOLD,
 )
 from axonai.realtime.displacement_buffer_engine import DisplacementBufferEngine
-from axonai.realtime.regime_engine import RegimeState
+
+if TYPE_CHECKING:
+    from axonai.realtime.regime_engine import RegimeState
 
 
 # ── Classification constants ────────────────────────────────────────
@@ -92,7 +94,7 @@ class DisplacementEngine:
 
         # Dynamic threshold engine
         self._buffer_engine = DisplacementBufferEngine(config=config)
-        self._last_regime: Optional[RegimeState] = None
+        self._last_regime: Optional[object] = None  # RegimeState, but avoid circular import
         self._regime_start_time: float = 0.0
 
         # Rolling tick history: (price, timestamp_sec, volume)
@@ -109,7 +111,7 @@ class DisplacementEngine:
         volume: float,
         velocity: NormalizedVelocity,
         displacement_normalizer=None,  # Optional: DisplacementNormalizer instance
-        regime: Optional[RegimeState] = None,  # Optional: RegimeState for dynamic thresholds
+        regime: Optional["RegimeState"] = None,  # Optional: RegimeState for dynamic thresholds
     ) -> DisplacementState:
         """Process one tick and return displacement state.
 
@@ -125,6 +127,9 @@ class DisplacementEngine:
         """
         ts = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
         self._ticks.append((price, ts, volume))
+
+        # Late import to avoid circular dependency
+        from axonai.realtime.regime_engine import RegimeState as RegimeStateClass
 
         # Compute dynamic thresholds based on regime (if provided)
         if regime and regime != self._last_regime:

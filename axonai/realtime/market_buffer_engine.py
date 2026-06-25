@@ -10,17 +10,13 @@ whether the market is compressed (tight exit) or expanding (loose exit).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 from axonai.realtime.velocity_normalizer import NormalizedVelocity
 from axonai.realtime.displacement_engine import DisplacementState
-from axonai.realtime.regime_engine import (
-    RegimeState,
-    REGIME_COMPRESSION,
-    REGIME_BREAKOUT,
-    REGIME_TREND_EXPANSION,
-    REGIME_EXHAUSTION,
-)
+
+if TYPE_CHECKING:
+    from axonai.realtime.regime_engine import RegimeState
 
 
 @dataclass
@@ -50,6 +46,14 @@ class MarketBufferEngine:
               - realtime_velocity_decay_threshold_aligned (default 0.20)
               - realtime_velocity_decay_threshold_unaligned (default 0.40)
         """
+        # Late import to avoid circular dependency
+        from axonai.realtime.regime_engine import (
+            REGIME_COMPRESSION,
+            REGIME_BREAKOUT,
+            REGIME_TREND_EXPANSION,
+            REGIME_EXHAUSTION,
+        )
+
         self.config = config or {}
 
         # Base thresholds (replaced by dynamic calculation)
@@ -66,7 +70,7 @@ class MarketBufferEngine:
 
     def compute(
         self,
-        regime: RegimeState,
+        regime: "RegimeState",
         velocity: NormalizedVelocity,
         displacement: DisplacementState,
         ticks_in_trade: int,

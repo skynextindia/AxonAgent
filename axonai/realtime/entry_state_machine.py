@@ -155,9 +155,13 @@ class EntryStateMachine:
         """Look for the initial anomaly (Microstructure Peak)."""
         # Anomaly criteria: High velocity + low tick efficiency (Climax)
         is_climax = vel.is_unusual and vel.tick_efficiency < 0.2
-        
+
         # Or an active liquidity sweep
         is_sweep = len(liq.active_sweeps) > 0
+
+        # Diagnostic: Log why no anomaly detected
+        if not is_climax and not is_sweep:
+            logger.debug("EntryIDLE: No anomaly. vel_unusual=%s eff=%.3f sweeps=%d", vel.is_unusual, vel.tick_efficiency, len(liq.active_sweeps))
         
         # Infer expected reversal direction
         direction = ""
