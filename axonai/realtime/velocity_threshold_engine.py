@@ -71,12 +71,12 @@ class VelocityThresholdEngine:
 
         # Regime-specific multipliers for PERCENTILE THRESHOLD (lower = more sensitive)
         self._percentile_factors = {
-            REGIME_COMPRESSION: 0.55,       # Lower (50th pct) - any spike is unusual
+            REGIME_COMPRESSION: 0.50,       # Very low (45th pct) - any spike is unusual in quiet markets
             REGIME_BREAKOUT: 1.1,           # Higher (99th pct) - filter false breakouts
-            REGIME_TREND_EXPANSION: 0.85,   # Moderately lower (75th pct) - catch strong moves
-            REGIME_TREND_CONTINUATION: 1.0, # Normal (90th pct)
-            REGIME_EXHAUSTION: 0.75,        # Lower (65th pct) - exits imminent
-            REGIME_RANGE_CHOP: 1.05,        # Slightly higher (95th pct) - choppy
+            REGIME_TREND_EXPANSION: 0.80,   # Moderately lower (72th pct) - catch strong moves
+            REGIME_TREND_CONTINUATION: 0.95, # Slightly lower (85th pct)
+            REGIME_EXHAUSTION: 0.70,        # Lower (63th pct) - exits imminent
+            REGIME_RANGE_CHOP: 0.60,        # LOWER (54th pct) - choppy/quiet market needs lower threshold!
         }
 
         # Regime-specific multipliers for Z-SCORE THRESHOLD (higher = less sensitive)
