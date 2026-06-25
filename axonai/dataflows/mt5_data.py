@@ -51,15 +51,15 @@ def _load_mt5():
 def set_feed_terminal_path(path: str):
     """Set the global fallback path for the feed terminal (e.g. Exness).
 
-    CRITICAL: Resets the _initialized flag so the next mt5_initialize() call
-    will actually reconnect to the new terminal instead of reusing the cached connection.
+    CRITICAL: Shuts down and resets the cached MT5 connection so the next
+    mt5_initialize() call will reconnect to the new terminal.
     """
     global _feed_terminal_path, _initialized
-    logger.info("[FIX] set_feed_terminal_path(%s): resetting _initialized=False to force reconnect", path)
-    _feed_terminal_path = path
-    _initialized = False  # Force reconnection to new terminal on next init call
-    # Also shutdown any existing connection
+    logger.info("[FIX] set_feed_terminal_path(%s): shutting down existing connection to allow reconnect", path)
+    # Shutdown FIRST (while _initialized is still True), THEN reset the flag
     mt5_shutdown()
+    _feed_terminal_path = path
+    _initialized = False  # Ensure next init call actually reconnects
 
 
 def mt5_initialize(terminal_path: Optional[str] = None) -> bool:
