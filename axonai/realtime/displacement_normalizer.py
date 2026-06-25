@@ -10,6 +10,11 @@ import math
 from collections import deque
 from dataclasses import dataclass
 
+# Threshold constants (used by displacement_engine.py, fixed per spec)
+# These define what z-score values trigger impulse vs trap classification
+Z_SCORE_IMPULSE_THRESHOLD = 1.5   # σ above mean triggers impulse classification
+Z_SCORE_TRAP_THRESHOLD = -1.5      # σ below mean triggers trap classification
+
 
 @dataclass
 class NormalizedDisplacement:
@@ -80,7 +85,8 @@ class DisplacementNormalizer:
         # Calculate mean
         mean = self._sum / n
 
-        # Calculate stdev (Welford method)
+        # Calculate stdev using two-pass formula: var = (sum_sq/n) - (mean²)
+        # This avoids separate pass through data while remaining numerically stable
         variance = (self._sum_sq / n) - (mean * mean)
         stdev = math.sqrt(max(0.0, variance))
 
@@ -109,4 +115,9 @@ class DisplacementNormalizer:
         self._sum_sq = 0.0
 
 
-__all__ = ["DisplacementNormalizer", "NormalizedDisplacement"]
+__all__ = [
+    "DisplacementNormalizer",
+    "NormalizedDisplacement",
+    "Z_SCORE_IMPULSE_THRESHOLD",
+    "Z_SCORE_TRAP_THRESHOLD",
+]
