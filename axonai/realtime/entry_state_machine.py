@@ -30,6 +30,7 @@ from axonai.realtime.mtf_context import MTFState
 
 if TYPE_CHECKING:
     from axonai.realtime.regime_engine import RegimeState
+    from axonai.realtime.market_context import MarketContext
 
 
 # ── Entry States ─────────────────────────────────────────────────────────
@@ -152,6 +153,113 @@ class EntryStateMachine:
             signal_quality=round(quality, 2),
             reason=reason
         )
+
+    def evaluate_with_context(
+        self,
+        price: float,
+        timestamp: datetime,
+        market_context: "MarketContext",
+    ) -> EntryDecision:
+        """
+        Evaluate entry decision using MarketContext quality scores.
+
+        Uses quality scores from MarketContext to make smarter decisions:
+        - Skips entry if stop_hunt_detected (false reversal)
+        - Waits for confirmation if displacement_phase is EARLY
+        - Skips if reversal_confidence is too low (ambiguous)
+        - Allows entry when displacement_phase is CONFIRMED
+        - Scales signal_quality based on signal_agreement_score
+
+        Args:
+            price: Current market price
+            timestamp: Tick time
+            market_context: MarketContext with quality scores
+
+        Returns:
+            EntryDecision with improved quality scoring
+        """
+        # Extract components from market_context for normal state machine evaluation
+        decision = self.evaluate(
+            price=price,
+            timestamp=timestamp,
+            velocity=market_context.velocity,
+            displacement=market_context.displacement,
+            liquidity=market_context.liquidity,
+            regime=market_context.regime,
+            mtf=market_context.mtf,
+        )
+
+        # Now enhance decision based on MarketContext quality scores
+        # Layer 1: Stop Hunting Detection (high priority filter)
+        if market_context.stop_hunt_detected:
+            if market_context.stop_hunt_phase == "HUNTING":
+                # Active stop hunting, skip entry (false reversal)
+                return EntryDecision(
+                    state=decision.state,
+                    is_valid_entry=False,
+                    direction=decision.direction,
+                    signal_quality=0.0,
+                    reason=f"Stop hunting detected ({market_context.stop_hunt_phase}). Skipping entry.",
+                )
+            elif market_context.stop_hunt_phase == "SWEEPING":
+                # Stops being swept, wait for reversal confirmation
+                return EntryDecision(
+                    state=decision.state,
+                    is_valid_entry=False,
+                    direction=decision.direction,
+                    signal_quality=decision.signal_quality * 0.5,
+                    reason="Stops being swept. Awaiting reversal confirmation.",
+                )
+            # If stop_hunt_phase == "REVERSING", allow normal evaluation to proceed
+
+        # Layer 2: Reversal Lag Detection (timing optimization)
+        if market_context.reversal_lag_ticks > 5:
+            # Signal too delayed, opportunity likely passed
+            return EntryDecision(
+                state=decision.state,
+                is_valid_entry=False,
+                direction=decision.direction,
+                signal_quality=0.0,
+                reason=f"Signal lagged {market_context.reversal_lag_ticks} ticks. Opportunity expired.",
+            )
+
+        # Layer 3: Displacement Phase Check (confirmation gate)
+        if self._current_state in (STATE_ANOMALY, STATE_ARMING):
+            if market_context.displacement_phase == "EARLY":
+                # Signal just forming, wait for confirmation
+                return EntryDecision(
+                    state=decision.state,
+                    is_valid_entry=False,
+                    direction=decision.direction,
+                    signal_quality=decision.signal_quality * 0.6,
+                    reason="Displacement in EARLY phase. Waiting for confirmation.",
+                )
+            elif market_context.displacement_phase == "CONFIRMED":
+                # Signal confirmed, upgrade quality
+                decision.signal_quality = min(1.0, decision.signal_quality * 1.2)
+
+        # Layer 4: Reversal Confidence Threshold (ambiguity filter)
+        if market_context.reversal_confidence < 50.0:
+            # Ambiguous signal, skip entry
+            return EntryDecision(
+                state=decision.state,
+                is_valid_entry=False,
+                direction=decision.direction,
+                signal_quality=0.0,
+                reason=f"Reversal confidence too low ({market_context.reversal_confidence:.0f}%). Ambiguous.",
+            )
+
+        # Layer 5: Signal Agreement Scoring (consensus weighting)
+        agreement_weight = market_context.signal_agreement_score / 100.0
+        decision.signal_quality = decision.signal_quality * agreement_weight
+
+        # Layer 6: Entry Window Expiration (opportunity closing)
+        if market_context.entry_window_closing and market_context.ticks_until_confirmation_expires < 5:
+            # Window closing fast, raise urgency
+            if decision.is_valid_entry:
+                decision.reason = f"{decision.reason} (URGENT: {market_context.ticks_until_confirmation_expires} ticks to expiration)"
+
+        return decision
 
     def _transition(self, new_state: str, reason: str) -> None:
         old_state = self._current_state
