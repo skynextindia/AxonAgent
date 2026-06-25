@@ -141,7 +141,11 @@ class ReversalModel:
         # --- TIER 1: DATA PIPELINE ---
         vel_state = self.velocity.update(price, timestamp, volume)
         self._last_vel_state = vel_state
-        disp_state = self.displacement.update(price, timestamp, volume, vel_state, displacement_normalizer=displacement_normalizer)
+        disp_state = self.displacement.update(
+            price, timestamp, volume, vel_state,
+            displacement_normalizer=displacement_normalizer,
+            regime=self._last_regime_state  # Dynamic threshold adaptation
+        )
         self._last_disp_state = disp_state
 
         # --- TIER 2: ANALYSIS PIPELINE ---
