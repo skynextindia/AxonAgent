@@ -73,8 +73,8 @@ class DisplacementEngine:
         self,
         pip_mult: float = 0.0001,
         window_ticks: int = 100,
-        impulse_ratio_threshold: float = 0.6,
-        trap_ratio_threshold: float = 0.25,
+        impulse_ratio_threshold: float = 0.4,    # Lowered from 0.60 for demo (more trades)
+        trap_ratio_threshold: float = 0.15,      # Lowered from 0.25 for demo (catch traps earlier)
         compression_velocity_z: float = -0.5,
         config: Optional[dict] = None,
     ):
