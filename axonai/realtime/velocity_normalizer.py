@@ -142,6 +142,8 @@ class VelocityNormalizer:
             # Apply dynamic thresholds
             self._pct_threshold = dyn_thresh.percentile_threshold
             self._z_threshold = dyn_thresh.z_score_threshold
+            import logging
+            logging.getLogger(__name__).debug(f"VelocityThreshold: regime={dyn_thresh.regime_name} pct_threshold={self._pct_threshold} z_threshold={self._z_threshold}")
         
         # Reset peak on large tick gap (context transition)
         dt = ts - self._prev_timestamp if self._prev_timestamp > 0 else 1.0
