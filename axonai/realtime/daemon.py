@@ -1285,27 +1285,57 @@ class AxonDaemon:
             logger.error("Failed to append to signals.log: %s", e)
 
     def _seconds_until_ready(self) -> float:
-        """Seconds remaining in execution cooldown."""
+        """Smart dynamic cooldown based on trade outcome and direction."""
         now = datetime.now()
-        
-        # Standard entry cooldown
-        cooldown_seconds = self.config.get("realtime_cooldown_seconds", self.config.get("cooldown_seconds", 300))
         elapsed = (now - self._last_execution_time).total_seconds()
+
+        # Check if we have an active position
+        active_positions = self._tracked_positions.copy() if hasattr(self, '_tracked_positions') else set()
+
+        # Determine dynamic cooldown based on position state
+        if not active_positions:
+            # No active trade: Fast recovery cooldown (60 sec) - allow new entries quickly
+            cooldown_seconds = 60
+        else:
+            # Have active position: Check profit/loss to determine cooldown
+            trade_state = self.reversal_model.trade_state_engine._state if hasattr(self.reversal_model, 'trade_state_engine') else None
+
+            if trade_state and hasattr(trade_state, 'current_profit_pips'):
+                pips = trade_state.current_profit_pips
+
+                if pips > 2.0:
+                    # Winning trade: LONG cooldown (300 sec) - protect the profit
+                    cooldown_seconds = 300
+                    logger.debug("SmartCooldown: Trade winning %.1f pips → 300s protection", pips)
+
+                elif pips < -3.0:
+                    # Losing trade: SHORT cooldown (60 sec) - allow quick recovery
+                    cooldown_seconds = 60
+                    logger.debug("SmartCooldown: Trade losing %.1f pips → 60s recovery", pips)
+
+                else:
+                    # Breakeven/small loss: MEDIUM cooldown (120 sec) - let it breathe
+                    cooldown_seconds = 120
+                    logger.debug("SmartCooldown: Trade at %.1f pips → 120s neutral", pips)
+            else:
+                # Fallback to standard cooldown
+                cooldown_seconds = self.config.get("realtime_cooldown_seconds", 300)
+
         cooldown_rem = max(0.0, cooldown_seconds - elapsed)
-        
+
         # Post-trade cooldown (measured from last close/exit time)
         post_trade_rem = 0.0
         if getattr(self, "_last_close_time", None) is not None:
             elapsed_close = (now - self._last_close_time).total_seconds()
             post_trade_rem = max(0.0, self._cooldown_seconds - elapsed_close)
-            
+
         # Loss cooldown check
         loss_cooldown_rem = 0.0
         if getattr(self, "_last_loss_time", None) is not None:
             elapsed_loss = (now - self._last_loss_time).total_seconds()
             loss_cooldown_minutes = self.config.get("realtime_loss_cooldown_minutes", self.config.get("loss_cooldown_minutes", 30))
             loss_cooldown_rem = max(0.0, (loss_cooldown_minutes * 60) - elapsed_loss)
-            
+
         return max(cooldown_rem, post_trade_rem, loss_cooldown_rem)
 
     def _log_stats(self):
