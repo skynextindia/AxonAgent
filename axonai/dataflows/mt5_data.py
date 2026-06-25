@@ -66,8 +66,14 @@ def mt5_initialize(terminal_path: Optional[str] = None) -> bool:
     """Connect to the MT5 terminal. Cached — safe to call repeatedly."""
     global _initialized, _TF_MAP, _feed_terminal_path
     if _initialized:
-        logger.info("[TRACE] mt5_initialize: Already initialized, returning cached connection")
+        logger.info("[TRACE] mt5_initialize: Already initialized with path, returning cached connection")
         return True
+
+    # Log call stack to see where init is being called from
+    import traceback
+    stack = traceback.format_stack()
+    caller = stack[-2].strip().split('\n')[-1] if len(stack) > 1 else "unknown"
+    logger.info("[INIT_TRACE] mt5_initialize called from: %s", caller)
     mt5 = _load_mt5()
 
     kwargs = {}
@@ -109,13 +115,14 @@ def mt5_initialize(terminal_path: Optional[str] = None) -> bool:
 
 def mt5_shutdown():
     """Disconnect from MT5 terminal."""
-    global _initialized
+    global _initialized, _mt5
     if _initialized:
         try:
             _load_mt5().shutdown()
         except Exception:
             pass
-        _initialized = False
+    _initialized = False
+    # Don't reset _mt5 here - keep the module reference but mark as uninitialized
 
 
 def set_trade_terminal_path(path: Optional[str]) -> None:
