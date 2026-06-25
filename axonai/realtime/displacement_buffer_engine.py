@@ -139,11 +139,11 @@ class DisplacementBufferEngine:
         trap_threshold = max(0.05, min(0.35, trap_threshold))
 
         # Reasoning
-        if regime_name == REGIME_COMPRESSION:
+        if regime_name == self.REGIME_COMPRESSION:
             reasoning = f"Compression: Lower thresholds ({impulse_threshold:.2f}) - rare moves are impulses"
-        elif regime_name == REGIME_BREAKOUT:
+        elif regime_name == self.REGIME_BREAKOUT:
             reasoning = f"Breakout: Higher thresholds ({impulse_threshold:.2f}) - filter false breakouts"
-        elif regime_name == REGIME_TREND_EXPANSION:
+        elif regime_name == self.REGIME_TREND_EXPANSION:
             reasoning = f"Trend: Moderate thresholds ({impulse_threshold:.2f}) - strong directional move"
         else:
             reasoning = f"Regime {regime_name}: Normal thresholds ({impulse_threshold:.2f})"

@@ -54,6 +54,12 @@ class MarketBufferEngine:
             REGIME_EXHAUSTION,
         )
 
+        # Store regime constants for use in other methods
+        self.REGIME_COMPRESSION = REGIME_COMPRESSION
+        self.REGIME_BREAKOUT = REGIME_BREAKOUT
+        self.REGIME_TREND_EXPANSION = REGIME_TREND_EXPANSION
+        self.REGIME_EXHAUSTION = REGIME_EXHAUSTION
+
         self.config = config or {}
 
         # Base thresholds (replaced by dynamic calculation)
