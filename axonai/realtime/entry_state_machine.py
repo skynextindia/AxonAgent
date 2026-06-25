@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,9 @@ from axonai.realtime.velocity_normalizer import NormalizedVelocity
 from axonai.realtime.displacement_engine import DisplacementState, DISPLACEMENT_IMPULSE, DISPLACEMENT_TRAP, DISPLACEMENT_ABSORPTION
 from axonai.realtime.liquidity_engine import LiquidityState
 from axonai.realtime.mtf_context import MTFState
-from axonai.realtime.regime_engine import RegimeState, REGIME_RANGE_CHOP, REGIME_EXHAUSTION, REGIME_REVERSAL
+
+if TYPE_CHECKING:
+    from axonai.realtime.regime_engine import RegimeState
 
 
 # ── Entry States ─────────────────────────────────────────────────────────
@@ -58,9 +60,16 @@ class EntryStateMachine:
     """Stateful trade entry execution manager."""
 
     def __init__(self, timeout_sec: float = 120.0, pip_mult: float = 0.0001):
+        # Late import to avoid circular dependency
+        from axonai.realtime.regime_engine import REGIME_RANGE_CHOP, REGIME_EXHAUSTION, REGIME_REVERSAL
+
+        self.REGIME_RANGE_CHOP = REGIME_RANGE_CHOP
+        self.REGIME_EXHAUSTION = REGIME_EXHAUSTION
+        self.REGIME_REVERSAL = REGIME_REVERSAL
+
         self._pip = pip_mult
         self._timeout_sec = timeout_sec
-        
+
         # State tracking
         self._current_state = STATE_IDLE
         self._anomaly_time: float = 0.0
@@ -91,7 +100,7 @@ class EntryStateMachine:
         velocity: NormalizedVelocity,
         displacement: DisplacementState,
         liquidity: LiquidityState,
-        regime: RegimeState,
+        regime: "RegimeState",
         mtf: MTFState,
     ) -> EntryDecision:
         """Evaluate conditions and transition states."""
@@ -259,14 +268,14 @@ class EntryStateMachine:
             else:
                 self._transition(STATE_TRIGGERED, "Displacement away from trap confirmed.")
 
-    def _calculate_quality(self, regime: RegimeState, mtf: MTFState) -> float:
+    def _calculate_quality(self, regime: "RegimeState", mtf: MTFState) -> float:
         """Calculate a 0.0 to 1.0 confidence score for the entry."""
         score = 0.5 # Base
         
         # Regime alignment
-        if regime.regime in (REGIME_REVERSAL, REGIME_EXHAUSTION):
+        if regime.regime in (self.REGIME_REVERSAL, self.REGIME_EXHAUSTION):
             score += 0.2
-        elif regime.regime == REGIME_RANGE_CHOP:
+        elif regime.regime == self.REGIME_RANGE_CHOP:
             score += 0.1
             
         # MTF Context
