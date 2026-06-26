@@ -652,31 +652,53 @@ class AxonDaemon:
         if trade_terminal_path and start_bridge(trade_terminal_path):
             logger.info("Step 1B/4: MT5 order bridge started (dual-terminal mode via subprocess)")
 
-        # Pre-populate active positions for trailing SL tracking
+        # Pre-populate / re-adopt active positions on (re)start so trailing,
+        # closure detection and journal logging resume seamlessly even when the
+        # daemon was halted with trades still open. Restores ALL tracking dicts
+        # (not just trailing SL) from the position data the trade terminal returns.
+        def _adopt_position(pos: dict):
+            ticket = int(pos["ticket"])
+            ptype = pos.get("type")
+            direction = "BUY" if ptype in (0, "BUY") else "SELL"
+            entry_price = pos.get("price_open", 0.0)
+            volume = pos.get("volume", 0.0)
+            self._tracked_positions.add(ticket)
+            self._active_trade_initial_sl[ticket] = pos.get("sl", 0.0)
+            self._active_trade_system.setdefault(ticket, "recovered")
+            # Only seed entry details if we don't already have richer info
+            self._active_trade_entry_details.setdefault(ticket, {
+                "entry_price": entry_price,
+                "direction": direction,
+                "entry_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S") + " (recovered)",
+                "volume": volume,
+                "entry_reason": "Re-adopted on daemon restart",
+            })
+            self._last_position_snapshot[ticket] = {
+                "entry_price": entry_price,
+                "direction": direction,
+                "volume": volume,
+                "profit": pos.get("profit", 0.0),
+                "price_current": pos.get("price_current", 0.0),
+                "sl": pos.get("sl", 0.0),
+            }
+
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
         try:
+            positions = []
             if is_bridge:
                 from axonai.realtime.execution_client import send_execution_command
                 res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol})
-                positions = res.get("positions", []) if res.get("success", False) else []
-                if positions:
-                    with self._position_lock:
-                        for pos in positions:
-                            ticket = pos["ticket"]
-                            self._tracked_positions.add(ticket)
-                            self._active_trade_initial_sl[ticket] = pos["sl"]
-                    logger.info("AxonDaemon: Pre-populated %d active positions from execution bridge.", len(positions))
-            else:
+                positions = res.get("positions", []) if res and res.get("success", False) else []
+            elif self._trade_terminal_path:
                 from axonai.dataflows.mt5_order_bridge import get_positions_via_bridge
-                if self._trade_terminal_path:
-                    pos_result = get_positions_via_bridge(self._trade_terminal_path, self.mt5_symbol)
-                    positions = pos_result.get("positions", []) if pos_result and pos_result.get("success") else []
-                    if positions:
-                        with self._position_lock:
-                            for pos in positions:
-                                self._tracked_positions.add(pos["ticket"])
-                                self._active_trade_initial_sl[pos["ticket"]] = pos["sl"]
-                        logger.info("AxonDaemon: Pre-populated %d active positions for trailing stop tracking.", len(positions))
+                pos_result = get_positions_via_bridge(self._trade_terminal_path, self.mt5_symbol)
+                positions = pos_result.get("positions", []) if pos_result and pos_result.get("success") else []
+            if positions:
+                with self._position_lock:
+                    for pos in positions:
+                        _adopt_position(pos)
+                logger.info("AxonDaemon: Re-adopted %d active position(s) on startup (trailing + journal tracking restored): %s",
+                            len(positions), [int(p["ticket"]) for p in positions])
         except Exception as pe:
             logger.warning("AxonDaemon: Failed to pre-populate active positions: %s", pe)
 
