@@ -1686,23 +1686,10 @@ class AxonDaemon:
                 deals = hist_res.get("deals", []) if hist_res and hist_res.get("success", False) else []
                 logger.info(f"[DEAL_HISTORY] Bridge history_deals_get(position={ticket}): returned {len(deals)} deals")
             else:
-                # In direct mode, query the MetaTrader 5 directly from the execution terminal
-                # Get deals from the trade terminal (MetaQuotes), not the data feed terminal (Exness)
-                try:
-                    from axonai.dataflows.mt5_data import mt5_initialize
-                    mt5_exec = mt5_initialize(path_to_use=self._trade_terminal_path)
-                    if mt5_exec:
-                        deals = mt5_exec.history_deals_get(position=ticket)
-                        if not deals:
-                            deals = mt5_exec.history_deals_get()
-                            deals = [d for d in deals if d.position == ticket] if deals else []
-                        logger.info(f"[DEAL_HISTORY] Direct MT5 (trade terminal): found {len(deals)} deals for ticket {ticket}")
-                    else:
-                        deals = []
-                        logger.warning(f"[DEAL_HISTORY] Could not initialize trade terminal MT5")
-                except Exception as e:
-                    deals = []
-                    logger.warning(f"[DEAL_HISTORY] Error querying trade terminal: {e}")
+                # In direct mode, fall back to current bid if no deals found
+                # (MT5 direct mode doesn't have reliable access to trade terminal deals)
+                deals = []
+                logger.debug(f"[DEAL_HISTORY] Direct mode: skipping deal history (use bridge for full deal data)")
 
             if deals:
                 for i, d in enumerate(deals):
