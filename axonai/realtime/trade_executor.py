@@ -218,6 +218,12 @@ class MT5TradeExecutor:
             risk_pct = self.config.get("realtime_risk_pct", 0.01)
             risk_amount = equity * risk_pct
             sl_pips = sl_distance / pip
+
+            # Validate SL is meaningful
+            if sl_pips < 1.0:
+                logger.warning("TradeExecutor: SL distance too small (%.4f pips) - entry skipped", sl_pips)
+                return {"success": False, "reason": "sl_too_small", "sl_pips": round(sl_pips, 4)}
+
             # $10 per pip per 1.00 standard lot (FX majors).
             pip_value_per_lot = 10.0
             lot_size = round(risk_amount / max(sl_pips * pip_value_per_lot, 1e-6), 2)

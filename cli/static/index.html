@@ -377,7 +377,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
   <div class="cyber-panel" style="flex:1;min-height:0;display:flex;flex-direction:column;background:#040406;overflow:hidden;padding:8px;">
     <!-- Trade History View -->
     <div id="jview-trades" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;max-width:1200px;margin:0 auto;width:100%;">
-      <div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.6fr 1.2fr 0.4fr;gap:4px;padding:6px 12px;font-size:8px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid var(--border);flex-shrink:0;text-transform:uppercase;letter-spacing:.08em;">
+      <div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.2fr 1.2fr 1.2fr 0.4fr;gap:4px;padding:6px 12px;font-size:8px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid var(--border);flex-shrink:0;text-transform:uppercase;letter-spacing:.08em;">
         <span>Timestamp</span>
         <span>Symbol</span>
         <span>Type</span>
@@ -387,6 +387,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
         <span>Pips</span>
         <span>Profit</span>
         <span>Reason</span>
+        <span>Exit Strategy</span>
         <span>Outcome</span>
         <span></span>
       </div>
@@ -1199,7 +1200,7 @@ class DashboardController {
               
               return `<div class="trade-row-container" style="border-bottom:1px solid var(--border-dim);display:flex;flex-direction:column;transition:all .15s;">
                 <!-- Main Grid Row -->
-                <div onclick="window.dashboardController.toggleTradeDetails('${e.ticket}')" style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.6fr 1.2fr 0.4fr;gap:4px;padding:8px 12px;cursor:pointer;align-items:center;background:#050507;transition:background 0.1s;" onmouseover="this.style.background='#0d0d14'" onmouseout="this.style.background='#050507'">
+                <div onclick="window.dashboardController.toggleTradeDetails('${e.ticket}')" style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.2fr 1.2fr 1.2fr 0.4fr;gap:4px;padding:8px 12px;cursor:pointer;align-items:center;background:#050507;transition:background 0.1s;" onmouseover="this.style.background='#0d0d14'" onmouseout="this.style.background='#050507'">
                   <span style="color:var(--text-secondary);">${e.entry_time || '--'}</span>
                   <span style="color:#fff;font-weight:700;text-align:center;">${e.symbol || '--'}</span>
                   <span style="color:${dirColor};font-weight:900;text-align:center;">${e.direction || '--'}</span>
@@ -1209,6 +1210,7 @@ class DashboardController {
                   <span style="color:${color};font-weight:700;text-align:center;">${pipsDisplay}</span>
                   <span style="color:${color};font-weight:700;text-align:center;">${profitDisplay}</span>
                   <span style="color:var(--text-secondary);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:4px;">${e.reason || '--'}</span>
+                  <span style="color:var(--amber);text-align:center;font-weight:700;text-transform:uppercase;font-size:7.5px;">${e.exit_strategy || 'manual'}</span>
                   <span style="text-align:center;"><span style="background:${e.outcome === "WIN" ? 'rgba(0,200,83,0.1)' : e.outcome === "LOSS" ? 'rgba(255,61,61,0.1)' : 'rgba(156,39,176,0.1)'};color:${color};padding:2px 6px;font-weight:900;border-radius:2px;font-size:7px;">${e.outcome}</span></span>
                   <span id="tarrow-${e.ticket}" style="color:var(--text-dim);font-weight:700;text-align:center;font-size:8px;">▼</span>
                 </div>
@@ -1224,6 +1226,8 @@ class DashboardController {
                       <div style="display:flex;justify-content:space-between;"><span>Duration</span><span style="color:#fff;font-weight:700;">${e.duration_str || '--'}</span></div>
                       <div style="display:flex;justify-content:space-between;"><span>Peak Reached</span><span style="color:var(--green);font-weight:700;">+${e.peak || 0.0} pips</span></div>
                       <div style="display:flex;justify-content:space-between;"><span>Max Drawdown</span><span style="color:var(--red);font-weight:700;">-${e.drawdown || 0.0} pips</span></div>
+                      <div style="display:flex;justify-content:space-between;border-top:1px solid rgba(200,200,200,0.1);padding-top:5px;margin-top:5px;"><span>Exit Strategy</span><span style="color:var(--amber);font-weight:700;text-transform:uppercase;font-size:7.5px;">${e.exit_strategy || 'manual'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Exit Urgency</span><span style="color:var(--orange);font-weight:700;">${e.exit_urgency ? (e.exit_urgency * 100).toFixed(0) + '%' : '0%'}</span></div>
                     </div>
                     
                     <!-- Col 2: Rule A & B Detection Metrics -->
@@ -1245,6 +1249,19 @@ class DashboardController {
                       <div style="display:flex;justify-content:space-between;"><span>Trading Session</span><span style="color:var(--amber);font-weight:700;">${e.session || '--'}</span></div>
                     </div>
                   </div>
+                  <!-- Velocity Trailing Events (if any) -->
+                  ${e.velocity_trailing_events && e.velocity_trailing_events.length > 0 ? `
+                  <div style="margin-top:10px;border-top:1px solid rgba(200,200,200,0.1);padding-top:10px;">
+                    <div style="font-size:7.5px;color:var(--amber);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px;border-bottom:1px solid rgba(255,193,7,0.15);padding-bottom:3px;">⚡ Velocity Trailing Events</div>
+                    ${e.velocity_trailing_events.map(v => `
+                    <div style="display:flex;justify-content:space-between;font-size:7px;color:var(--text-secondary);margin-bottom:4px;padding:4px;background:rgba(255,193,7,0.05);border-radius:2px;">
+                      <span>${v.time || '--'}</span>
+                      <span>${v.old_sl ? parseFloat(v.old_sl).toFixed(5) : '--'} → ${v.new_sl ? parseFloat(v.new_sl).toFixed(5) : '--'}</span>
+                      <span style="color:var(--text-dim);">${v.reason || 'adjustment'}</span>
+                    </div>
+                    `).join('')}
+                  </div>
+                  ` : ''}
                 </div>
               </div>`;
             }).join("");

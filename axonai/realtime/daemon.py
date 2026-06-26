@@ -107,6 +107,13 @@ class AxonDaemon:
         self._tracked_positions: set[int] = set()
         self._active_trade_initial_sl: dict[int, float] = {}
         self._active_trade_system: dict[int, str] = {}
+        self._active_trade_exit_reasons: dict[int, dict] = {}  # ticket -> {reason, strategy, urgency, details}
+        self._active_trade_entry_details: dict[int, dict] = {}  # ticket -> {signal_type, confidence, regime}
+        self._active_trade_velocity_events: dict[int, list] = {}  # ticket -> [{time, old_sl, new_sl, reason}]
+
+        # Thread safety for position tracking (tick engine + main thread access)
+        import threading
+        self._position_lock = threading.Lock()
 
         # Stats
         self._events_detected: int = 0
@@ -552,10 +559,13 @@ class AxonDaemon:
             from axonai.realtime.execution_client import send_execution_command
             try:
                 acc_res = send_execution_command(self.config, {"action": "account_info"})
-                if not acc_res.get("success", False):
-                    logger.debug("Bridge execution_client returned success=False")
+                if not acc_res or not acc_res.get("success", False):
+                    logger.debug("Bridge account_info failed or returned success=False")
                     return None
                 pos_res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol})
+                if not pos_res:
+                    logger.debug("Bridge positions_get returned None")
+                    return None
                 pos_list = pos_res.get("positions", [])
                 return {
                     "type": "account",
@@ -649,10 +659,11 @@ class AxonDaemon:
                 res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol})
                 positions = res.get("positions", []) if res.get("success", False) else []
                 if positions:
-                    for pos in positions:
-                        ticket = pos["ticket"]
-                        self._tracked_positions.add(ticket)
-                        self._active_trade_initial_sl[ticket] = pos["sl"]
+                    with self._position_lock:
+                        for pos in positions:
+                            ticket = pos["ticket"]
+                            self._tracked_positions.add(ticket)
+                            self._active_trade_initial_sl[ticket] = pos["sl"]
                     logger.info("AxonDaemon: Pre-populated %d active positions from execution bridge.", len(positions))
             else:
                 from axonai.dataflows.mt5_order_bridge import get_positions_via_bridge
@@ -660,9 +671,10 @@ class AxonDaemon:
                     pos_result = get_positions_via_bridge(self._trade_terminal_path, self.mt5_symbol)
                     positions = pos_result.get("positions", []) if pos_result and pos_result.get("success") else []
                     if positions:
-                        for pos in positions:
-                            self._tracked_positions.add(pos["ticket"])
-                            self._active_trade_initial_sl[pos["ticket"]] = pos["sl"]
+                        with self._position_lock:
+                            for pos in positions:
+                                self._tracked_positions.add(pos["ticket"])
+                                self._active_trade_initial_sl[pos["ticket"]] = pos["sl"]
                         logger.info("AxonDaemon: Pre-populated %d active positions for trailing stop tracking.", len(positions))
         except Exception as pe:
             logger.warning("AxonDaemon: Failed to pre-populate active positions: %s", pe)
@@ -1061,6 +1073,12 @@ class AxonDaemon:
                     logger.info("SKIPPED (cooldown=%.0fs remaining)", remaining)
                     continue
 
+                # Validate entry direction
+                if not snapshot.entry_decision.direction:
+                    logger.error("Entry direction is None - skipping trade")
+                    self._events_skipped += 1
+                    continue
+
                 signal = "Buy" if snapshot.entry_decision.direction == "BUY" else "Sell"
                 system_name = "reversal_model"
                 logger.info("EXECUTING: ReversalModel Triggered → signal: %s", signal)
@@ -1082,10 +1100,11 @@ class AxonDaemon:
                 trade_result = None
                 try:
                     trade_result = self.trade_executor_opt.execute_signal(self.mt5_symbol, signal, self.live_state)
-                    if trade_result and trade_result.get("success", True) and trade_result.get("order"):
+                    if trade_result and trade_result.get("success", False) and trade_result.get("order"):
                         logger.info("AxonDaemon: Order execution complete: %s", trade_result)
                         ticket = trade_result.get("order")
-                        self._tracked_positions.add(ticket)
+                        with self._position_lock:
+                            self._tracked_positions.add(ticket)
                         self._active_trade_initial_sl[ticket] = trade_result.get("sl")
                         self._active_trade_system[ticket] = system_name
                         
@@ -1178,8 +1197,8 @@ class AxonDaemon:
                         positions = res.get("positions", []) if res.get("success", False) else []
                         for p in positions:
                             # Close position via bridge
-                            # Determine close side (SELL to close BUY, BUY to close SELL)
-                            order_type = 1 if p["type"] == "BUY" else 0
+                            # Determine close side: Send SELL (1) to close BUY (0), BUY (0) to close SELL (1)
+                            order_type = 1 if p["type"] == "SELL" else 0
                             tick_bid = self.live_state.current_bid if hasattr(self.live_state, "current_bid") else p["price_current"]
                             tick_ask = self.live_state.current_ask if hasattr(self.live_state, "current_ask") else p["price_current"]
                             price = tick_ask if order_type == 0 else tick_bid
@@ -1202,8 +1221,9 @@ class AxonDaemon:
                                     p["ticket"], price, profit_pips, decision.reason, snapshot
                                 )
                                 self.reversal_model.clear_trade()
-                                if p["ticket"] in self._tracked_positions:
-                                    self._tracked_positions.remove(p["ticket"])
+                                with self._position_lock:
+                                    if p["ticket"] in self._tracked_positions:
+                                        self._tracked_positions.remove(p["ticket"])
                                     
                                 logger.info("Successfully closed position %d via bridge: %s", p["ticket"], decision.reason)
                     else:
@@ -1241,8 +1261,9 @@ class AxonDaemon:
                                                 p.ticket, price, profit_pips, decision.reason, snapshot
                                             )
                                             self.reversal_model.clear_trade()
-                                            if p.ticket in self._tracked_positions:
-                                                self._tracked_positions.remove(p.ticket)
+                                            with self._position_lock:
+                                                if p.ticket in self._tracked_positions:
+                                                    self._tracked_positions.remove(p.ticket)
                                                 
                                             logger.info("Successfully closed position %d: %s", p.ticket, decision.reason)
 
@@ -1299,7 +1320,8 @@ class AxonDaemon:
         elapsed = (now - self._last_execution_time).total_seconds()
 
         # Check if we have an active position
-        active_positions = self._tracked_positions.copy() if hasattr(self, '_tracked_positions') else set()
+        with self._position_lock:
+            active_positions = self._tracked_positions.copy() if hasattr(self, '_tracked_positions') else set()
 
         # Determine dynamic cooldown based on position state (AGGRESSIVE - allow 50+ trades/day)
         if not active_positions:
@@ -1425,12 +1447,13 @@ class AxonDaemon:
                 return
             self._last_bridge_check_time = now
 
-            if not self._tracked_positions:
-                return
+            with self._position_lock:
+                if not self._tracked_positions:
+                    return
 
             from axonai.realtime.execution_client import send_execution_command
             res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol})
-            positions = res.get("positions", []) if res.get("success", False) else []
+            positions = res.get("positions", []) if res and res.get("success", False) else []
         else:
             if not mt5 or not mt5.terminal_info():
                 return
@@ -1465,14 +1488,18 @@ class AxonDaemon:
             # Initialize tracking
             if ticket not in self._active_trade_initial_sl:
                 self._active_trade_initial_sl[ticket] = pos_sl
-                self._tracked_positions.add(ticket)
+                with self._position_lock:
+                    self._tracked_positions.add(ticket)
 
             initial_sl = self._active_trade_initial_sl[ticket]
             if initial_sl <= 0.0:
                 continue
 
-            # Get velocity trailing decision
-            pos_type_str = "BUY" if pos_type == 0 or pos_type == "BUY" else "SELL"
+            # Get velocity trailing decision (normalize type to string)
+            if isinstance(pos_type, int):
+                pos_type_str = "BUY" if pos_type == 0 else "SELL"
+            else:
+                pos_type_str = "BUY" if str(pos_type).upper() == "BUY" else "SELL"
 
             # Calculate velocity acceleration (current vs previous)
             velocity_accel = 1.0
@@ -1556,6 +1583,13 @@ class AxonDaemon:
                         "[EXIT_ENGINE] CLOSING ticket %d: %s (urgency=%.1f)",
                         ticket, exit_signal.reason, exit_signal.urgency
                     )
+                    # Store exit reason for later logging
+                    self._active_trade_exit_reasons[ticket] = {
+                        "reason": exit_signal.reason,
+                        "strategy": getattr(exit_signal, "strategy", "exit_engine"),
+                        "urgency": exit_signal.urgency,
+                        "details": getattr(exit_signal, "details", {})
+                    }
                     if is_bridge:
                         from axonai.realtime.execution_client import send_execution_command
                         send_execution_command(self.config, {
@@ -1582,6 +1616,15 @@ class AxonDaemon:
                 elif exit_signal and exit_signal.action == "ADJUST_SL" and exit_signal.suggested_sl:
                     new_sl = round(exit_signal.suggested_sl, 5 if "JPY" not in self.mt5_symbol.upper() else 3)
                     logger.info("[EXIT_ENGINE] Adjusting SL for ticket %d: %.5f -> %.5f", ticket, pos_sl, new_sl)
+                    # Track SL adjustment for velocity trailing visibility
+                    if ticket not in self._active_trade_velocity_events:
+                        self._active_trade_velocity_events[ticket] = []
+                    self._active_trade_velocity_events[ticket].append({
+                        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "old_sl": round(pos_sl, 5),
+                        "new_sl": new_sl,
+                        "reason": getattr(exit_signal, "details", {}).get("reason", "velocity_trailing")
+                    })
                     if is_bridge:
                         from axonai.realtime.execution_client import send_execution_command
                         send_execution_command(self.config, {
@@ -1606,27 +1649,29 @@ class AxonDaemon:
     def _check_for_closed_positions(self, bid: float, ask: float):
         """Detect closed positions and log outcomes."""
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
-        
+
         if is_bridge:
-            if not self._tracked_positions:
-                return
+            with self._position_lock:
+                if not self._tracked_positions:
+                    return
             from axonai.realtime.execution_client import send_execution_command
             res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol})
-            positions = res.get("positions", []) if res.get("success", False) else []
+            positions = res.get("positions", []) if res and res.get("success", False) else []
             active_tickets = {int(p["ticket"]) for p in positions}
         else:
             if not mt5 or not mt5.terminal_info():
                 return
             positions = mt5.positions_get(symbol=self.mt5_symbol)
             active_tickets = {p.ticket for p in positions} if positions else set()
-        
-        # Detect closed tickets
-        closed_tickets = self._tracked_positions - active_tickets
-        if not closed_tickets:
-            # Still update tracked positions to capture any manually opened trades
-            for t in active_tickets:
-                self._tracked_positions.add(t)
-            return
+
+        # Detect closed tickets (thread-safe copy)
+        with self._position_lock:
+            closed_tickets = self._tracked_positions - active_tickets
+            if not closed_tickets:
+                # Still update tracked positions to capture any manually opened trades
+                for t in active_tickets:
+                    self._tracked_positions.add(t)
+                return
             
         pip = 0.01 if "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() else 0.0001
         
@@ -1646,22 +1691,41 @@ class AxonDaemon:
             profit = 0.0
             pips = 0.0
             reason = "Manual Close / Unknown"
+            exit_strategy = "manual"  # default: manual close
+            exit_urgency = 0.0
             direction = "UNKNOWN"
             volume = 0.0
             entry_price = 0.0
-            
+
+            # Check if we have stored exit reason from ExitEngine
+            stored_exit_info = self._active_trade_exit_reasons.pop(ticket, None)
+            if stored_exit_info:
+                reason = stored_exit_info.get("reason", reason)
+                exit_strategy = stored_exit_info.get("strategy", "exit_engine")
+                exit_urgency = stored_exit_info.get("urgency", 0.0)
+
+            # Retrieve velocity trailing events
+            velocity_events = self._active_trade_velocity_events.pop(ticket, [])
+
             initial_sl = self._active_trade_initial_sl.get(ticket, 0.0)
             
             if deals:
-                # Find exit deal
+                # Find exit deal (normalize deal entry types)
                 exit_deal = None
                 entry_deal = None
+                DEAL_ENTRY_IN = 0 if mt5 is None else mt5.DEAL_ENTRY_IN
+                DEAL_ENTRY_OUT = 1 if mt5 is None else mt5.DEAL_ENTRY_OUT
+
                 for deal in deals:
                     deal_entry = deal["entry"] if is_bridge else deal.entry
-                    
-                    if deal_entry == 1 or (not is_bridge and deal_entry == mt5.DEAL_ENTRY_OUT):
+
+                    # Normalize comparison: is this a closing deal?
+                    is_exit = (deal_entry == DEAL_ENTRY_OUT) or (is_bridge and deal_entry == 1)
+                    is_entry = (deal_entry == DEAL_ENTRY_IN) or (is_bridge and deal_entry == 0)
+
+                    if is_exit:
                         exit_deal = deal
-                    elif deal_entry == 0 or (not is_bridge and deal_entry == mt5.DEAL_ENTRY_IN):
+                    elif is_entry:
                         entry_deal = deal
                         
                 if entry_deal:
@@ -1730,6 +1794,9 @@ class AxonDaemon:
                     "profit": profit,
                     "pips": round(pips, 1),
                     "reason": reason,
+                    "exit_strategy": exit_strategy,
+                    "exit_urgency": round(exit_urgency, 2),
+                    "velocity_trailing_events": velocity_events,
                     "outcome": outcome
                 }
                 with open(os.path.join("reports", "signals.jsonl"), "a", encoding="utf-8") as f:
@@ -1762,7 +1829,8 @@ class AxonDaemon:
                 })
                 
             # Remove from tracking cache
-            self._tracked_positions.discard(ticket)
+            with self._position_lock:
+                self._tracked_positions.discard(ticket)
             self._active_trade_initial_sl.pop(ticket, None)
             self.velocity_trailing.reset(ticket)  # Clean up velocity trail state
             self._lowest_price_since_entry.pop(ticket, None)  # Clean up lowest price tracking
@@ -1777,7 +1845,8 @@ class AxonDaemon:
                 self._last_loss_time = datetime.now()
             
         # Update tracked positions with active ones
-        self._tracked_positions = active_tickets.copy()
+        with self._position_lock:
+            self._tracked_positions = active_tickets.copy()
 
 
 def generate_session_summary():
@@ -1810,7 +1879,8 @@ def generate_session_summary():
                     decisions += 1
                 elif etype == 'event_detected':
                     events_detected += 1
-            except Exception:
+            except Exception as e:
+                logger.warning("Error parsing session log entry: %s", e)
                 continue
 
     duration_str = '0 hours 0 minutes'
