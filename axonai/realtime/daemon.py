@@ -110,6 +110,7 @@ class AxonDaemon:
         self._active_trade_exit_reasons: dict[int, dict] = {}  # ticket -> {reason, strategy, urgency, details}
         self._active_trade_entry_details: dict[int, dict] = {}  # ticket -> {signal_type, confidence, regime}
         self._active_trade_velocity_events: dict[int, list] = {}  # ticket -> [{time, old_sl, new_sl, reason}]
+        self._last_position_snapshot: dict[int, dict] = {}  # ticket -> last-known live position data (entry, dir, profit)
 
         # Thread safety for position tracking (tick engine + main thread access)
         import threading
@@ -1658,6 +1659,10 @@ class AxonDaemon:
         """Detect closed positions and log outcomes."""
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
 
+        # Positions live in the MetaQuotes TRADE terminal, accessed via the bridge — NOT the
+        # Exness feed terminal that mt5.positions_get() would query. Always use the bridge so
+        # both bridge and direct execution modes read the correct terminal.
+        positions = []
         if is_bridge:
             with self._position_lock:
                 if not self._tracked_positions:
@@ -1665,14 +1670,32 @@ class AxonDaemon:
             from axonai.realtime.execution_client import send_execution_command
             res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol})
             positions = res.get("positions", []) if res and res.get("success", False) else []
-            active_tickets = {int(p["ticket"]) for p in positions}
         else:
-            if not mt5 or not mt5.terminal_info():
-                logger.warning("[POS_CHECK] MT5 not initialized or terminal offline")
+            with self._position_lock:
+                if not self._tracked_positions:
+                    return
+            from axonai.dataflows.mt5_order_bridge import get_positions_via_bridge
+            if not self._trade_terminal_path:
                 return
-            positions = mt5.positions_get(symbol=self.mt5_symbol)
-            active_tickets = {p.ticket for p in positions} if positions else set()
-            logger.debug(f"[POS_CHECK] mt5.positions_get(symbol={self.mt5_symbol}): returned {len(positions) if positions else 0} positions, active_tickets={active_tickets}")
+            pos_result = get_positions_via_bridge(self._trade_terminal_path, self.mt5_symbol)
+            positions = pos_result.get("positions", []) if pos_result and pos_result.get("success") else []
+
+        active_tickets = {int(p["ticket"]) for p in positions}
+        logger.debug(f"[POS_CHECK] bridge positions_get: {len(positions)} positions, active_tickets={active_tickets}")
+
+        # Cache last-known live data for each active position (bridge returns dicts).
+        # Used to recover entry price/direction/profit when a position closes (esp. manual trades).
+        for p in positions:
+            tkt = int(p["ticket"])
+            ptype = p["type"]
+            self._last_position_snapshot[tkt] = {
+                "entry_price": p.get("price_open", 0.0),
+                "direction": "BUY" if ptype in (0, "BUY") else "SELL",
+                "volume": p.get("volume", 0.0),
+                "profit": p.get("profit", 0.0),
+                "price_current": p.get("price_current", 0.0),
+                "sl": p.get("sl", 0.0),
+            }
 
         # Detect closed tickets (thread-safe copy)
         with self._position_lock:
@@ -1718,13 +1741,29 @@ class AxonDaemon:
             volume = 0.0
             entry_price = 0.0
 
-            # Retrieve stored entry details from when position was opened
+            # Retrieve stored entry details from when position was opened (daemon-executed trades)
             stored_entry_info = self._active_trade_entry_details.pop(ticket, None)
             if stored_entry_info:
                 entry_price = stored_entry_info["entry_price"]
                 direction = stored_entry_info["direction"]
                 volume = stored_entry_info["volume"]
                 logger.info(f"[ENTRY_RETRIEVED] Ticket {ticket}: {direction} @ {entry_price}")
+
+            # Fall back to last-known live snapshot (works for manually-opened trades too)
+            last_snap = self._last_position_snapshot.pop(ticket, None)
+            if last_snap:
+                if entry_price == 0.0:
+                    entry_price = last_snap["entry_price"]
+                if direction == "UNKNOWN":
+                    direction = last_snap["direction"]
+                if volume == 0.0:
+                    volume = last_snap["volume"]
+                # Last-known profit and current price are the best estimate at close
+                if profit == 0.0:
+                    profit = last_snap["profit"]
+                if last_snap.get("price_current"):
+                    exit_price = last_snap["price_current"]
+                logger.info(f"[SNAPSHOT_RECOVERED] Ticket {ticket}: {direction} entry={entry_price} exit~={exit_price} profit={profit}")
 
             # Check if we have stored exit reason from ExitEngine
             stored_exit_info = self._active_trade_exit_reasons.pop(ticket, None)
@@ -1801,15 +1840,20 @@ class AxonDaemon:
                 exit_price = bid  # Use current bid as exit
                 logger.info(f"[EXIT_PRICE] Ticket {ticket}: Using current bid {bid} as exit price")
 
-            # Calculate profit from entry/exit if not already set
+            # Calculate pips from entry/exit (always, when we have both prices)
+            if entry_price > 0 and exit_price > 0 and pips == 0.0:
+                if direction == "BUY":
+                    pips = (exit_price - entry_price) / pip
+                elif direction == "SELL":
+                    pips = (entry_price - exit_price) / pip
+
+            # Estimate profit only if we still don't have it (no deal history, no snapshot profit)
             if entry_price > 0 and exit_price > 0 and profit == 0.0:
                 if direction == "BUY":
-                    profit = (exit_price - entry_price) * volume * 10000 if "JPY" not in self.mt5_symbol.upper() else (exit_price - entry_price) * volume * 100
-                    pips = (exit_price - entry_price) / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001)
+                    profit = (exit_price - entry_price) * volume * 100000
                 elif direction == "SELL":
-                    profit = (entry_price - exit_price) * volume * 10000 if "JPY" not in self.mt5_symbol.upper() else (entry_price - exit_price) * volume * 100
-                    pips = (entry_price - exit_price) / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001)
-                logger.info(f"[PROFIT_CALC] Ticket {ticket}: {direction} entry={entry_price} exit={exit_price} -> profit={profit:.2f} pips={pips:.1f}")
+                    profit = (entry_price - exit_price) * volume * 100000
+            logger.info(f"[PROFIT_CALC] Ticket {ticket}: {direction} entry={entry_price} exit={exit_price} -> profit={profit:.2f} pips={pips:.1f}")
 
             outcome = "WIN" if pips > 0 else "LOSS" if pips < 0 else "BREAKEVEN"
             if outcome == "LOSS":
