@@ -34,8 +34,11 @@ echo.
 echo ════════════════════════════════════════════════════════════════
 echo.
 
-REM Start the live trading system
-python run.py --direct --symbol EURUSD --live
+REM Start the live trading system with dual terminals
+REM Feed: Exness (data) | Execution: MetaQuotes (orders)
+python run.py --direct --symbol EURUSD --live ^
+  --feed-path "C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe" ^
+  --exec-path "C:\Program Files\MetaTrader 5\terminal64.exe"
 
 REM If we get here, the system exited
 echo.

@@ -37,8 +37,11 @@ echo.
 echo ════════════════════════════════════════════════════════════════
 echo.
 
-REM Start the paper trading system
-python run.py --direct --symbol EURUSD --paper
+REM Start the paper trading system with dual terminals
+REM Feed: Exness (data) | Execution: MetaQuotes (simulated)
+python run.py --direct --symbol EURUSD --paper ^
+  --feed-path "C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe" ^
+  --exec-path "C:\Program Files\MetaTrader 5\terminal64.exe"
 
 REM If we get here, the system exited
 echo.

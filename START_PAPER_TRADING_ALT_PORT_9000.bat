@@ -33,7 +33,9 @@ echo.
 echo ════════════════════════════════════════════════════════════════
 echo.
 
-python run.py --direct --symbol EURUSD --paper --port 9000
+python run.py --direct --symbol EURUSD --paper --port 9000 ^
+  --feed-path "C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe" ^
+  --exec-path "C:\Program Files\MetaTrader 5\terminal64.exe"
 
 echo.
 echo ════════════════════════════════════════════════════════════════
