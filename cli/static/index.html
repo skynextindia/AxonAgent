@@ -684,6 +684,21 @@ class DashboardController {
       case"trade_state":this.handleTradeState(d);break;
       case"location_context":this.handleLocationContext(d);break;
     }
+    // Real-time journal: when a trade closes, refresh the journal live (no manual reload needed)
+    if(d.type==="event"&&d.event_type==="TRADE_CLOSED"){this.onTradeClosed(d);}
+  }
+  onTradeClosed(d){
+    // Re-fetch trades so the journal reflects the new close immediately, using the
+    // server's complete merged record (direction, entry/exit, P&L, pips, duration, peak).
+    if(this.activeTab==="journal"&&(this.activeJournalTab||"trades")==="trades"){
+      this.loadJournalData();
+    }
+    // Lightweight toast/log so the user sees the close even when not on the journal tab.
+    try{
+      const det=d.details||{};
+      const pl=det.profit!==undefined?((det.profit>0?'+':'')+parseFloat(det.profit).toFixed(2)):'';
+      console.log(`[TRADE CLOSED] #${det.ticket||''} ${det.direction||''} ${pl} (${det.outcome||''})`);
+    }catch(_){}
   }
   handleTradeState(d) {
     const upd = (id,val) => {const el=g(id);if(el)el.textContent=val};
