@@ -74,9 +74,11 @@ class AxonDaemon:
         self._last_loss_time: Optional[datetime] = None
         self._last_close_time: Optional[datetime] = None
 
-        # Layer 4: Trade Executor
+        # Layer 4: Trade Executor - FORCE MetaQuotes terminal for execution
         config_base = config.copy()
         config_base["realtime_magic_number"] = 123456
+        # CRITICAL: Override to use MetaQuotes (NOT Exness) for order execution
+        config_base["mt5_terminal_path"] = "C:\\Program Files\\MetaTrader 5\\terminal64.exe"
         self.trade_executor_base = MT5TradeExecutor(config_base)
 
         config_opt = config.copy()
