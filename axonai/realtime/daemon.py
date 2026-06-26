@@ -1680,18 +1680,36 @@ class AxonDaemon:
             logger.info("AxonDaemon: Detected closed position for ticket %d", ticket)
             
             # Fetch deal history for this ticket
-            # NOTE: Always use bridge for deal history, even in "direct" mode, because bridge has access to
-            # MetaQuotes execution terminal while direct mode queries Exness feed terminal
-            from axonai.realtime.execution_client import send_execution_command
-            hist_res = send_execution_command(self.config, {"action": "history_deals_get", "position": ticket})
-            deals = hist_res.get("deals", []) if hist_res and hist_res.get("success", False) else []
-            logger.info(f"[DEAL_HISTORY] Bridge history_deals_get(position={ticket}): returned {len(deals)} deals, success={hist_res.get('success') if hist_res else False}")
+            if is_bridge:
+                from axonai.realtime.execution_client import send_execution_command
+                hist_res = send_execution_command(self.config, {"action": "history_deals_get", "position": ticket})
+                deals = hist_res.get("deals", []) if hist_res and hist_res.get("success", False) else []
+                logger.info(f"[DEAL_HISTORY] Bridge history_deals_get(position={ticket}): returned {len(deals)} deals")
+            else:
+                # In direct mode, query the MetaTrader 5 directly from the execution terminal
+                # Get deals from the trade terminal (MetaQuotes), not the data feed terminal (Exness)
+                try:
+                    from axonai.dataflows.mt5_data import mt5_initialize
+                    mt5_exec = mt5_initialize(path_to_use=self._trade_terminal_path)
+                    if mt5_exec:
+                        deals = mt5_exec.history_deals_get(position=ticket)
+                        if not deals:
+                            deals = mt5_exec.history_deals_get()
+                            deals = [d for d in deals if d.position == ticket] if deals else []
+                        logger.info(f"[DEAL_HISTORY] Direct MT5 (trade terminal): found {len(deals)} deals for ticket {ticket}")
+                    else:
+                        deals = []
+                        logger.warning(f"[DEAL_HISTORY] Could not initialize trade terminal MT5")
+                except Exception as e:
+                    deals = []
+                    logger.warning(f"[DEAL_HISTORY] Error querying trade terminal: {e}")
 
             if deals:
                 for i, d in enumerate(deals):
-                    logger.info(f"  Deal {i}: entry={d.get('entry')}, type={d.get('type')}, price={d.get('price')}, profit={d.get('profit')}, comment={d.get('comment', 'N/A')}")
+                    entry = d.get("entry") if isinstance(d, dict) else d.entry
+                    logger.info(f"  Deal {i}: entry={entry}, type={d.get('type') if isinstance(d, dict) else d.type}, price={d.get('price') if isinstance(d, dict) else d.price}")
             else:
-                logger.warning(f"[DEAL_HISTORY] No deals returned for ticket {ticket}")
+                logger.warning(f"[DEAL_HISTORY] No deals found for ticket {ticket}")
 
             exit_price = 0.0
             exit_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
