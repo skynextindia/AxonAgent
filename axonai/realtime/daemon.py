@@ -1106,6 +1106,15 @@ class AxonDaemon:
                             self._tracked_positions.add(ticket)
                         self._active_trade_initial_sl[ticket] = trade_result.get("sl")
                         self._active_trade_system[ticket] = system_name
+                        # Store entry details for when position closes
+                        self._active_trade_entry_details[ticket] = {
+                            "entry_price": snapshot.price,
+                            "direction": snapshot.entry_decision.direction,
+                            "entry_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "volume": trade_result.get("volume", 0.01),
+                            "entry_reason": snapshot.entry_decision.reason
+                        }
+                        logger.info(f"[ENTRY_TRACKED] Ticket {ticket}: {snapshot.entry_decision.direction} @ {snapshot.price}")
                         
                         # Register trade with models
                         # CHANGE 9C: Register with trade_state_engine for lifecycle tracking
@@ -1709,6 +1718,14 @@ class AxonDaemon:
             volume = 0.0
             entry_price = 0.0
 
+            # Retrieve stored entry details from when position was opened
+            stored_entry_info = self._active_trade_entry_details.pop(ticket, None)
+            if stored_entry_info:
+                entry_price = stored_entry_info["entry_price"]
+                direction = stored_entry_info["direction"]
+                volume = stored_entry_info["volume"]
+                logger.info(f"[ENTRY_RETRIEVED] Ticket {ticket}: {direction} @ {entry_price}")
+
             # Check if we have stored exit reason from ExitEngine
             stored_exit_info = self._active_trade_exit_reasons.pop(ticket, None)
             if stored_exit_info:
@@ -1779,15 +1796,20 @@ class AxonDaemon:
                     else:
                         reason = f"Closed ({exit_deal['comment'] if is_bridge else (exit_deal.comment or 'Manual')})"
                         
-            # If history failed, fallback to basic estimates
-            if entry_price == 0.0:
-                entry_price = bid  # fallback
+            # If no exit price yet, use current bid/ask as approximation
             if exit_price == 0.0:
-                exit_price = bid  # Current bid as approximate exit
-                logger.warning(f"[FALLBACK] Ticket {ticket}: No exit deal found, using current bid as exit_price")
-            if profit == 0.0 and entry_price > 0:
-                # Estimate profit from current position (shouldn't happen for closed positions)
-                logger.warning(f"[FALLBACK] Ticket {ticket}: No profit data, estimated from entry/exit prices")
+                exit_price = bid  # Use current bid as exit
+                logger.info(f"[EXIT_PRICE] Ticket {ticket}: Using current bid {bid} as exit price")
+
+            # Calculate profit from entry/exit if not already set
+            if entry_price > 0 and exit_price > 0 and profit == 0.0:
+                if direction == "BUY":
+                    profit = (exit_price - entry_price) * volume * 10000 if "JPY" not in self.mt5_symbol.upper() else (exit_price - entry_price) * volume * 100
+                    pips = (exit_price - entry_price) / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001)
+                elif direction == "SELL":
+                    profit = (entry_price - exit_price) * volume * 10000 if "JPY" not in self.mt5_symbol.upper() else (entry_price - exit_price) * volume * 100
+                    pips = (entry_price - exit_price) / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001)
+                logger.info(f"[PROFIT_CALC] Ticket {ticket}: {direction} entry={entry_price} exit={exit_price} -> profit={profit:.2f} pips={pips:.1f}")
 
             outcome = "WIN" if pips > 0 else "LOSS" if pips < 0 else "BREAKEVEN"
             if outcome == "LOSS":
