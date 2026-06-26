@@ -30,6 +30,8 @@ from axonai.realtime.displacement_normalizer import DisplacementNormalizer
 from axonai.realtime.trade_analytics import TradeAnalytics
 from axonai.realtime.trade_executor import MT5TradeExecutor
 from axonai.realtime.api_server import get_dashboard
+from axonai.realtime.exit_engine import ExitEngine
+from axonai.realtime.adaptive_exit import AdaptiveExitManager
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +92,11 @@ class AxonDaemon:
         self.velocity_trailing = VelocityTrailingManager()
         self._lowest_price_since_entry = {}  # Track lowest price for retest detection
         self._last_velocity_percentile = 0.0
+
+        # Layer 6: Exit Engine (priority-based trade closure logic)
+        pip_mult = 0.01 if "JPY" in symbol.upper() else 0.0001
+        adaptive_exit_mgr = AdaptiveExitManager(pip_mult=pip_mult, config=config)
+        self.exit_engine = ExitEngine(legacy_exit_manager=adaptive_exit_mgr, pip_mult=pip_mult, config=config)
 
         # Layer 6: Displacement Normalization
         self.displacement_normalizer = DisplacementNormalizer(window_sec=300.0)
@@ -1528,6 +1535,73 @@ class AxonDaemon:
                     res = self._send_order(request)
                     if res and res.get("retcode") == mt5.TRADE_RETCODE_DONE:
                         logger.info("AxonDaemon: SL modification successful for ticket %d", ticket)
+
+            # --- EXIT ENGINE: Evaluate exit conditions (thesis failure, adverse impulse, exhaustion) ---
+            if self.reversal_model and self.reversal_model.trade_state_engine:
+                trade_state = self.reversal_model.trade_state_engine._state
+                snapshot = self.reversal_model.latest_snapshot if hasattr(self.reversal_model, 'latest_snapshot') else None
+                location_context = self.reversal_model.location_engine.context if hasattr(self.reversal_model, 'location_engine') else None
+                current_price = bid if pos_type_str == "SELL" else ask
+
+                exit_signal = self.exit_engine.evaluate(
+                    trade_state=trade_state,
+                    snapshot=snapshot,
+                    location_context=location_context,
+                    current_price=current_price
+                )
+
+                # Execute exit decision (CLOSE_NOW, ADJUST_SL, or HOLD)
+                if exit_signal and exit_signal.should_exit:
+                    logger.warning(
+                        "[EXIT_ENGINE] CLOSING ticket %d: %s (urgency=%.1f)",
+                        ticket, exit_signal.reason, exit_signal.urgency
+                    )
+                    if is_bridge:
+                        from axonai.realtime.execution_client import send_execution_command
+                        send_execution_command(self.config, {
+                            "action": "close",
+                            "position": ticket,
+                            "symbol": pos_symbol,
+                        })
+                    else:
+                        close_request = {
+                            "action": mt5.TRADE_ACTION_DEAL,
+                            "symbol": self.mt5_symbol,
+                            "volume": pos_volume,
+                            "type": mt5.ORDER_TYPE_SELL if pos_type_str == "BUY" else mt5.ORDER_TYPE_BUY,
+                            "position": ticket,
+                            "deviation": self.config.get("realtime_deviation", 20),
+                            "magic": self.config.get("realtime_magic_number", 123456),
+                        }
+                        res = self._send_order(close_request)
+                        if res and res.get("retcode") == mt5.TRADE_RETCODE_DONE:
+                            logger.info("[EXIT_ENGINE] Successfully closed ticket %d", ticket)
+                            self._on_position_closed(ticket, bid, ask)
+                        else:
+                            logger.error("[EXIT_ENGINE] Failed to close ticket %d: %s", ticket, res)
+                elif exit_signal and exit_signal.action == "ADJUST_SL" and exit_signal.suggested_sl:
+                    new_sl = round(exit_signal.suggested_sl, 5 if "JPY" not in self.mt5_symbol.upper() else 3)
+                    logger.info("[EXIT_ENGINE] Adjusting SL for ticket %d: %.5f -> %.5f", ticket, pos_sl, new_sl)
+                    if is_bridge:
+                        from axonai.realtime.execution_client import send_execution_command
+                        send_execution_command(self.config, {
+                            "action": "modify",
+                            "position": ticket,
+                            "symbol": pos_symbol,
+                            "sl": new_sl,
+                            "tp": pos_tp,
+                        })
+                    else:
+                        request = {
+                            "action": mt5.TRADE_ACTION_SLTP,
+                            "position": ticket,
+                            "symbol": self.mt5_symbol,
+                            "sl": new_sl,
+                            "tp": pos_tp,
+                        }
+                        res = self._send_order(request)
+                        if res and res.get("retcode") == mt5.TRADE_RETCODE_DONE:
+                            logger.info("[EXIT_ENGINE] SL modification successful for ticket %d", ticket)
 
     def _check_for_closed_positions(self, bid: float, ask: float):
         """Detect closed positions and log outcomes."""
