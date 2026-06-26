@@ -688,16 +688,15 @@ class DashboardController {
     if(d.type==="event"&&d.event_type==="TRADE_CLOSED"){this.onTradeClosed(d);}
   }
   onTradeClosed(d){
-    // Re-fetch trades so the journal reflects the new close immediately, using the
+    // Always re-fetch trades on a close so the journal reflects it immediately, using the
     // server's complete merged record (direction, entry/exit, P&L, pips, duration, peak).
-    if(this.activeTab==="journal"&&(this.activeJournalTab||"trades")==="trades"){
-      this.loadJournalData();
-    }
-    // Lightweight toast/log so the user sees the close even when not on the journal tab.
+    // Safe even when the journal tab is hidden (it writes to the DOM element which always exists).
+    try{this.loadJournalData();}catch(_){}
+    // Visible confirmation so the user sees the live close even from another tab.
     try{
       const det=d.details||{};
       const pl=det.profit!==undefined?((det.profit>0?'+':'')+parseFloat(det.profit).toFixed(2)):'';
-      console.log(`[TRADE CLOSED] #${det.ticket||''} ${det.direction||''} ${pl} (${det.outcome||''})`);
+      console.log(`[LIVE TRADE CLOSED] #${det.ticket||''} ${det.direction||''} ${pl} (${det.outcome||''})`);
     }catch(_){}
   }
   handleTradeState(d) {
