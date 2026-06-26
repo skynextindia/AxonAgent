@@ -1104,33 +1104,74 @@ class DashboardController {
   renderLiveTrades() {
     const live=document.getElementById("jview-trades-live");if(!live)return;
     const pos=this.livePositions||[];
+    if(!this._expandedLive)this._expandedLive=new Set();
     if(pos.length===0){live.innerHTML="";return;}
-    live.innerHTML=pos.map(p=>{
+    const header=`<div style="display:flex;align-items:center;gap:6px;padding:5px 12px;background:rgba(0,240,255,0.06);border-bottom:1px solid rgba(0,240,255,0.2);"><span style="color:var(--cyan);font-weight:900;font-size:7.5px;letter-spacing:.1em;text-transform:uppercase;">● Running Trades (Live)</span><span style="color:var(--text-dim);font-size:7px;">${pos.length} open · updating real-time</span></div>`;
+    live.innerHTML=header+pos.map(p=>{
       const dir=(p.type===0||p.type==="BUY")?"BUY":"SELL";
       const sym=p.symbol||"EURUSD";
       const pip=sym.toUpperCase().includes("JPY")?0.01:0.0001;
       const open=parseFloat(p.price_open||0),cur=parseFloat(p.price_current||0);
       const pips=cur&&open?(dir==="BUY"?(cur-open):(open-cur))/pip:0;
       const profit=parseFloat(p.profit||0);
+      const sl=parseFloat(p.sl||0),tp=parseFloat(p.tp||0);
       const dirColor=dir==="BUY"?"var(--green)":"var(--red)";
       const c=profit>0?"var(--green)":profit<0?"var(--red)":"var(--text-secondary)";
       const profitDisplay=(profit>0?'+':'')+profit.toFixed(2);
       const pipsDisplay=(pips>0?'+':'')+pips.toFixed(1);
-      return `<div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.2fr 1.2fr 1.2fr 0.4fr;gap:4px;padding:8px 12px;align-items:center;background:rgba(0,240,255,0.04);border-bottom:1px solid var(--border-dim);border-left:2px solid var(--cyan);">
-        <span style="color:var(--cyan);font-weight:700;">● LIVE</span>
-        <span style="color:#fff;font-weight:700;text-align:center;">${sym}</span>
-        <span style="color:${dirColor};font-weight:900;text-align:center;">${dir}</span>
-        <span style="color:#fff;text-align:center;">${this.sf(p.volume,2)}</span>
-        <span style="color:var(--text-secondary);text-align:center;">${this.sf(open,5)}</span>
-        <span style="color:#fff;text-align:center;font-weight:700;">${this.sf(cur,5)}</span>
-        <span style="color:${c};font-weight:700;text-align:center;">${pipsDisplay}</span>
-        <span style="color:${c};font-weight:700;text-align:center;">${profitDisplay}</span>
-        <span style="color:var(--text-secondary);text-align:left;padding-left:4px;">Running #${p.ticket}</span>
-        <span style="color:var(--text-dim);text-align:center;">--</span>
-        <span style="text-align:center;"><span style="background:rgba(0,240,255,0.1);color:var(--cyan);padding:2px 6px;font-weight:900;border-radius:2px;font-size:7px;">OPEN</span></span>
-        <span style="text-align:center;"></span>
+      const exp=this._expandedLive.has(String(p.ticket));
+      return `<div class="trade-row-container" style="border-bottom:1px solid var(--border-dim);display:flex;flex-direction:column;border-left:2px solid var(--cyan);">
+        <div onclick="window.dashboardController.toggleLiveTradeDetails('${p.ticket}')" style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.2fr 1.2fr 1.2fr 0.4fr;gap:4px;padding:8px 12px;cursor:pointer;align-items:center;background:rgba(0,240,255,0.04);transition:background 0.1s;" onmouseover="this.style.background='rgba(0,240,255,0.08)'" onmouseout="this.style.background='rgba(0,240,255,0.04)'">
+          <span style="color:var(--cyan);font-weight:700;">● LIVE</span>
+          <span style="color:#fff;font-weight:700;text-align:center;">${sym}</span>
+          <span style="color:${dirColor};font-weight:900;text-align:center;">${dir}</span>
+          <span style="color:#fff;text-align:center;">${this.sf(p.volume,2)}</span>
+          <span style="color:var(--text-secondary);text-align:center;">${this.sf(open,5)}</span>
+          <span style="color:#fff;text-align:center;font-weight:700;">${this.sf(cur,5)}</span>
+          <span style="color:${c};font-weight:700;text-align:center;">${pipsDisplay}</span>
+          <span style="color:${c};font-weight:700;text-align:center;">${profitDisplay}</span>
+          <span style="color:var(--text-secondary);text-align:left;padding-left:4px;">Running</span>
+          <span style="color:var(--text-dim);text-align:center;">--</span>
+          <span style="text-align:center;"><span style="background:rgba(0,240,255,0.1);color:var(--cyan);padding:2px 6px;font-weight:900;border-radius:2px;font-size:7px;">OPEN</span></span>
+          <span id="ltarrow-${p.ticket}" style="color:var(--text-dim);font-weight:700;text-align:center;font-size:8px;">${exp?'▲':'▼'}</span>
+        </div>
+        <div id="ltdetails-${p.ticket}" style="display:${exp?'block':'none'};background:#020203;border-top:1px solid #141419;padding:12px;font-size:8px;color:var(--text-secondary);">
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;border-left:3px solid var(--cyan);padding-left:12px;">
+            <div style="display:flex;flex-direction:column;gap:5px;">
+              <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Live Position</div>
+              <div style="display:flex;justify-content:space-between;"><span>Ticket</span><span style="color:#fff;font-weight:700;">#${p.ticket}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Direction</span><span style="color:${dirColor};font-weight:700;">${dir}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Volume</span><span style="color:#fff;font-weight:700;">${this.sf(p.volume,2)}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Status</span><span style="color:var(--cyan);font-weight:700;">OPEN / RUNNING</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;">
+              <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Price & P&L (Live)</div>
+              <div style="display:flex;justify-content:space-between;"><span>Entry</span><span style="color:#fff;font-weight:700;">${this.sf(open,5)}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Current</span><span style="color:#fff;font-weight:700;">${this.sf(cur,5)}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Pips</span><span style="color:${c};font-weight:700;">${pipsDisplay}</span></div>
+              <div style="display:flex;justify-content:space-between;border-top:1px solid rgba(200,200,200,0.1);padding-top:5px;margin-top:5px;"><span>Floating P&L</span><span style="color:${c};font-weight:700;">${profitDisplay}</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;">
+              <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Risk Levels</div>
+              <div style="display:flex;justify-content:space-between;"><span>Stop Loss</span><span style="color:var(--red);font-weight:700;">${sl>0?this.sf(sl,5):'--'}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Take Profit</span><span style="color:var(--green);font-weight:700;">${tp>0?this.sf(tp,5):'--'}</span></div>
+            </div>
+          </div>
+        </div>
       </div>`;
     }).join("");
+  }
+  toggleLiveTradeDetails(ticket) {
+    if(!this._expandedLive)this._expandedLive=new Set();
+    const key=String(ticket);
+    const el=document.getElementById("ltdetails-"+ticket);
+    const arrow=document.getElementById("ltarrow-"+ticket);
+    if(el){
+      const isHidden=el.style.display==="none";
+      el.style.display=isHidden?"block":"none";
+      if(arrow)arrow.textContent=isHidden?"▲":"▼";
+      if(isHidden)this._expandedLive.add(key);else this._expandedLive.delete(key);
+    }
   }
   handleSingleCandle(d) {
     const tf=d.timeframe||this.currentTimeframe;
@@ -1237,10 +1278,14 @@ class DashboardController {
         const j = await r.json();
         const body = document.getElementById("jview-trades-body");
         if (body && j.status === "success") {
-          if (j.entries.length === 0) {
-            body.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No trades in history yet.</div>';
+          // Exclude still-open trades (shown live in the Running section above) to avoid duplicates
+          const openTickets = new Set((this.livePositions||[]).map(p=>String(p.ticket)));
+          const closed = j.entries.filter(e => e.outcome !== "OPEN" && !openTickets.has(String(e.ticket)));
+          if (closed.length === 0) {
+            body.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No closed trades yet.</div>';
           } else {
-            body.innerHTML = j.entries.map(e => {
+            const histHeader = '<div style="display:flex;align-items:center;gap:6px;padding:5px 12px;background:#0a0a0f;border-bottom:1px solid var(--border);"><span style="color:var(--text-dim);font-weight:900;font-size:7.5px;letter-spacing:.1em;text-transform:uppercase;">Closed History</span><span style="color:var(--text-dim);font-size:7px;">'+closed.length+' trades</span></div>';
+            body.innerHTML = histHeader + closed.map(e => {
               const color = e.outcome === "WIN" ? "var(--green)" : e.outcome === "LOSS" ? "var(--red)" : "var(--text-secondary)";
               const dirColor = e.direction === "BUY" ? "var(--green)" : "var(--red)";
               const exitPriceDisplay = e.exit_price ? parseFloat(e.exit_price).toFixed(5) : "--";
