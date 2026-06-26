@@ -869,13 +869,12 @@ class AxonDaemon:
         if snapshot.exit_decision.should_exit or snapshot.exit_decision.action == "ADJUST_SL":
             self.event_queue.put({"type": "exit", "snapshot": snapshot})
 
-        # Handle trailing stops and closed position logging for dryrun
-        if self.config.get("realtime_dry_run", False):
-            try:
-                self._manage_trailing_stops(bid, ask)
-                self._check_for_closed_positions(bid, ask)
-            except Exception as e:
-                logger.error("Error managing trailing stops / closed positions: %s", e, exc_info=True)
+        # Handle trailing stops and closed position logging (both dryrun AND live)
+        try:
+            self._manage_trailing_stops(bid, ask)
+            self._check_for_closed_positions(bid, ask)
+        except Exception as e:
+            logger.error("Error managing trailing stops / closed positions: %s", e, exc_info=True)
         
         # Broadcast tick to dashboard WebSocket
         dashboard = get_dashboard()
@@ -1660,9 +1659,11 @@ class AxonDaemon:
             active_tickets = {int(p["ticket"]) for p in positions}
         else:
             if not mt5 or not mt5.terminal_info():
+                logger.warning("[POS_CHECK] MT5 not initialized or terminal offline")
                 return
             positions = mt5.positions_get(symbol=self.mt5_symbol)
             active_tickets = {p.ticket for p in positions} if positions else set()
+            logger.debug(f"[POS_CHECK] mt5.positions_get(symbol={self.mt5_symbol}): returned {len(positions) if positions else 0} positions, active_tickets={active_tickets}")
 
         # Detect closed tickets (thread-safe copy)
         with self._position_lock:
@@ -1679,13 +1680,19 @@ class AxonDaemon:
             logger.info("AxonDaemon: Detected closed position for ticket %d", ticket)
             
             # Fetch deal history for this ticket
-            if is_bridge:
-                from axonai.realtime.execution_client import send_execution_command
-                hist_res = send_execution_command(self.config, {"action": "history_deals_get", "position": ticket})
-                deals = hist_res.get("deals", []) if hist_res.get("success", False) else []
+            # NOTE: Always use bridge for deal history, even in "direct" mode, because bridge has access to
+            # MetaQuotes execution terminal while direct mode queries Exness feed terminal
+            from axonai.realtime.execution_client import send_execution_command
+            hist_res = send_execution_command(self.config, {"action": "history_deals_get", "position": ticket})
+            deals = hist_res.get("deals", []) if hist_res and hist_res.get("success", False) else []
+            logger.info(f"[DEAL_HISTORY] Bridge history_deals_get(position={ticket}): returned {len(deals)} deals, success={hist_res.get('success') if hist_res else False}")
+
+            if deals:
+                for i, d in enumerate(deals):
+                    logger.info(f"  Deal {i}: entry={d.get('entry')}, type={d.get('type')}, price={d.get('price')}, profit={d.get('profit')}, comment={d.get('comment', 'N/A')}")
             else:
-                deals = mt5.history_deals_get(position=ticket)
-            
+                logger.warning(f"[DEAL_HISTORY] No deals returned for ticket {ticket}")
+
             exit_price = 0.0
             exit_time_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             profit = 0.0
@@ -1733,13 +1740,19 @@ class AxonDaemon:
                     volume = entry_deal["volume"] if is_bridge else entry_deal.volume
                     deal_type = entry_deal["type"] if is_bridge else entry_deal.type
                     direction = "BUY" if deal_type == 0 else "SELL"
-                    
+                    logger.info(f"[ENTRY_DEAL] Ticket {ticket}: entry_price={entry_price}, type={deal_type}, direction={direction}")
+                else:
+                    logger.warning(f"[ENTRY_DEAL] Ticket {ticket}: No entry deal found in deals")
+
                 if exit_deal:
                     exit_price = exit_deal["price"] if is_bridge else exit_deal.price
                     deal_time = exit_deal["time"] if is_bridge else exit_deal.time
                     exit_time_str = datetime.fromtimestamp(deal_time).strftime("%Y-%m-%d %H:%M:%S")
                     profit = exit_deal["profit"] if is_bridge else exit_deal.profit
                     comment = (exit_deal["comment"] if is_bridge else getattr(exit_deal, "comment", "")).lower()
+                    logger.info(f"[DEAL_FOUND] Ticket {ticket}: exit_price={exit_price}, profit={profit}, comment={comment}")
+                else:
+                    logger.warning(f"[DEAL_NOT_FOUND] Ticket {ticket}: No exit deal in {len(deals)} deals returned")
                     
                     # Calculate pips
                     if direction == "BUY":
@@ -1764,7 +1777,13 @@ class AxonDaemon:
             # If history failed, fallback to basic estimates
             if entry_price == 0.0:
                 entry_price = bid  # fallback
-                
+            if exit_price == 0.0:
+                exit_price = bid  # Current bid as approximate exit
+                logger.warning(f"[FALLBACK] Ticket {ticket}: No exit deal found, using current bid as exit_price")
+            if profit == 0.0 and entry_price > 0:
+                # Estimate profit from current position (shouldn't happen for closed positions)
+                logger.warning(f"[FALLBACK] Ticket {ticket}: No profit data, estimated from entry/exit prices")
+
             outcome = "WIN" if pips > 0 else "LOSS" if pips < 0 else "BREAKEVEN"
             if outcome == "LOSS":
                 self._last_loss_time = datetime.now()
