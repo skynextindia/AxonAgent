@@ -16,8 +16,8 @@ from dataclasses import dataclass
 from typing import Optional, Iterable
 
 EXHAUSTION_PEAKS = ("velocity_exhaustion", "microstructure_exhaustion")
-SR_PROXIMITY_PIPS = 5.0
-DEFAULT_MIN_QUALITY = 0.55
+SR_PROXIMITY_PIPS = 10.0  # Relaxed from 5.0 - allow more entries away from exact levels
+DEFAULT_MIN_QUALITY = 0.50  # Relaxed from 0.55
 
 
 @dataclass
@@ -66,10 +66,11 @@ def evaluate_peak_entry(
     confirmed = details.get("peak_confirmed", False)
     intensity = details.get("intensity", "MEDIUM")
 
-    # Intensity / confidence gate (backtester :594-603)
-    if intensity not in ("HIGH", "MEDIUM"):
+    # Intensity / confidence gate (RELAXED for more entries)
+    if intensity not in ("HIGH", "MEDIUM", "LOW"):  # Allow LOW intensity too
         return EntryDecision(False, skip_reason=f"intensity {intensity}")
-    if intensity == "HIGH" and not confirmed and confidence < 0.6:
+    # Relaxed confidence requirement for unconfirmed peaks
+    if intensity == "HIGH" and not confirmed and confidence < 0.40:  # was 0.6
         return EntryDecision(False, skip_reason=f"HIGH peak unconfirmed (conf={confidence:.2f})")
 
     # Direction (fail closed)

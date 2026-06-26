@@ -480,9 +480,21 @@ class TickEngine(threading.Thread):
             # Check if market is closed (weekend in broker local time) or if the feed is stale
             broker_now = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=self.offset_hours)
 
+            # ADAPTIVE stale threshold based on market session
+            utc_hour = datetime.now(timezone.utc).hour
+            if 0 <= utc_hour < 9:  # Asian session (very slow)
+                stale_threshold = 30.0  # Allow 30s gaps (was 10s)
+            elif 9 <= utc_hour < 15:  # London/morning NY
+                stale_threshold = 5.0   # Normal speed
+            elif 15 <= utc_hour < 20:  # NY session (very fast)
+                stale_threshold = 3.0   # Aggressive
+            else:  # Evening/night
+                stale_threshold = 15.0  # Moderate
+
             is_stale = False
             if self.latest_timestamp is not None:
-                if (broker_now - self.latest_timestamp).total_seconds() > 10.0:
+                elapsed = (broker_now - self.latest_timestamp).total_seconds()
+                if elapsed > stale_threshold:
                     is_stale = True
 
             # If feed is stale, try to reconnect before falling back to mock data

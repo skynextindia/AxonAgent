@@ -293,20 +293,55 @@ def build_world_state(symbol: str = "EURUSD=X") -> WorldState:
             ]))
             usd_strength = float(np.clip(usd_strength * 100, -1.0, 1.0))
 
-        # 6. Belief gating calculations
+        # 6. Belief gating calculations (ADAPTIVE WEIGHTS)
         trend_score = regime_scores["trending"]
         spread_score = 1.0 if spread_safe else float(np.clip(1.0 - (spread_pips / (3.0 * latest_atr_pips + 1e-8)), 0.0, 1.0))
-        
-        belief_score = (regime_confidence * 0.35) + (session_quality * 0.25) + (trend_score * 0.20) + (spread_score * 0.20)
-        
+
+        # DYNAMIC WEIGHTS based on regime (not static 0.35/0.25/0.20/0.20)
+        if dominant_regime == "trending":
+            weights = {"regime": 0.50, "session": 0.15, "trend": 0.25, "spread": 0.10}
+        elif dominant_regime == "ranging":
+            weights = {"regime": 0.25, "session": 0.35, "trend": 0.15, "spread": 0.25}
+        elif dominant_regime == "compression":
+            weights = {"regime": 0.60, "session": 0.10, "trend": 0.20, "spread": 0.10}
+        elif dominant_regime == "panic":
+            weights = {"regime": 0.40, "session": 0.10, "trend": 0.20, "spread": 0.30}
+        else:  # breakout, exhaustion
+            weights = {"regime": 0.35, "session": 0.25, "trend": 0.20, "spread": 0.20}
+
+        # Session-aware adjustments (de-weight Asian's low volume, boost prime sessions)
+        if session == "asian":
+            weights["session"] *= 0.6  # Don't penalize for expected low volume
+            weights["regime"] *= 1.1   # Rely more on structure
+        elif session == "london":
+            weights["session"] *= 1.2  # Prime liquidity boost
+
+        # Normalize weights to sum = 1.0
+        total_weight = sum(weights.values())
+        weights = {k: v / total_weight for k, v in weights.items()}
+
+        belief_score = (regime_confidence * weights["regime"]
+                       + session_quality * weights["session"]
+                       + trend_score * weights["trend"]
+                       + spread_score * weights["spread"])
+
+        # ADAPTIVE GATING THRESHOLD (not static 0.60)
+        # Lower threshold for Asian (expect low conviction), higher for prime sessions
+        if session == "asian":
+            gate_threshold = 0.40  # More permissive (was 0.60)
+        elif session in ("london", "newyork", "overlap"):
+            gate_threshold = 0.55  # Slightly stricter for prime sessions
+        else:  # rollover
+            gate_threshold = 0.45
+
         gated_score = belief_score * session_penalty
-        should_run_graph = gated_score > 0.60
-        
+        should_run_graph = gated_score > gate_threshold
+
         abort_reason = ""
         if not should_run_graph:
-            if gated_score <= 0.60:
+            if gated_score <= gate_threshold:
                 reasons = []
-                if belief_score <= 0.60:
+                if belief_score <= gate_threshold:
                     reasons.append("low_conviction")
                 if session_penalty < 1.0:
                     reasons.append(f"{session}_session")

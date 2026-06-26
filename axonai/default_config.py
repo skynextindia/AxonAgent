@@ -136,7 +136,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_min_event_priority": "MEDIUM",
     "realtime_tick_buffer_size": 10_000,
     "realtime_candle_history": 500,
-    "realtime_suppress_asian": False,
+    "realtime_suppress_asian": False,    # False = Allow Asian trading (with 0.25 penalty)
     "realtime_level_reset_atr_multiple": 2.0,
     "realtime_log_events": True,
     "realtime_magic_number": 123456,
@@ -156,7 +156,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_use_pinpoint_price": False,
     "realtime_correct_rule_a_direction": True,   # corrected Rule-A reversal direction (buy-spike→SELL, sell-spike→BUY)
     "realtime_max_spread_frac": 0.5,             # reject entry if spread > this fraction of the stop distance
-    "realtime_min_signal_quality": 0.60,         # confluence-score floor for entries (shared by backtester + live gate)
+    "realtime_min_signal_quality": 0.50,         # confluence-score floor for entries (reduced from 0.60 for more trades)
     "realtime_cooldown_bypass_better_peak": False,
     "realtime_min_profit_for_velocity_exit": 3.0,
     "realtime_velocity_decay_profit_factor": 0.75,
