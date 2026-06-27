@@ -150,7 +150,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_deviation": 20,
     "realtime_min_confluence_conditions": 1,
     "realtime_dry_run": False,
-    "paper_trade": False,           # True = simulate fills internally, never call mt5.order_send (safe for tests / funded accounts)
+    "paper_trade": True,           # True = simulate fills internally, never call mt5.order_send (safe for tests / funded accounts)
     "peak_detector_rule_c_enabled": False,
     "trade_risk_pct": 0.01,
     "realtime_use_pinpoint_price": False,

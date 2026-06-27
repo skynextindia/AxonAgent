@@ -57,6 +57,7 @@ class AxonDaemon:
         self.tz = timezone.utc
         self.event_queue: queue.Queue = queue.Queue(maxsize=100)
         self._running = False
+        self._warming_up = False  # True while replaying historical bars to warm MTF EMAs
 
         # Layer 1: Tick Engine
         self.tick_engine = TickEngine(self.mt5_symbol, config)
@@ -735,6 +736,10 @@ class AxonDaemon:
         self.reversal_model.sync_levels(self.live_evidence.price_levels)
         logger.info("Step 2/4: Live state initialized")
 
+        # 2B. Warm MTF EMAs / regime / daily levels from historical bars so the
+        # trend filter is active from the first tick (avoids ~8-day cold start).
+        self._backfill_history()
+
         # 3. Pure-math engine (no LLM graph)
         logger.info("Step 3/4: Engine mode: Pure-Math Rule A+B signals (no LLM)")
 
@@ -843,6 +848,8 @@ class AxonDaemon:
         )
         _t1 = time.perf_counter()
         self._last_snapshot = snapshot
+        # Expose latest snapshot on the engine so the exit-engine path (below) can read it.
+        self.reversal_model.latest_snapshot = snapshot
 
         # CHANGE 9C: Dependency injection for EntryDecision
         if snapshot and snapshot.entry_decision:
@@ -892,12 +899,17 @@ class AxonDaemon:
         if snapshot.exit_decision.should_exit or snapshot.exit_decision.action == "ADJUST_SL":
             self.event_queue.put({"type": "exit", "snapshot": snapshot})
 
-        # Handle trailing stops and closed position logging (both dryrun AND live)
+        # Handle trailing stops and closed position logging (both dryrun AND live).
+        # Kept in separate try blocks so a failure in trailing-stop management can never
+        # suppress closed-position detection (which would leave closed trades shown as open).
         try:
             self._manage_trailing_stops(bid, ask)
+        except Exception as e:
+            logger.error("Error managing trailing stops: %s", e, exc_info=True)
+        try:
             self._check_for_closed_positions(bid, ask)
         except Exception as e:
-            logger.error("Error managing trailing stops / closed positions: %s", e, exc_info=True)
+            logger.error("Error checking closed positions: %s", e, exc_info=True)
         
         # Broadcast tick to dashboard WebSocket
         dashboard = get_dashboard()
@@ -1027,6 +1039,63 @@ class AxonDaemon:
                     dashboard.broadcast(acc_payload)
                 else:
                     logger.debug("Account payload is None")
+
+    def _backfill_history(self):
+        """Warm MTF EMAs, regime, and daily levels from historical bars before
+        the live loop starts, so the entry trend filter (entry_state_machine
+        MTF gate) is active from the first tick instead of cold for ~8 days.
+
+        Reuses the closed M15/H1/H4 candles already fetched by live_evidence
+        (no extra MT5 round-trips) and fetches a few D1 bars for PDH/PDL. Each
+        bar is replayed chronologically through reversal_model.on_candle_close,
+        which updates the MTF EMAs, H1 ATR, and regime — it never opens trades.
+        Runs before tick_engine.start(), so no live ticks fire during replay.
+        """
+        self._warming_up = True
+        try:
+            replayed = 0
+
+            # D1 bars seed previous-day high/low (PDH/PDL). Small fetch.
+            try:
+                from axonai.dataflows.mt5_data import _fetch_bars
+                end_dt = datetime.now()
+                df_d1 = _fetch_bars(self.mt5_symbol, "D1", end_dt - timedelta(days=15), end_dt)
+                if df_d1 is not None and not df_d1.empty:
+                    closed_d1 = df_d1.iloc[:-1] if len(df_d1) > 1 else df_d1
+                    for open_time, row in closed_d1.iterrows():
+                        self.reversal_model.on_candle_close(LiveCandle(
+                            timeframe="D1",
+                            open_time=open_time.to_pydatetime(),
+                            open=float(row["Open"]), high=float(row["High"]),
+                            low=float(row["Low"]), close=float(row["Close"]),
+                            volume=int(row["Volume"]), is_closed=True,
+                        ))
+                        replayed += 1
+            except Exception as de:
+                logger.warning("AxonDaemon: D1 backfill skipped: %s", de)
+
+            # Replay H4 -> H1 -> M15 closed candles (already chronological per
+            # timeframe). EMAs are per-timeframe, so cross-TF ordering does not
+            # matter; only within-TF chronological order, which is preserved.
+            for tf_candles in (
+                self.live_evidence._h4_candles,
+                self.live_evidence._h1_candles,
+                self.live_evidence._m15_candles,
+            ):
+                for candle in list(tf_candles):
+                    self.reversal_model.on_candle_close(candle)
+                    replayed += 1
+
+            mtf = self.reversal_model._last_mtf_state
+            logger.info(
+                "AxonDaemon: MTF warm-up complete (%d bars). h4_bias=%.2f h1_bias=%.2f "
+                "m15_bias=%.2f pdh=%.5f pdl=%.5f",
+                replayed, mtf.h4_bias, mtf.h1_bias, mtf.m15_bias, mtf.pdh, mtf.pdl,
+            )
+        except Exception as e:
+            logger.error("AxonDaemon: MTF warm-up failed: %s", e, exc_info=True)
+        finally:
+            self._warming_up = False
 
     def _on_candle_close(self, candle: LiveCandle):
         """Called by TickEngine when any timeframe candle closes."""
@@ -1498,7 +1567,7 @@ class AxonDaemon:
         # Get current market metrics for velocity trailing
         vel = self.reversal_model._last_vel_state if hasattr(self, 'reversal_model') else None
         disp = self.reversal_model._last_disp_state if hasattr(self, 'reversal_model') else None
-        health_state = self.reversal_model.health if hasattr(self, 'reversal_model') else None
+        health_state = getattr(self.reversal_model, '_last_health_state', None) if hasattr(self, 'reversal_model') else None
 
         for pos in positions:
             if is_bridge:
@@ -1560,7 +1629,7 @@ class AxonDaemon:
                 velocity_percentile=vel.percentile if vel else 50.0,
                 velocity_acceleration=velocity_accel,
                 displacement_ratio=disp.displacement_ratio if disp else 0.0,
-                health_score=health_state.health_score if health_state else 50.0,
+                health_score=(health_state.score * 100.0) if health_state else 50.0,
                 at_structure=False,
                 lowest_price=self._lowest_price_since_entry.get(ticket, price_open)
             )

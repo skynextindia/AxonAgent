@@ -90,11 +90,14 @@ class ReversalModel:
         self._last_liquidity_state = LiquidityState()
         self._last_vel_state = NormalizedVelocity()
         self._last_disp_state = DisplacementState()
+        self._last_health_state = TradeHealth()
         
         # H1 ATR tracking
         self._h1_tr_window = deque(maxlen=14)
         self._h1_atr = 0.0012
         self._prev_h1_close = None
+
+        self.latest_snapshot = None  # Populated on every tick by daemon.py (bug #3 fix)
 
     def sync_levels(self, price_levels: List[PriceLevel]) -> None:
         """Update structural support/resistance levels."""
@@ -174,19 +177,33 @@ class ReversalModel:
         health_state = self.health.evaluate(
             price, ts_float, vel_state, disp_state, self._last_regime_state, self._last_mtf_state, phase_snap.phase
         )
+        self._last_health_state = health_state
+
+        # Build a tick snapshot carrying the full tier context. Used by both
+        # trade_state_engine (velocity/displacement) and exit_engine's legacy
+        # AdaptiveExitManager fallback (regime/liquidity/health/phase/mtf/atr).
+        temp_snapshot = type("obj", (object,), {
+            "velocity": vel_state,
+            "displacement": disp_state,
+            "regime": self._last_regime_state,
+            "liquidity": self._last_liquidity_state,
+            "mtf": self._last_mtf_state,
+            "trade_health": health_state,
+            "phase": phase_snap.phase,
+            "phase_confidence": phase_snap.confidence,
+            "atr": self._h1_atr,
+        })()
 
         # NEW: Update trade state with lifecycle phase tracking
         trade_state = self.trade_state_engine.on_tick(
             price=price,
             timestamp=timestamp,
-            snapshot=None,  # Build snapshot incrementally, not needed here
+            snapshot=temp_snapshot,
             location_context=location_context,
             htf_context=self._last_mtf_state.htf_context if hasattr(self._last_mtf_state, "htf_context") else "NEUTRAL",
         )
 
         # 3. Evaluate Exit Options (NEW: use new ExitEngine instead of legacy only)
-        # Build a minimal snapshot for exit_engine
-        temp_snapshot = type("obj", (object,), {"velocity": vel_state, "displacement": disp_state})()
         exit_signal = self.exit_engine.evaluate(
             trade_state=trade_state,
             snapshot=temp_snapshot,

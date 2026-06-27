@@ -154,7 +154,16 @@ class ExitEngine:
         # Delegate to legacy AdaptiveExitManager for trailing stop logic
         if self.legacy and hasattr(self.legacy, "evaluate"):
             legacy_decision = self.legacy.evaluate(
-                trade_state=trade_state, velocity=snapshot.velocity, displacement=snapshot.displacement
+                current_price=current_price,
+                health=getattr(snapshot, "trade_health", None),
+                regime=getattr(snapshot, "regime", None),
+                liquidity=getattr(snapshot, "liquidity", None),
+                velocity=snapshot.velocity,
+                displacement=snapshot.displacement,
+                phase=getattr(snapshot, "phase", None),
+                phase_confidence=getattr(snapshot, "phase_confidence", 0.0),
+                mtf=getattr(snapshot, "mtf", None),
+                atr=getattr(snapshot, "atr", None),
             )
             if legacy_decision and legacy_decision.should_exit:
                 urgency = self.config.get("trailing_stop_urgency", 0.3)
