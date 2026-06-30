@@ -492,11 +492,11 @@ class DashboardServer:
         @self.app.get("/api/logs/system")
         def get_system_log():
             import os
-            bridge_log_path = "bridge.log"
-            if not os.path.exists(bridge_log_path):
-                return {"status": "success", "lines": ["bridge.log does not exist yet."]}
+            log_path = os.path.join(os.path.expanduser("~"), ".axonai", "logs", "axon.log")
+            if not os.path.exists(log_path):
+                return {"status": "success", "lines": ["System log does not exist yet."]}
             try:
-                with open(bridge_log_path, "r", encoding="utf-8", errors="ignore") as f:
+                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
                     lines = f.readlines()
                 return {"status": "success", "lines": [line.strip() for line in lines[-200:]]}
             except Exception as e:
