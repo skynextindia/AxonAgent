@@ -2120,8 +2120,6 @@ class AxonDaemon:
                     profit = exit_deal["profit"] if is_bridge else exit_deal.profit
                     comment = (exit_deal["comment"] if is_bridge else getattr(exit_deal, "comment", "")).lower()
                     logger.info(f"[DEAL_FOUND] Ticket {ticket}: exit_price={exit_price}, profit={profit}, comment={comment}")
-                else:
-                    logger.warning(f"[DEAL_NOT_FOUND] Ticket {ticket}: No exit deal in {len(deals)} deals returned")
                     
                     # Calculate pips
                     if direction == "BUY":
@@ -2141,7 +2139,9 @@ class AxonDaemon:
                     elif "so" in comment:
                         reason = "Stop Out (SO)"
                     else:
-                        reason = f"Closed ({exit_deal['comment'] if is_bridge else (exit_deal.comment or 'Manual')})"
+                        reason = f"Closed ({exit_deal['comment'] if is_bridge else getattr(exit_deal, 'comment', 'Manual')})"
+                else:
+                    logger.warning(f"[DEAL_NOT_FOUND] Ticket {ticket}: No exit deal in {len(deals)} deals returned")
                         
             # If no exit price yet, use current bid/ask as approximation
             if exit_price == 0.0:
