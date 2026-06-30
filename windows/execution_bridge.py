@@ -294,7 +294,12 @@ async def handle_client(websocket):
                             "point": s_info.point,
                             "digits": s_info.digits,
                             "trade_tick_value": s_info.trade_tick_value,
-                            "trade_tick_size": s_info.trade_tick_size
+                            "trade_tick_size": s_info.trade_tick_size,
+                            # Broker volume constraints — required by 1%-lock sizing
+                            # so bridge mode honours min/step/max like direct mode.
+                            "volume_min": s_info.volume_min,
+                            "volume_step": s_info.volume_step,
+                            "volume_max": s_info.volume_max,
                         }
                     else:
                         response = {"success": False, "error": f"Could not get symbol info for {sym}"}

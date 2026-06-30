@@ -946,6 +946,11 @@ class AxonDaemon:
                             self._tracked_positions.discard(p["ticket"])
                         closed += 1
                         logger.info("EOD: closed position %d via bridge (%s)", p["ticket"], reason)
+            elif mt5 is None:
+                # Direct mode but MT5 module unavailable (non-Windows / not installed):
+                # cannot flatten. Surface loudly instead of silently leaving positions open.
+                logger.error("EOD close: MT5 module unavailable in direct mode — %d position(s) NOT closed (%s)",
+                             len(self._tracked_positions), reason)
             else:
                 from axonai.dataflows.mt5_order_bridge import get_positions_via_bridge
                 positions = []
@@ -954,6 +959,9 @@ class AxonDaemon:
                     positions = pos_result.get("positions", []) if pos_result and pos_result.get("success") else []
                 for p in positions:
                     tick = mt5.symbol_info_tick(self.mt5_symbol)
+                    if tick is None:
+                        logger.error("EOD close: no tick for %s — position %s NOT closed", self.mt5_symbol, p.get("ticket"))
+                        continue
                     price = tick.ask if p["type"] == "SELL" else tick.bid
                     order_type = 1 if p["type"] == "SELL" else 0
                     request = {
@@ -2120,12 +2128,26 @@ class AxonDaemon:
                     profit = exit_deal["profit"] if is_bridge else exit_deal.profit
                     comment = (exit_deal["comment"] if is_bridge else getattr(exit_deal, "comment", "")).lower()
                     logger.info(f"[DEAL_FOUND] Ticket {ticket}: exit_price={exit_price}, profit={profit}, comment={comment}")
-                    
-                    # Calculate pips
-                    if direction == "BUY":
-                        pips = (exit_price - entry_price) / pip
-                    elif direction == "SELL":
-                        pips = (entry_price - exit_price) / pip
+
+                    # Recover direction for re-adopted / manually-opened trades that
+                    # have no entry deal, no stored details and no snapshot. A closing
+                    # deal's type is the INVERSE of the position direction: a buy-to-close
+                    # (type 0) closes a SELL; a sell-to-close (type 1) closes a BUY.
+                    if direction == "UNKNOWN":
+                        exit_type = exit_deal["type"] if is_bridge else exit_deal.type
+                        direction = "SELL" if exit_type == 0 else "BUY"
+                        logger.warning(f"[DIR_INFERRED] Ticket {ticket}: direction={direction} from exit deal type={exit_type}")
+
+                    # Calculate pips ONLY when we have a real entry price. For
+                    # inferred-direction closes (re-adopted/manual trades with no
+                    # entry deal) entry_price is 0.0 — computing pips here would
+                    # yield a large bogus value whose sign depends only on direction,
+                    # masking the broker profit fallback. Leave pips=0.0 in that case.
+                    if entry_price > 0:
+                        if direction == "BUY":
+                            pips = (exit_price - entry_price) / pip
+                        elif direction == "SELL":
+                            pips = (entry_price - exit_price) / pip
                         
                     # Determine reason
                     if "sl" in comment:
@@ -2163,7 +2185,14 @@ class AxonDaemon:
                     profit = (entry_price - exit_price) * volume * 100000
             logger.info(f"[PROFIT_CALC] Ticket {ticket}: {direction} entry={entry_price} exit={exit_price} -> profit={profit:.2f} pips={pips:.1f}")
 
-            outcome = "WIN" if pips > 0 else "LOSS" if pips < 0 else "BREAKEVEN"
+            # Outcome from pips when we have a direction; otherwise fall back to the
+            # broker's realized profit so a real loss is never mislabelled BREAKEVEN.
+            if pips != 0.0:
+                outcome = "WIN" if pips > 0 else "LOSS"
+            elif profit != 0.0:
+                outcome = "WIN" if profit > 0 else "LOSS"
+            else:
+                outcome = "BREAKEVEN"
             if outcome == "LOSS":
                 self._last_loss_time = datetime.now()
             

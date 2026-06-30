@@ -144,9 +144,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Live sizing: when False, every live order uses realtime_default_lot_size.
     # When True, size is risk-based off account equity (realtime_risk_pct),
     # capped at realtime_max_lot.
-    "realtime_dynamic_sizing": False,
-    "realtime_risk_pct": 0.01,
-    "realtime_max_lot": 1.00,
+    # Pure 1% risk hard-lock: every trade risks exactly realtime_risk_pct of
+    # equity; lot floats with equity & stop distance (see trade_executor sizing).
+    "realtime_dynamic_sizing": True,
+    "realtime_risk_pct": 0.01,           # HARD 1% risk per trade
+    "realtime_max_lot": 5.00,            # backstop ceiling vs pip-miscalc blow-ups
     "realtime_deviation": 20,
     "realtime_min_confluence_conditions": 1,
     "realtime_dry_run": False,

@@ -158,6 +158,13 @@ class MT5TradeExecutor:
             elif isinstance(live_state, dict):
                 atr = live_state.get("atr_14_h1", 0.0)
 
+        # Coerce to float — snapshot/getattr may yield a non-numeric (e.g. a Mock
+        # in tests, or an unexpected type) which would crash the max() below.
+        try:
+            atr = float(atr)
+        except (TypeError, ValueError):
+            atr = 0.0
+
         # Fallback if ATR is unavailable or zero
         if atr <= 0.0:
             atr = price * 0.0015  # default to 0.15% of price
@@ -169,17 +176,24 @@ class MT5TradeExecutor:
         direction = "BUY" if order_type == ORDER_TYPE_BUY else "SELL"
         
         # Determine pip size and digits dynamically
-        if not is_bridge and mt5_inst and mt5_inst.symbol_info(symbol):
-            s_info = mt5_inst.symbol_info(symbol)
-            pip = s_info.point * 10
-            digits = s_info.digits
+        # Symbol-based pip/digits defaults (always valid numbers)
+        if "JPY" in symbol.upper():
+            pip, digits = 0.01, 3
+        elif price > 1000:
+            pip, digits = 0.1, 2
         else:
-            if "JPY" in symbol.upper():
-                pip, digits = 0.01, 3
-            elif price > 1000:
-                pip, digits = 0.1, 2
-            else:
-                pip, digits = 0.0001, 5
+            pip, digits = 0.0001, 5
+        # Prefer broker-reported precision when available AND numeric (guards against
+        # a bad/non-numeric point, which would otherwise corrupt SL/TP/spread math).
+        if not is_bridge and mt5_inst:
+            s_info = mt5_inst.symbol_info(symbol)
+            if s_info is not None:
+                try:
+                    p = float(s_info.point) * 10
+                    if p > 0:
+                        pip, digits = p, int(s_info.digits)
+                except (TypeError, ValueError):
+                    pass
 
         sl_atr_mult = self.config.get("realtime_sl_atr_multiple", self.config.get("sl_atr_multiple", 1.2))
         # SL is kept as sl_atr_mult*ATR to act as a hard backstop
@@ -208,70 +222,120 @@ class MT5TradeExecutor:
         tp = round(tp, digits)
         price = round(price, digits)
 
-        # 3. Position Sizing
+        # 3. Position Sizing — PURE 1% RISK HARD-LOCK
+        #    A single trade never risks more than realtime_risk_pct (default 1%)
+        #    of account equity. Lot floats with equity and stop distance:
+        #        lot = (equity * risk_pct) / (sl_pips * pip_value_per_lot)
+        #    Currency-consistent: pip_value_per_lot comes from the broker's
+        #    trade_tick_value, which is denominated in the ACCOUNT currency —
+        #    the same units as equity — so no USD assumption is made and no flat
+        #    USD cap is needed (the % itself is the hard cap). Result is clamped
+        #    to the broker's volume_min/volume_step/volume_max plus a config
+        #    backstop ceiling (realtime_max_lot) to contain pip-miscalc blow-ups.
         #    - dry-run: fixed 1.00 lot (sandbox)
-        #    - live + realtime_dynamic_sizing: risk-based off account equity
-        #    - live (default): the configured realtime_default_lot_size (predictable)
+        #    - realtime_dynamic_sizing == False: fixed realtime_default_lot_size
         is_mock_env = self.config.get("realtime_dry_run", False)
 
         if is_mock_env:
             lot = 1.00
             logger.info("TradeExecutor: Dryrun active. Using fixed lot size: 1.00")
-        elif self.config.get("realtime_dynamic_sizing", False):
+        elif self.config.get("realtime_dynamic_sizing", True):
+            mt5_inst = None
+            equity = None
+            sym_res = None
             if is_bridge:
                 res = send_execution_command(self.config, {"action": "account_info"})
-                equity = res.get("equity", 10000.0) if res.get("success") else 10000.0
+                if res.get("success") and res.get("equity"):
+                    equity = float(res["equity"])
+                sym_res = send_execution_command(self.config, {"action": "symbol_info", "symbol": symbol})
             else:
                 mt5_inst = self._get_mt5()
                 acc = mt5_inst.account_info() if mt5_inst else None
-                equity = acc.equity if acc else 10000.0
+                if acc and getattr(acc, "equity", 0):
+                    equity = float(acc.equity)
 
-            risk_pct = self.config.get("realtime_risk_pct", 0.01)
-            calculated_risk = equity * risk_pct
-            
-            # Hard cap the risk per trade to 100 USD (configurable) to prevent massive losses
-            max_risk_usd = self.config.get("realtime_max_risk_usd", 100.0)
-            risk_amount = min(calculated_risk, max_risk_usd)
-            
-            sl_pips = sl_distance / pip
-
-            # Validate SL is meaningful
-            if sl_pips < 1.0:
-                logger.warning("TradeExecutor: SL distance too small (%.4f pips) - entry skipped", sl_pips)
-                return {"success": False, "reason": "sl_too_small", "sl_pips": round(sl_pips, 4)}
-
-            # Calculate exact pip value per lot
-            pip_value_per_lot = 10.0 # fallback
-            tick_value = 0.0
-            tick_size = 0.0
-
-            if is_bridge:
-                sym_res = send_execution_command(self.config, {"action": "symbol_info", "symbol": symbol})
-                if sym_res.get("success"):
-                    tick_value = sym_res.get("trade_tick_value", 0.0)
-                    tick_size = sym_res.get("trade_tick_size", 0.0)
+            if equity is None or equity <= 0:
+                # Could not read equity (bridge down / MT5 not connected). Refuse to
+                # guess a large account — fall back to the smallest safe lot.
+                fallback_lot = max(0.01, float(self.config.get("realtime_default_lot_size", 0.01)))
+                logger.warning(
+                    "TradeExecutor: equity unavailable for 1%% sizing — using fallback lot %.2f",
+                    fallback_lot,
+                )
+                lot = fallback_lot
             else:
-                if mt5_inst and mt5_inst.symbol_info(symbol):
-                    s_info = mt5_inst.symbol_info(symbol)
-                    tick_value = s_info.trade_tick_value
-                    tick_size = s_info.trade_tick_size
+                risk_pct = float(self.config.get("realtime_risk_pct", 0.01))
+                risk_amount = equity * risk_pct          # HARD 1% lock, account currency
 
-            if tick_value > 0 and tick_size > 0:
-                # pip_value_per_lot = how much 1 lot profits when price moves by 1 pip
-                pip_value_per_lot = (pip / tick_size) * tick_value
-            elif price > 1000:
-                # Fallbacks for non-forex if tick value is unavailable
-                pip_value_per_lot = 1.0 if pip >= 0.1 else 10.0
-            
-            lot_size = round(risk_amount / max(sl_pips * pip_value_per_lot, 1e-6), 2)
-            max_lot = self.config.get("realtime_max_lot", 50.0)  # Raised from 1.0 to 50.0 to support 100k+ accounts
-            lot = max(0.01, min(lot_size, max_lot))
+                sl_pips = sl_distance / pip
+                if sl_pips < 1.0:
+                    logger.warning("TradeExecutor: SL distance too small (%.4f pips) - entry skipped", sl_pips)
+                    return {"success": False, "reason": "sl_too_small", "sl_pips": round(sl_pips, 4)}
 
-            logger.info(
-                "TradeExecutor: Dynamic sizing | equity: %.2f | risk: %.2f | "
-                "SL pips: %.2f | pip val: $%.2f | calc lot: %.4f | final lot: %.2f",
-                equity, risk_amount, sl_pips, pip_value_per_lot, lot_size, lot
-            )
+                # Broker contract constraints (account-currency tick value)
+                pip_value_per_lot = 10.0  # fallback
+                tick_value = tick_size = 0.0
+                vol_min, vol_step, vol_max = 0.01, 0.01, None
+                if is_bridge:
+                    if sym_res and sym_res.get("success"):
+                        tick_value = sym_res.get("trade_tick_value", 0.0)
+                        tick_size = sym_res.get("trade_tick_size", 0.0)
+                        vol_min = sym_res.get("volume_min", vol_min) or vol_min
+                        vol_step = sym_res.get("volume_step", vol_step) or vol_step
+                        vol_max = sym_res.get("volume_max", vol_max)
+                else:
+                    s_info = mt5_inst.symbol_info(symbol) if mt5_inst else None
+                    if s_info:
+                        tick_value = s_info.trade_tick_value
+                        tick_size = s_info.trade_tick_size
+                        vol_min = getattr(s_info, "volume_min", vol_min) or vol_min
+                        vol_step = getattr(s_info, "volume_step", vol_step) or vol_step
+                        vol_max = getattr(s_info, "volume_max", vol_max)
+
+                # Coerce all broker-reported numerics defensively (a bad/non-numeric
+                # value from the bridge or a Mock must never crash sizing math).
+                def _num(v, default):
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        return default
+                tick_value = _num(tick_value, 0.0)
+                tick_size = _num(tick_size, 0.0)
+                vol_min = _num(vol_min, 0.01) or 0.01
+                vol_step = _num(vol_step, 0.01) or 0.01
+                vol_max = _num(vol_max, 0.0) or None
+
+                if tick_value > 0 and tick_size > 0:
+                    pip_value_per_lot = (pip / tick_size) * tick_value
+                elif price > 1000:
+                    pip_value_per_lot = 1.0 if pip >= 0.1 else 10.0
+
+                raw_lot = risk_amount / max(sl_pips * pip_value_per_lot, 1e-6)
+
+                # Hard ceiling = min(broker volume_max, config backstop)
+                ceiling = float(self.config.get("realtime_max_lot", 5.0))
+                if vol_max and vol_max > 0:
+                    ceiling = min(ceiling, float(vol_max))
+                if raw_lot > ceiling:
+                    logger.warning(
+                        "TradeExecutor: 1%% lot %.4f exceeds ceiling %.2f (check SL/pip-value) — clamping",
+                        raw_lot, ceiling,
+                    )
+
+                # Clamp to [vol_min, ceiling] then floor to broker volume_step
+                step = vol_step if vol_step > 0 else 0.01
+                lot = max(vol_min, min(raw_lot, ceiling))
+                # Floor to broker volume_step; +1e-9 absorbs float error so an exact
+                # step multiple (e.g. 0.29/0.01) is not truncated by one extra step.
+                lot = max(vol_min, round((int(lot / step + 1e-9)) * step, 2))
+
+                logger.info(
+                    "TradeExecutor: 1%%-lock sizing | equity: %.2f | risk: %.2f | "
+                    "SL pips: %.2f | pip val: %.2f | raw lot: %.4f | final lot: %.2f "
+                    "(min=%.2f step=%.2f max=%s)",
+                    equity, risk_amount, sl_pips, pip_value_per_lot, raw_lot, lot,
+                    vol_min, step, vol_max,
+                )
         else:
             lot = self.default_lot_size
             logger.info("TradeExecutor: Using configured default lot size: %.2f", lot)

@@ -44,6 +44,8 @@ class VelocityTrailingManager:
         # Trailing parameters (these now have dynamic alternatives)
         self.min_price_distance_to_trail = 2.0  # Minimum 2 pips away from SL to trail
         self.max_trail_distance = 15.0  # Never trail more than 15 pips from price
+        self.base_trail_buffer = 5.0   # Base pips behind price, scaled by momentum
+        self.min_trail_floor_pips = 2.0  # Never trail tighter than this (anti-spiral)
 
     def on_tick(
         self,
@@ -162,10 +164,10 @@ class VelocityTrailingManager:
             retest_detected
         )
 
-        # Trail distance based on how far price has moved
-        trail_distance = self._calculate_trail_distance(
-            current_profit, displacement_ratio, agg, distance_from_sl
-        )
+        # Momentum-aware trail distance: wide while the move is intact and in our
+        # favor, tight as momentum exhausts. Replaces the proximity-driven collapse.
+        width_mult = self._momentum_width_mult(velocity, position_type)
+        trail_distance = self._calculate_trail_distance(current_profit, width_mult)
 
         # Include dynamic buffer info in log
         buffer_info = f" [buffer={dyn_buffer.threshold:.3f} regime={dyn_buffer.regime_name}]" if dyn_buffer else ""
@@ -252,27 +254,45 @@ class VelocityTrailingManager:
 
         return min(agg, 1.0)
 
-    def _calculate_trail_distance(
-        self, current_profit: float, displacement_ratio: float,
-        aggressiveness: float, distance_from_sl: float
+    def _momentum_width_mult(
+        self, velocity: Optional[NormalizedVelocity], position_type: str
     ) -> float:
-        """Calculate how many pips to keep as buffer from current price."""
+        """Momentum-state multiplier in [0.4, 2.5].
 
-        # More profit made = can trail tighter (but keep at least 1 pip)
-        # Higher aggressiveness = trail tighter
-        # Higher displacement = trail tighter (trending strong)
+        High (give the move room) when momentum is intact and pushing the trade
+        forward: decay_ratio near peak, in-favor z_score high, clean ticks.
+        Low (lock gains) as momentum exhausts (decay_ratio falls, z reverts).
+        """
+        if velocity is None:
+            return 1.0
 
-        profit_factor = min(current_profit / 20.0, 1.0)  # 20 pips = max profit factor
-        disp_factor = min(displacement_ratio, 1.0)
+        decay = getattr(velocity, "decay_ratio", 1.0)
+        decay = 1.0 if decay is None else decay
+        eff = getattr(velocity, "tick_efficiency", 0.5)
+        eff = 0.5 if eff is None else eff
 
-        # Trail buffer decreases with aggressiveness and profit
-        base_buffer = 5.0
-        trail_distance = base_buffer * (1.0 - aggressiveness * 0.7) * (1.0 - profit_factor * 0.5)
+        # Only momentum that pushes the trade forward should widen the trail.
+        disp_v = getattr(velocity, "displacement_velocity", 0.0) or 0.0
+        in_favor = disp_v > 0 if position_type == "BUY" else disp_v < 0
+        z = getattr(velocity, "z_score", 0.0) or 0.0
+        z_term = min(max(z, 0.0) / 2.0, 1.0) if in_favor else 0.0
 
-        # Ensure minimum and maximum
-        trail_distance = max(trail_distance, 1.0)
+        mult = 0.5 + 1.5 * decay + 0.4 * z_term - 0.5 * (1.0 - eff)
+        return max(0.4, min(mult, 2.5))
+
+    def _calculate_trail_distance(
+        self, current_profit: float, width_mult: float
+    ) -> float:
+        """Pips to keep behind price, driven by momentum state.
+
+        width_mult (from momentum) sets the base width; profit allows a mild
+        extra tighten. Floored at min_trail_floor_pips so proximity to SL can
+        never collapse the stop (the old retest death-spiral).
+        """
+        profit_factor = min(current_profit / 20.0, 1.0)  # 20 pips = full profit lock
+        trail_distance = self.base_trail_buffer * width_mult * (1.0 - profit_factor * 0.2)
+        trail_distance = max(trail_distance, self.min_trail_floor_pips)
         trail_distance = min(trail_distance, self.max_trail_distance)
-
         return trail_distance
 
     def reset(self, ticket: Optional[int] = None):

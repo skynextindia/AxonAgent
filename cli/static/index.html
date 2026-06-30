@@ -1240,6 +1240,7 @@ class DashboardController {
       const hdr=document.createElement("div");hdr.style.cssText="font-size:7.5px;color:#ffaa00;font-weight:900;letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid #1f1f2e;padding-bottom:4px;";
       hdr.innerHTML='&#128197; ECONOMIC CALENDAR <span style="color:var(--text-dim);font-weight:400;text-transform:none;">(today)</span>';
       sec.appendChild(hdr);
+      const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
       d.calendar.forEach(ev=>{
         const isBlocking=ev.is_blocking;
         const impactColor=ev.impact==="High"?"#ff4444":ev.impact==="Medium"?"#ffaa00":"#888";
@@ -1247,7 +1248,7 @@ class DashboardController {
         const timeStr=minsAway<0?`${Math.abs(minsAway)}m ago`:(minsAway<60?`in ${minsAway}m`:`in ${Math.floor(minsAway/60)}h${Math.round(minsAway%60)}m`);
         const row=document.createElement("div");
         row.style.cssText=`background:rgba(7,7,11,.9);border:1px solid ${isBlocking?"#ff4444":"#1f1f2e"};padding:4px 6px;font-size:7.5px;font-family:monospace;display:flex;justify-content:space-between;align-items:center;gap:6px;${isBlocking?"box-shadow:0 0 6px rgba(255,68,68,.3);":""}`;
-        row.innerHTML=`<span style="color:${impactColor};font-weight:bold;min-width:28px;">${ev.currency}</span><span style="flex:1;color:#e0e0e0;">${ev.title}</span><span style="color:var(--text-dim);min-width:50px;text-align:right;">${ev.time}</span><span style="color:#888;min-width:40px;text-align:right;font-size:7px;">${timeStr}</span>${isBlocking?'<span style="color:#ff4444;font-weight:bold;font-size:7px;">BLOCK</span>':''}`;
+        row.innerHTML=`<span style="color:${impactColor};font-weight:bold;min-width:28px;">${esc(ev.currency)}</span><span style="flex:1;color:#e0e0e0;">${esc(ev.title)}</span><span style="color:var(--text-dim);min-width:50px;text-align:right;">${esc(ev.time)}</span><span style="color:#888;min-width:40px;text-align:right;font-size:7px;">${timeStr}</span>${isBlocking?'<span style="color:#ff4444;font-weight:bold;font-size:7px;">BLOCK</span>':''}`;
         sec.appendChild(row);
       });
       c.appendChild(sec);added=true;
