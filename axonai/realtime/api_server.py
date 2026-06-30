@@ -161,9 +161,9 @@ class DashboardServer:
         @self.app.post("/api/close_all")
         def close_all_positions():
             with self._lock:
-                if self.daemon and hasattr(self.daemon, "execution"):
-                    self.daemon.execution.close_all()
-                    return {"status": "success", "message": "Close all signal sent to MT5"}
+                if self.daemon and hasattr(self.daemon, "_close_all_positions"):
+                    n = self.daemon._close_all_positions("Manual close-all (dashboard)")
+                    return {"status": "success", "message": f"Closed {n} position(s)"}
                 return {"status": "error", "message": "Execution engine not available"}
 
         @self.app.post("/api/pause_llm")
@@ -804,10 +804,9 @@ class DashboardServer:
     def _news_poller(self):
         """Background thread: periodically polls news sources (non-blocking) and backfills."""
         import time
-        from datetime import datetime
+        from datetime import datetime, timezone
         from axonai.dataflows.yfinance_news import get_global_news_yfinance
         from axonai.dataflows.forex_social import fetch_forex_social_feed
-        from axonai.dataflows.reddit import fetch_reddit_posts
 
         logger.info("Dashboard API: Background News Sentiment poller started.")
         while not hasattr(self, "_poller_stop") or not self._poller_stop.is_set():
@@ -818,26 +817,74 @@ class DashboardServer:
                     ticker = self.daemon.yf_symbol
 
                 curr_date = datetime.now().strftime("%Y-%m-%d")
-                
+
+                # 2. Pull economic calendar events from NewsGuard
+                calendar_events = []
+                # Fall back to a local NewsGuard instance if daemon is not registered yet
+                ng = None
+                if self.daemon and hasattr(self.daemon, "news_guard"):
+                    ng = self.daemon.news_guard
+                else:
+                    if not hasattr(self, "_local_news_guard"):
+                        from axonai.realtime.news_guard import NewsGuard
+                        config = self.daemon.config if self.daemon else self.fallback_config
+                        self._local_news_guard = NewsGuard(config)
+                    ng = self._local_news_guard
+
+                if ng:
+                    # Refresh if stale (respects internal 6h throttle)
+                    try:
+                        ng.refresh()
+                    except Exception:
+                        pass
+                    now_utc = datetime.now(timezone.utc)
+                    for ev in getattr(ng, "_events", []):
+                        dt = ev["dt"]
+                        mins_away = (dt - now_utc).total_seconds() / 60.0
+                        # Show events within -12 hours and +24 hours
+                        if -720 <= mins_away <= 1440:
+                            blocked, _ = ng.should_block_entry(
+                                getattr(self.daemon, "mt5_symbol", "EURUSD") if self.daemon else "EURUSD", now_utc
+                            )
+                            is_this_event = abs(mins_away) <= 30
+                            calendar_events.append({
+                                "title": ev["title"],
+                                "currency": ev["currency"],
+                                "impact": ev["impact"],
+                                "time": dt.strftime("%H:%M UTC"),
+                                "forecast": ev.get("forecast", ""),
+                                "previous": ev.get("previous", ""),
+                                "actual": ev.get("actual", ""),
+                                "mins_away": round(mins_away, 0),
+                                "is_blocking": is_this_event and blocked,
+                            })
+                    calendar_events.sort(key=lambda x: x["mins_away"])
+
                 # 2. Fetch in non-blocking background mode
                 logger.info("Dashboard API: Refreshing News Sentiment Feed (cached continuous mode)...")
                 
-                # Fetch global news
-                news = get_global_news_yfinance(curr_date=curr_date, look_back_days=3, limit=10)
-                
                 # Fetch social feed (MT5 ticker mapping e.g. EURUSDm -> EURUSD)
                 fs_ticker = ticker.replace("=X", "").replace("=x", "")
-                forex_social = fetch_forex_social_feed(fs_ticker, limit=10)
-                
-                # Fetch reddit
-                reddit = fetch_reddit_posts(fs_ticker)
-                
+                forex_social_raw = fetch_forex_social_feed(fs_ticker, limit=10)
+
+                # Split social feed into lines
+                def _to_lines(raw) -> list:
+                    if isinstance(raw, list):
+                        return [str(x) for x in raw if str(x).strip()]
+                    if isinstance(raw, str):
+                        return [ln.strip() for ln in raw.splitlines() if ln.strip()]
+                    return []
+
+                news = []  # Global news removed as per user request
+                forex_social = _to_lines(forex_social_raw)
+
                 # 3. Update cache history and broadcast
                 payload = {
                     "type": "news_data",
                     "news": news,
                     "forex_social": forex_social,
-                    "reddit": reddit,
+                    "reddit": None,
+                    "calendar": calendar_events,
                     "timestamp": datetime.now().strftime("%H:%M:%S")
                 }
                 

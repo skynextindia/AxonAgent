@@ -131,6 +131,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
     <div style="border-top:1px solid rgba(31,31,46,.5);padding-top:6px;"><span style="font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px;">TODAY_SESSION</span>
       <div style="display:flex;flex-direction:column;gap:3px;font-size:8.5px;"><div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;">BIAS <span id="london-bias" style="font-weight:700;">--</span></div><div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;">HIGH <span id="london-high-val" style="font-weight:700;color:#fff;">--</span></div><div style="display:flex;justify-content:space-between;">LOW <span id="london-low-val" style="font-weight:700;color:#fff;">--</span></div></div>
     </div>
+    <div style="border-top:1px solid rgba(31,31,46,.5);padding-top:6px;"><span style="font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px;">DYNAMIC_LEVELS</span><div id="dynamic-levels" style="display:flex;flex-direction:column;gap:2px;font-size:8px;"><div style="color:var(--text-dim);font-style:italic;">Awaiting levels...</div></div></div>
   </div>
 </div>
 <!-- RIGHT COLUMN -->
@@ -1063,6 +1064,17 @@ class DashboardController {
     const res=filtered.filter(z=>z.direction==="resistance");const sup=filtered.filter(z=>z.direction==="support");
     if(res.length>0){const r=res[0];this.currentRes=r.price;if(this.levelResVal)this.levelResVal.textContent=this.sf(r.price,5);if(this.levelResTime)this.levelResTime.textContent=r.level_type+" AT "+this.sf(r.price,5)}
     if(sup.length>0){const s=sup[0];this.currentSup=s.price;if(this.levelSupVal)this.levelSupVal.textContent=this.sf(s.price,5);if(this.levelSupTime)this.levelSupTime.textContent=s.level_type+" AT "+this.sf(s.price,5)}
+    // Full dynamic-levels list in the left sidebar (all active levels, not just top S/R)
+    const dlEl=document.getElementById("dynamic-levels");
+    if(dlEl){
+      const bid=this.currentBid||0;const pm=this.pipMult||0.0001;let html="";
+      filtered.forEach(z=>{
+        const p=Number(z.price);const isRes=z.direction==="resistance";const col=isRes?"#ff3d3d":"#00c853";
+        const dist=bid>0?Math.abs(p-bid)/pm:0;
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(31,31,46,.4);padding-bottom:1px;"><span style="color:'+col+';font-weight:700;min-width:52px;">'+z.level_type+'</span><span style="color:#fff;">'+this.sf(p,5)+'</span><span style="color:var(--text-dim);width:32px;text-align:right;">'+dist.toFixed(1)+'p</span></div>';
+      });
+      dlEl.innerHTML=html||'<div style="color:var(--text-dim);font-style:italic;">No active levels</div>';
+    }
     this.updatePipDistances();
   }
   updatePipDistances() {
@@ -1210,8 +1222,37 @@ class DashboardController {
   }
   handleNewsData(d) {
     const c=document.getElementById("news-log-container");if(!c)return;c.innerHTML="";
-    const fs=(title,items,bc,tc,bb)=>{if(!items||!Array.isArray(items)||items.length===0)return null;const s=document.createElement("div");s.style.cssText="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;";const h=document.createElement("div");h.style.cssText="font-size:7.5px;color:"+tc+";font-weight:900;letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid #1f1f2e;padding-bottom:4px;";h.innerHTML=title;h.innerHTML+=' <span style="color:var(--text-dim);font-weight:400;text-transform:none;">('+items.length+')</span>';s.appendChild(h);items.forEach(line=>{const cl=line.replace(/^[\s\-\*\•\d\.\)]+/,"").trim();if(!cl)return;const it=document.createElement("div");it.style.cssText="background:rgba(7,7,11,.9);border:1px solid "+bc+";padding:4px 6px;font-size:7.5px;font-family:monospace;";it.textContent=cl;s.appendChild(it)});return s};
-    let added=false;[fs("ForexLive",d.forex_social,"var(--border)","#ff66b2",""),fs("Global News",d.news,"var(--border)","#00f0ff",""),fs("Reddit",d.reddit,"var(--border)","#00ff66","")].forEach(s=>{if(s){c.appendChild(s);added=true}});
+    let added=false;
+
+    // Helper to render standard list categories (e.g. ForexLive)
+    const fs=(title,items,bc,tc)=>{if(!items||!Array.isArray(items)||items.length===0)return null;const s=document.createElement("div");s.style.cssText="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;";const h=document.createElement("div");h.style.cssText="font-size:7.5px;color:"+tc+";font-weight:900;letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid #1f1f2e;padding-bottom:4px;";h.innerHTML=title;h.innerHTML+=' <span style="color:var(--text-dim);font-weight:400;text-transform:none;">('+items.length+')</span>';s.appendChild(h);items.forEach(line=>{const cl=line.replace(/^[\s\-\*\•\d\.\)]+/,"").trim();if(!cl)return;const it=document.createElement("div");it.style.cssText="background:rgba(7,7,11,.9);border:1px solid "+bc+";padding:4px 6px;font-size:7.5px;font-family:monospace;";it.textContent=cl;s.appendChild(it)});return s};
+
+    // ── 1. LIVE NEWS (ForexLive) ───────────────────────────────────────────
+    const flSection = fs("ForexLive",d.forex_social,"var(--border)","#ff66b2");
+    if(flSection){
+      c.appendChild(flSection);
+      added=true;
+    }
+
+    // ── 2. ECONOMIC CALENDAR (Forex Factory) ──────────────────────────────────
+    if(d.calendar&&Array.isArray(d.calendar)&&d.calendar.length>0){
+      const sec=document.createElement("div");sec.style.cssText="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;";
+      const hdr=document.createElement("div");hdr.style.cssText="font-size:7.5px;color:#ffaa00;font-weight:900;letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid #1f1f2e;padding-bottom:4px;";
+      hdr.innerHTML='&#128197; ECONOMIC CALENDAR <span style="color:var(--text-dim);font-weight:400;text-transform:none;">(today)</span>';
+      sec.appendChild(hdr);
+      d.calendar.forEach(ev=>{
+        const isBlocking=ev.is_blocking;
+        const impactColor=ev.impact==="High"?"#ff4444":ev.impact==="Medium"?"#ffaa00":"#888";
+        const minsAway=ev.mins_away;
+        const timeStr=minsAway<0?`${Math.abs(minsAway)}m ago`:(minsAway<60?`in ${minsAway}m`:`in ${Math.floor(minsAway/60)}h${Math.round(minsAway%60)}m`);
+        const row=document.createElement("div");
+        row.style.cssText=`background:rgba(7,7,11,.9);border:1px solid ${isBlocking?"#ff4444":"#1f1f2e"};padding:4px 6px;font-size:7.5px;font-family:monospace;display:flex;justify-content:space-between;align-items:center;gap:6px;${isBlocking?"box-shadow:0 0 6px rgba(255,68,68,.3);":""}`;
+        row.innerHTML=`<span style="color:${impactColor};font-weight:bold;min-width:28px;">${ev.currency}</span><span style="flex:1;color:#e0e0e0;">${ev.title}</span><span style="color:var(--text-dim);min-width:50px;text-align:right;">${ev.time}</span><span style="color:#888;min-width:40px;text-align:right;font-size:7px;">${timeStr}</span>${isBlocking?'<span style="color:#ff4444;font-weight:bold;font-size:7px;">BLOCK</span>':''}`;
+        sec.appendChild(row);
+      });
+      c.appendChild(sec);added=true;
+    }
+
     if(!added)c.innerHTML='<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;font-size:7px;text-transform:uppercase;letter-spacing:.08em;">Awaiting news stream...</div>';
   }
   startClock() {

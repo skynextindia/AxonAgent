@@ -167,7 +167,19 @@ class MT5TradeExecutor:
         # SL remains fixed (hard backstop). TP is a wide placeholder — ExitEngine drives actual exits.
         entry = price
         direction = "BUY" if order_type == ORDER_TYPE_BUY else "SELL"
-        pip = 0.01 if "JPY" in symbol.upper() else 0.0001
+        
+        # Determine pip size and digits dynamically
+        if not is_bridge and mt5_inst and mt5_inst.symbol_info(symbol):
+            s_info = mt5_inst.symbol_info(symbol)
+            pip = s_info.point * 10
+            digits = s_info.digits
+        else:
+            if "JPY" in symbol.upper():
+                pip, digits = 0.01, 3
+            elif price > 1000:
+                pip, digits = 0.1, 2
+            else:
+                pip, digits = 0.0001, 5
 
         sl_atr_mult = self.config.get("realtime_sl_atr_multiple", self.config.get("sl_atr_multiple", 1.2))
         # SL is kept as sl_atr_mult*ATR to act as a hard backstop
@@ -192,7 +204,6 @@ class MT5TradeExecutor:
         tp = entry + tp_distance if direction == "BUY" else entry - tp_distance  # Placeholder — ExitEngine drives exits
 
         # Format price to correct number of digits
-        digits = 3 if "JPY" in symbol.upper() else 5
         sl = round(sl, digits)
         tp = round(tp, digits)
         price = round(price, digits)
@@ -216,7 +227,12 @@ class MT5TradeExecutor:
                 equity = acc.equity if acc else 10000.0
 
             risk_pct = self.config.get("realtime_risk_pct", 0.01)
-            risk_amount = equity * risk_pct
+            calculated_risk = equity * risk_pct
+            
+            # Hard cap the risk per trade to 100 USD (configurable) to prevent massive losses
+            max_risk_usd = self.config.get("realtime_max_risk_usd", 100.0)
+            risk_amount = min(calculated_risk, max_risk_usd)
+            
             sl_pips = sl_distance / pip
 
             # Validate SL is meaningful
@@ -224,16 +240,37 @@ class MT5TradeExecutor:
                 logger.warning("TradeExecutor: SL distance too small (%.4f pips) - entry skipped", sl_pips)
                 return {"success": False, "reason": "sl_too_small", "sl_pips": round(sl_pips, 4)}
 
-            # $10 per pip per 1.00 standard lot (FX majors).
-            pip_value_per_lot = 10.0
+            # Calculate exact pip value per lot
+            pip_value_per_lot = 10.0 # fallback
+            tick_value = 0.0
+            tick_size = 0.0
+
+            if is_bridge:
+                sym_res = send_execution_command(self.config, {"action": "symbol_info", "symbol": symbol})
+                if sym_res.get("success"):
+                    tick_value = sym_res.get("trade_tick_value", 0.0)
+                    tick_size = sym_res.get("trade_tick_size", 0.0)
+            else:
+                if mt5_inst and mt5_inst.symbol_info(symbol):
+                    s_info = mt5_inst.symbol_info(symbol)
+                    tick_value = s_info.trade_tick_value
+                    tick_size = s_info.trade_tick_size
+
+            if tick_value > 0 and tick_size > 0:
+                # pip_value_per_lot = how much 1 lot profits when price moves by 1 pip
+                pip_value_per_lot = (pip / tick_size) * tick_value
+            elif price > 1000:
+                # Fallbacks for non-forex if tick value is unavailable
+                pip_value_per_lot = 1.0 if pip >= 0.1 else 10.0
+            
             lot_size = round(risk_amount / max(sl_pips * pip_value_per_lot, 1e-6), 2)
-            max_lot = self.config.get("realtime_max_lot", 1.00)
+            max_lot = self.config.get("realtime_max_lot", 50.0)  # Raised from 1.0 to 50.0 to support 100k+ accounts
             lot = max(0.01, min(lot_size, max_lot))
 
             logger.info(
                 "TradeExecutor: Dynamic sizing | equity: %.2f | risk: %.2f | "
-                "SL pips: %.2f | calc lot: %.4f | final lot: %.2f",
-                equity, risk_amount, sl_pips, lot_size, lot
+                "SL pips: %.2f | pip val: $%.2f | calc lot: %.4f | final lot: %.2f",
+                equity, risk_amount, sl_pips, pip_value_per_lot, lot_size, lot
             )
         else:
             lot = self.default_lot_size

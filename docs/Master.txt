@@ -1,0 +1,243 @@
+## 1. Executive Summary
+
+  The codebase is **three disconnected layers**, only one alive:
+
+  | Layer | Location | Status | LLM? |
+  |-------|----------|--------|------|
+  | **L1 Live engine** | `axonai/realtime/` (+ `daemon.py`, `api_server.py`, `backtester.py`) | **ACTIVE** | **No LLM.** Pure math. |
+  | **L2 Dead LLM prototype** | root `orchestrator.py`, `llm_bridge.py`, `execution.py`, `market_state.py`, `market_context.py`, `macro_bridge.py`, `mt5_receiver.py`, `core/orchestrator.py`, `agents/*.md` | **DEAD** | **Yes** — DeepSeek + Anthropic |
+  | **L3 Dead stock dataflows** | `dataflows/interface.py`, `alpha_vantage_*`, `y_finance.py`, `stockstats_utils.py` | **DEAD** | Indirect |
+
+  - Live engine imports **no** anthropic/openai/deepseek/langchain/langgraph. `axonai/__init__.py`: "all LLM/AI third-party dependencies removed."
+  - **All real LLM code is in the dead L2 prototype.** `orchestrator.py` is imported by **zero** files.
+  - Live engine's only LLM residue = **naming/labels** (`/api/pause_llm`, `llm_paused`, `"llm":False`, `llm_*` config keys) — no client behind them.
+  - ~1,300+ LOC dead stock-vendor dataflows survive only via the dead `interface.py`.
+
+  **Bottom line:** "No LLM" is already achieved live. Cleanup = delete two dead layers + label residue.
+
+  ---
+
+  ## 2. Architecture & Layer Map
+
+  ```
+   MT5 (Exness feed)
+     |  tick
+     v
+   Layer1 tick_engine -> Layer2 DETECTION (velocity_*, displacement_*, peak_detector, event_detector)
+                      -> Layer3 CONTEXT (regime_engine, level_tracker, liquidity_engine, location_engine,
+                                         mtf_context, market_context(_builder), live_state)
+                      -> Layer4 ENTRY/EXIT (entry_state_machine, exit_engine, adaptive_exit,
+                                            velocity_trailing, trade_state_engine, trade_health_monitor,
+                                            trade_executor)
+   Layer5 daemon.py + reversal_model.py orchestrate;  Layer6 api_server.py = dashboard/WS
+  ```
+  Execution transport (dual-terminal): Feed=Exness MT5; Orders=separate MT5 via `mt5_order_bridge.py` (subprocess) or `execution_client.py` -> `windows/execution_bridge.py`. WSL dashboard data via `mt5_bridge_client.py` -> `windows/mt5_bridge.py`.
+
+  ---
+
+  ## 3. End-to-End Runtime Sequence
+
+  1. **Launch** — `cli/main.py`/`run.py` build config, call `AxonDaemon`; `api_server.start_dashboard()` starts FastAPI/uvicorn on a bg thread.
+  2. **Construction** (`AxonDaemon.__init__`, daemon.py:50) — wires TickEngine, LiveWorldState, LiveMarketEvidence, ReversalModel (builds VelocityNormalizer, DisplacementEngine, EntryStateMachine, location/trade-state), MT5TradeExecutor x2, VelocityTrailingManager, ExitEngine+AdaptiveExitManager, DisplacementNormalizer; starts `_slow_poll_loop`.
+  3. **Cold start** (`start`, daemon.py:622) — mt5_initialize (Exness) -> start_bridge (orders) -> re-adopt positions -> live_state/live_evidence initialize from history -> sync_levels -> wire tick callbacks -> tick_engine.start() -> `_event_loop()`.
+  4. **Tick ingestion** — TickEngine polls MT5 (ms time_msc), builds candles, computes order imbalance, fires `_on_tick`.
+  5. **State update** (`_on_tick`, daemon.py:821) — live_state.on_tick + live_evidence.on_tick (regime, sessions, S/R, level behaviour); sync_levels.
+  6. **Location** — `location_engine.compute(...)` -> LocationContext (distance-to-S/R in ATR, room, at_structure).
+  7. **Detection/entry** (`reversal_model.on_tick`, reversal_model.py:123) — VelocityNormalizer.update -> NormalizedVelocity (velocity pips/s, percentile, z, tick_efficiency, decay_ratio, is_unusual/is_decaying/is_accelerating); DisplacementEngine.update -> DisplacementState (ratio, IMPULSE/TRAP/ABSORPTION/EXHAUSTION/COMPRESSION); regime+MTF; EntryStateMachine (IDLE->ANOMALY->ARMING->TRIGGERED) -> EntryDecision; also ExitDecision, trade_health. Returns EngineSnapshot.
+  8. **Telemetry** — inject context into snapshot; broadcast trigger_metrics/tick/trade_state/location_context.
+  9. **Queue** — valid entry -> `{type:entry}`; should_exit/ADJUST_SL -> `{type:exit}` onto event_queue.
+  10. **Inline trailing/closure** (tick thread) — `_manage_trailing_stops` runs VelocityTrailingManager.on_tick + ExitEngine.evaluate; `_check_for_closed_positions` reconciles tickets.
+  11. **Entry exec** (main thread `_event_loop`, daemon.py:1066) — pause/cooldown/direction gates -> trade_executor_opt.execute_signal -> register with trade_state_engine, reversal_model.register_trade, trade_analytics.record_entry.
+  12. **Exit exec** — reconcile is_position_live() -> ADJUST_SL or CLOSE_NOW via bridge/execution_client -> record_exit, clear_trade.
+  13. **Persistence/API** — closed trades -> reports/signals.jsonl; dashboard caches + pushes /ws; /api/logs/trades merges open+close.
+  14. **Shutdown** (`stop`, daemon.py:1430).
+
+  Backtester mirrors 4-12 deterministically: interpolated ticks (0.05s for VelocityNormalizer) -> same stack -> markdown report.
+
+  ---
+
+  ## 4. Cluster A — Detection (`axonai/realtime/`)
+
+  - **tick_engine.py (573)** — MT5 tick ingestion + candle building + order imbalance. No LLM. Garbage: unused `Tuple`(L14)/`numpy`(L16); redundant re-import L475; `import random` in loop L523; O(n) imbalance per tick. Foundation; ms timestamps essential for velocity; weekend mock ticks (L521-549) fabricate exhaustion — must tag/suppress.
+  - **event_detector.py (844)** — structural event emitter (level breach/sweep/peak), zero-LLM. Garbage: dup local imports; `_structure_detected_on_candle` written never read; `self.peak_detector` unused. Primary `PeakDetector` consumer; emits PEAK_DETECTION on velocity-exhaustion.
+  - **tick_behavior.py (242)** — tick telemetry logger. **BROKEN import L24** `from tick_engine import Tick,TickProcessor,SignalState` (names don't exist) -> non-importable/orphaned. `field` unused; hardcoded peak_count=0.
+  - **velocity_normalizer.py (356)** — broker-agnostic velocity ("unusual for conditions?"). decay_ratio/is_decaying = exhaustion signal; regime-keyed dynamic thresholds. Garbage: `field` unused; per-call imports L145/208/322; typo evited.
+  - **velocity_threshold_engine.py (153)** — dynamic velocity pct/z thresholds per regime. Central stage mechanism (low in COMPRESSION/EXHAUSTION, high in BREAKOUT). Redundant regime_confidence param.
+  - **velocity_displacement_matrix.py (146)** — stateless (vel pct x disp class x at_structure)->action lookup. `__main__` test. Encodes high-vel+EXHAUSTION=EXIT.
+  - **displacement_engine.py (322)** — IMPULSE vs TRAP/ABSORPTION/EXHAUSTION/COMPRESSION via displacement ratio+velocity. Bridge from velocity to reversal semantics. Garbage: unused RegimeStateClass L132; demo thresholds L80-81; maybe-unused vw_disp/get_recent_trend/is_regime_shifting.
+  - **displacement_buffer_engine.py (160)** — dynamic impulse/trap thresholds per regime. Near-duplicate of velocity_threshold_engine (extract base).
+  - **displacement_normalizer.py (123)** — rolling z/percentile of displacement (n>=50). Clean; percentile O(n) per call.
+  - **peak_detector.py (369)** — PRIMARY velocity-reversal generator. Rule A velocity-exhaustion climax (>5x baseline then collapse<25%); Rule B divergence>0.8+efficiency collapse; Rule C off. Garbage: unused Dict/Any/List L6; dead `_last_*` telemetry. **Static thresholds — not regime-aware (improvement target).**
+  - **market_buffer_engine.py (148)** — dynamic velocity-decay trail thresholds. **BUG L131-134: `>1000` elif unreachable** (ordering) -> strongest late-trade tightening dead.
+
+  **A improvements:** wire DisplacementState EXHAUSTION/TRAP into peak detection; make PeakDetector regime-aware; fix buffer ordering; suppress mock ticks; incremental O(n) recompute; fix tick_behavior import.
+
+  ---
+
+  ## 5. Cluster B — Entry/Exit/Lifecycle
+
+  - **entry_gate.py (138)** — **DEAD**: only `tests/test_entry_gate.py` imports it; live path uses EntryStateMachine. Docstring falsely claims daemon+backtester use it. Cleanest reversal filter conceptually, contributes nothing live.
+  - **entry_state_machine.py (410)** — **LIVE entry path**. 5-state machine confirming reversal via displacement. `evaluate_with_context` (L157-262, 6 context layers: stop-hunt/lag/confidence/agreement) **never called = dead**. Raw "EXHAUSTION" literal L349; INFO spam L360. 0.3-pip relaxed trigger.
+  - **exit_engine.py (246)** — priority exits wrapping AdaptiveExitManager. **BUG L156-158: legacy.evaluate(trade_state=...) wrong signature -> TypeError**, Priority-4 trailing unreachable. `__main__` block L173-247.
+  - **adaptive_exit.py (335)** — richest velocity-reversal exits (decay-ratio thresholds, exhaustion energy, velocity-scaled trailing). Unused DISPLACEMENT_NEUTRAL L22.
+  - **exit_stats.py (109)** — exit CSV/JSON for tuning. Dup header logic; deprecated utcnow.
+  - **trade_executor.py (374)** — live MT5 order routing, ATR SL, placeholder TP (ExitEngine drives real exits). **BUG L312 IOC retry uses module `mt5` not self._get_mt5() (dual-terminal)**. Unused phase_tracker/exit_stats; redundant circuit_breaker alias.
+  - **trade_state_engine.py (404)** — per-tick phase tracker (ENTRY..EXHAUSTION..EXIT) MFE/MAE/health. **Called snapshot=None from reversal_model:184 -> favourability never updated**. `__main__` block; stale FIX comments; odd hasattr(datetime,UTC).
+  - **trade_phase.py (229)** — market-state phase + confidence; adverse-impulse>=5 -> REVERSAL_RISK. Unused liq param/CONFIDENCE_* consts.
+  - **trade_health_monitor.py (231)** — health from velocity/displacement/regime/phase (energy x phase matrix); is_failing<0.2. Unused disp consts/mtf param.
+  - **trade_analytics.py (125)** — pre-trade context + outcome JSONL (anomaly_velocity_z + disp class). Silent except pass; naive local time.
+  - **velocity_trailing.py (283)** — velocity-accel + retest SL trailing via dynamic buffer. **BUG L94 pip from position_type (JPY branch unreachable)**; `_detect_retest` doesn't implement documented bounce. Overlaps AdaptiveExitManager trailing.
+  - **execution_client.py (74)** — WS client to execution_bridge. Deprecated get_event_loop; no pooling.
+  - **reversal_model.py (267)** — TOP-LEVEL wiring -> EngineSnapshot. **BUGS: snapshot=None to trade_state_engine (L184); never sets `latest_snapshot` (daemon:1605 reads it -> always None); evaluate_with_context unused; broken temp_snapshot for broken ExitEngine fallback.**
+
+  **B improvements:** pick one entry path (wire evaluate_with_context or delete entry_gate); fix ExitEngine signature; feed real snapshot; unify trailing; fix pip/retest.
+
+  ---
+
+  ## 6. Cluster C — Context/Levels/Regime
+
+  - **level_tracker.py (415)** — per-level interaction state (rejection velocity, absorption, attack quality). **No LLM** (grep hit = docstring prose). Unused `timezone` L18. Core: rejection_velocities quantify reversal sharpness.
+  - **location_engine.py (203)** — distance to S/R (ATR), room, at_structure. `__main__` L148-204; `distance_to_liquidity` = copy of distance_to_sr (stub). Precondition for high-confidence reversal.
+  - **liquidity_engine.py (303)** — sweep (grab+return) vs break (acceptance) via velocity z+displacement. Stale comment L146-155; unread _last_price; **unbounded recent_events growth (leak)**. Central: confirmed SWEEP = reversal precursor.
+  - **regime_engine.py (465)** — 7 regimes (TREND_EXPANSION/CONTINUATION,RANGE_CHOP,COMPRESSION,BREAKOUT,EXHAUSTION,REVERSAL) + hysteresis. **Keystone for stage-aware reversals**: encodes EXHAUSTION(L353) and REVERSAL(L375-395); transition_probability flags flips.
+  - **market_context.py (165)** — frozen per-tick truth aggregating 6 engines + ~25 quality fields. Dead fields: best_entry_already_missed, optimal_entry_price, current_entry_slippage_pips, engines_with_high_confidence. Carries reversal_confidence/consensus_verdict/displacement_phase/reversal_lag.
+  - **market_context_builder.py (418)** — computes quality scores + assembles context. **Throwaway 2nd MarketContext for summary string (L106-114, wasteful)**; **dead EARLY branch (==0 after +=1, L372)**; stop-hunt uses proxy L294-296 while level_tracker data exists.
+  - **mtf_context.py (172)** — M15/H1/H4 + daily bias -1..+1. Hardcoded 80-pip exhaustion (L120, JPY-unsafe); Optional unused. is_pullback = continuation entry; is_exhaustion_zone = reversal-probable.
+  - **live_state.py (1467)** — incrementally maintained state: LiveWorldState (indicators/regime/belief gate) + LiveMarketEvidence (institutional/session levels, swings, patterns, level-behaviour). No LLM. Unused math L11; redundant hasattr L356; **magic EURUSD fallback prices 1.1600(L734)/1.15000(L1206)**; dup LNDH/LDH rebuilt every tick; per-tick price_levels rebuild (perf). Supplies structural/regime substrate for reversals.
+  - **risk_guard.py (104)** — daily drawdown circuit breaker. Unused current_balance param; %dd uses only floating loss.
+  - **alerts.py (40)** — Telegram/webhook. Discord-shaped payload.
+  - **mt5_bridge_client.py (228)** — WS client (WSL) relaying data to dashboard. Unused time/datetime; dead historical-future path (request_id=0).
+
+  **C improvements:** centralize reversal-stage label (fix dead EARLY); wire LevelBehaviorTracker into stop-hunt/agreement; make pip thresholds ATR/symbol-relative; implement real distance_to_liquidity; bound recent_events.
+
+  ---
+
+  ## 7. Cluster D — Orchestration
+
+  - **daemon.py (2015)** — always-alive runtime (see Section 3). No functional LLM; residual labels: `"llm":False`(L276), llm_paused(L445), llm_calls/tool_calls(L462-463), self.paused via /api/pause_llm. Garbage: dup `import threading` L116/132/1480; unused/re-imported names; **BROKEN direct-mode close (L1291-1304 dict-vs-attr; undefined pos_volume L1640)**; `_log_signal` never called; commented block L1402-1406; dup DST math; tick-freq INFO spam; pointless hasattr guard L1177; unused trade_executor_base/trade_executor.
+  - **api_server.py (884)** — FastAPI+WS dashboard. Removable: /api/pause_llm (toggles daemon.paused), /api/logs/decisions ([] stub), agent_trace/"agent" vestiges (L74,566-572,703-707). **DEAD: /api/close_all (nonexistent daemon.execution), /trigger (disabled), bridge_client branches**; hardcoded BLACKLIST L198-212; per-request imports.
+  - **backtester.py (814)** — offline replay through same stack -> markdown. Unused _pending_level_breaches; empty event tables; **unreachable hard_sl elif + missing soft-TP (TP-Hit never produced)**; ticket-id mismatch; to_csv gated off; unused imports.
+
+  **D improvements:** move heavy `_on_tick` work off tick thread (10ms budget); delete/rename LLM surface; shared DST helper; fix direct-mode close; backtester event tables + soft-TP + ticket ids; hoist imports; externalize blacklist.
+
+  ---
+
+  ## 8. Cluster E — Root legacy / LLM prototype (ALL DEAD)
+
+  Verified: `orchestrator.py` imported by nothing; cluster is a closed import loop (+scratch/test_phase1). This is the entire real LLM/agentic footprint.
+
+  - **orchestrator.py (585)** — prototype root: ticks->state->context->LLM->execution. LLM: LLMBridge L44; should_query L398; query L473; async flow L471-503; ANTHROPIC_API_KEY L570; claude_query L416. **Delete whole file.**
+  - **llm_bridge.py (200)** — LLM core. `from openai import OpenAI` L8; `OpenAI(base_url=api.deepseek.com)` L29 model deepseek-chat L28; chat.completions.create L166. **Delete whole file.**
+  - **execution.py (255)** — ExecutionEngine consuming LLMDecision (confidence gate L57). **Delete.**
+  - **core/orchestrator.py (43)** — Anthropic Claude planner->analyzer->executor->validator loop. `import anthropic` L1; Anthropic() L3; model claude-3-5-sonnet L8; reads agents/*.md L25-31. **Delete + agents/ dir.**
+  - **market_state.py (174), market_context.py (206 root)** — non-LLM prototype market modeling, used only by dead files. **Delete.** (Live entry_state_machine:181 "market_context" comment refers to the LIVE realtime module, not these.)
+  - **macro_bridge.py (133), mt5_receiver.py (170)** — prototype macro/tick receiver, used only by orchestrator (+scratch). Live engine uses tick_engine. **Delete.**
+  - **agents/{planner,analyzer,executor,validator}.md** — LLM prompts read by dead stub. **Delete.**
+
+  Deleting this cluster removes **100% of real LLM/agentic code** (DeepSeek + Anthropic).
+
+  ---
+
+  ## 9. Cluster F — Dataflows / Config
+
+  **LIVE (keep):**
+  - **default_config.py (202)** — keep realtime_*/mt5_*/sl_tp_atr/*_urgency/velocity_decay_*/exhaustion_*/dashboard_* block. **Remove LLM keys: env overrides L11-18; keys L62-81 (llm_provider, deep_think_llm, quick_think_llm, backend_url, checkpoint_enabled, output_language, max_debate_rounds, max_risk_discuss_rounds, max_recur_limit, analyst_concurrency_limit). Drop stock keys L82-96 (news), L97-126 (data_vendors/tool_vendors/benchmark_*), L75 intraday_interval.**
+  - **__init__.py (14), config.py (42)** — keep.
+  - **world_state.py (408)** — pure-math WorldState (live). Redundant timedelta L88; unused math L6; __main__ L393-409. should_run_graph naming vestigial but consumed.
+  - **mt5_data.py (468)** — most-used feed (keep). Orphaned: get_mt5_stock_data(L286-332), get_mt5_indicators(L337-383), get_mt5_ticks(L249-260). Noisy [TRACE] logs -> DEBUG.
+  - **mt5_order_bridge.py (259)** — live critical order bridge. bare except L40/256; unused _bridge_script L20; undrained child stderr (deadlock risk).
+  - **evidence_extractor.py (339)** — pure-math MarketEvidence (live). __main__ L335-339.
+  - **utils.py (75)** — only safe_ticker_component referenced; rest unused.
+
+  **DEAD vendor tree (delete as set):** interface.py (171, **zero importers**), alpha_vantage.py(4)/_common(125)/_fundamentals(55)/_indicator(225)/_news(70)/_stock(37), y_finance.py(548, stale MACRO_DATA), stockstats_utils.py(154).
+
+  **PARTIALLY-LIVE (sentiment endpoint only):** yfinance_news.py(202, get_global_news_yfinance@api_server:808), reddit.py(119), forex_social.py(90). Removable if sentiment sidebar dropped.
+
+  **F improvement:** delete dead vendor tree + orphaned mt5_data fns + LLM/vendor config keys = ~1,300+ LOC and yfinance/stockstats/alpha_vantage deps gone, zero live impact.
+
+  ---
+
+  ## 10. Cluster G — CLI / Windows bridges / Frontend
+
+  - **cli/main.py (132)** — LIVE entry; builds AxonDaemon(L61)/BacktestEngine(L89). No LLM.
+  - **run.py (271)** — LIVE launcher; Windows direct vs WSL bridge auto-detect; daemon@L250. No LLM.
+  - **cli/utils.py(219), announcements.py(51), config.py(6), models.py(19)** — support-only, no LLM.
+  - **windows/mt5_bridge.py (708)** — LIVE Windows-side data-feed WS+HTTP bridge (counterpart of mt5_bridge_client). No LLM. Recommend lint pass.
+  - **windows/execution_bridge.py (377)** — LIVE Windows-side order-execution WS bridge to separate MT5 terminal (counterpart of execution_client). No LLM.
+  - **cli/static/index.html** — SPA dashboard (vanilla JS + lightweight-charts); /ws to api_server. Has LLM-legacy labels ("TOGGLE LLM PAUSE", LLM_PAUSED) -> rename with backend.
+  - **cli/static/index.html.bak** — stale backup. **GARBAGE, delete.**
+  - **cli/static/lightweight-charts.min.js** — vendored lib (keep). **welcome.txt** — banner.
+  - **cli/static/patch_ui.py** — one-off HTML patcher with hardcoded foreign path `d:\work\TradingAgents\...` (L5); "LLM" hits = injected button strings. **GARBAGE, delete.**
+
+  **G improvements:** delete index.html.bak + patch_ui.py; rename LLM UI labels; add a velocity-reversal visualization panel (velocity pct, displacement class, peak signals, regime stage); lint the two bridges.
+
+  ---
+
+  ## 11. Cluster H — Tests / Scratch / Artifacts
+
+  **Tests (keep):** conftest, test_realtime_core, test_daemon_e2e, test_backtest, test_entry_gate (only importer of dead module), test_entry_direction, test_entry_state_machine_with_market_context, test_market_context, test_peak_detector, test_pattern_intensity, test_velocity_spike_quiet_market, test_smart_cooldown, test_trade_execution, test_displacement_normalizer, test_dataflows_config, test_env_overrides, test_safe_ticker_component, test_ticker_symbol_handling.
+
+  **Coverage gaps (no test) for reversal core:** velocity_normalizer, velocity_threshold_engine, displacement_engine, displacement_buffer_engine, regime_engine, liquidity_engine, adaptive_exit, exit_engine, velocity_trailing, market_buffer_engine, trade_state_engine, trade_health_monitor, market_context_builder.
+
+  **Scratch/ (GARBAGE/dev-only):** all test_*/analyze_*/calculate_*/debug_*/find_*/optimize_*/compare_times/search_trend_filter. test_phase1 imports dead mt5_receiver.
+
+  **Root dev scripts:** Delete: _cc_*.py, _mock_daemon.py, _start_dash.py, mock_data_feeder.py, simulate_level_tracker.py, demo_velocity_trailing.py, root tick_engine.py (duplicate; verify), test_order.py, test_live_entry.py, test_execution_flow.py. Keep as dev-tools: check_bridge_status.py, close_test_position.py, force_close_test.py, verify_position.py. Keep runners: run_*_backtest.py, run_optimizer.py, backtest_velocity_system.py.
+
+  **Artifacts (gitignore/delete):** *.pid x4, _cc_*.csv, .axon_session.json, __pycache__/, axonai.egg-info/, .pytest_cache/, autoresearch/debug-*, brainstorm/BS.txt, reports/* contents. Consolidate duplicate root markdowns into docs/.
+
+  ---
+
+  ## 12. Consolidated Garbage Inventory
+
+  ### 12.1 LLM/agentic to remove
+  - Whole files: llm_bridge.py, orchestrator.py, execution.py, core/orchestrator.py, agents/*.md (4).
+  - Config keys: default_config.py L11-18, L62-81.
+  - Labels/endpoints: api_server /api/pause_llm(L169), /api/logs/decisions stub(L179), agent_trace/agent(L74,566-572,703-707); daemon "llm":False(276)/llm_paused(445)/llm_calls,tool_calls(462-463); index.html UI labels.
+
+  ### 12.2 Dead files (non-LLM)
+  market_state.py, root market_context.py, macro_bridge.py, mt5_receiver.py, root tick_engine.py(verify); dataflows/interface.py + alpha_vantage_*(6) + y_finance.py + stockstats_utils.py; orphaned mt5_data fns; most of dataflows/utils.py; entry_gate.py (decide); tick_behavior.py (broken import); index.html.bak; patch_ui.py.
+
+  ### 12.3 Dead code in live files
+  event_detector dead flag/dup imports; market_buffer_engine unreachable branch; exit_engine broken fallback + __main__; reversal_model snapshot=None/never-set latest_snapshot/unused evaluate_with_context; entry_state_machine evaluate_with_context unused; trade_executor IOC bug/unused members; backtester empty event tables/unreachable TP; daemon broken close paths/_log_signal/commented blocks/INFO spam; api_server dead endpoints/blacklist; many unused imports & __main__ smoke blocks.
+
+  ### 12.4 Artifacts
+  *.pid, _cc_*, .axon_session.json, caches, autoresearch/debug-*, brainstorm/BS.txt, scratch experiments, stray root test scripts.
+
+  ---
+
+  ## 13. Confirmed Bugs (priority)
+
+  1. **ExitEngine Priority-4 trailing dead** — exit_engine.py:156-158 wrong signature -> TypeError. (High)
+  2. **TradeStateEngine starved** — reversal_model.py:184 snapshot=None; phase transitions stall. (High)
+  3. **latest_snapshot always None** — daemon.py:1605 reads never-set attr. (Med-High)
+  4. **market_buffer_engine unreachable branch** — L131-134 ordering; late tightening dead. (Med)
+  5. **velocity_trailing JPY pip unreachable** — pip from position_type L94. (Med)
+  6. **trade_executor IOC wrong MT5 instance** — L312 module mt5. (Med)
+  7. **daemon direct-mode close broken** — dict-vs-attr L1291-1304 + undefined pos_volume L1640. (Med)
+  8. **api_server /api/close_all always errors** — nonexistent daemon.execution. (Low-Med)
+  9. **backtester TP-Hit unreachable** — no soft-TP, hard_sl elif dead, ticket-id mismatch. (Med)
+  10. **liquidity_engine unbounded recent_events** — memory growth. (Low)
+  11. **market_context_builder dead EARLY branch** — L372 phase never starts EARLY. (Med)
+  12. **tick_behavior non-importable** — broken import L24. (Low)
+
+  ---
+
+  ## 14. Improvement & Completion Roadmap — Velocity Reversal System
+
+  Goal: auto-detect velocity behaviour on reversals at different market stages. Blocks exist & are strong; gaps are wiring, stage-consistency, symbol-robustness.
+
+  **Phase 0 Cleanup (no behaviour change):** delete L2 prototype + L3 vendor tree + artifacts; rename LLM labels; lint pass (unused imports, __main__ blocks, deprecated utcnow/get_event_loop).
+
+  **Phase 1 Fix decision wiring:** fix bugs #1-3,#6,#11; decide entry path — recommend **wiring EntryStateMachine.evaluate_with_context** (its stop-hunt/lag/confidence/agreement filters are dead today and are the richest stage-aware reversal guards) or delete entry_gate; unify trailing (merge velocity_trailing + AdaptiveExitManager trail), fix #4/#5.
+
+  **Phase 2 Regime-consistent stages:** make PeakDetector regime-aware (static thresholds today); corroborate peaks with DisplacementState EXHAUSTION/TRAP; centralize one canonical reversal-stage label (displacement_phase + regime sequence + reversal_lag); wire real LevelBehaviorTracker (absorption/rejection velocity/attack quality) into stop-hunt & agreement.
+
+  **Phase 3 Symbol/ATR robustness:** replace hardcoded pips (mtf 80-pip, regime 5-pip, live_state pip bands + magic prices, velocity_trailing pip) with ATR/symbol-relative; implement real location_engine.distance_to_liquidity from liquidity_engine.
+
+  **Phase 4 Runtime safety/perf:** move heavy work off tick thread (10ms budget); tag/suppress mock weekend ticks; incremental O(n) recompute (imbalance, percentiles, price_levels); bound recent_events.
+
+  **Phase 5 Validation/learning:** add tests for untested reversal core; fix backtester fidelity (#9); mine trade_analytics.jsonl + exit_stats to learn which (velocity z x displacement class x regime stage) setups pay off and feed thresholds back.
+
+  **Order:** P0 -> P1 -> P2 = biggest correctness+capability gains; P3 generalizes beyond EURUSD; P4/P5 harden+validate. Each phase independently shippable against the backtester.
+
+  *End of master document.*

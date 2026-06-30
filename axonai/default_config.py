@@ -163,6 +163,25 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_velocity_decay_threshold_aligned": 0.20,
     "realtime_velocity_decay_threshold_unaligned": 0.40,
 
+    # ── EOD (End-of-Day) position close ─────────────────────────────────────
+    # Force-close all open positions when the trading day winds down, matching
+    # the backtester's session-transition close. Fires once when the live
+    # session rolls from an active session into a wind-down session.
+    "eod_close_enabled": True,
+    "eod_close_active_sessions": ["london", "overlap", "newyork"],   # day sessions
+    "eod_close_trigger_sessions": ["rollover", "asian"],             # roll → close
+
+    # ── Dynamic News Guard ──────────────────────────────────────────────────
+    # Block new entries around high-impact economic news for either currency in
+    # the traded pair. Calendar fetched from ForexFactory's free weekly JSON and
+    # cached to <data_cache_dir>/economic_calendar.json (offline fallback).
+    "news_guard_enabled": True,
+    "news_guard_block_impacts": ["High"],   # impact levels that trigger a blackout
+    "news_guard_pre_minutes": 30,           # blackout starts N min before event
+    "news_guard_post_minutes": 30,          # blackout ends N min after event
+    "news_guard_calendar_url": "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+    "news_guard_refresh_hours": 6,          # re-fetch calendar at most this often
+
     "sl_atr_multiple": 1.0,
     "tp_atr_multiple": 1.5,
 

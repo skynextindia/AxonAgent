@@ -6,7 +6,7 @@ REM ═════════════════════════�
 
 setlocal enabledelayedexpansion
 
-cd /d "D:\AXON.AI\AxonAgent-Agy"
+cd /d "%~dp0"
 
 cls
 

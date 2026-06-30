@@ -75,6 +75,7 @@ class TradeState:
     close_reason: Optional[str] = None
     close_price: Optional[float] = None
     close_time: Optional[datetime] = None
+    is_active: bool = True  # False once the trade has been closed/exited
 
 
 class TradeStateEngine:
