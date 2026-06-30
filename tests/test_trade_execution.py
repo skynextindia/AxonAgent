@@ -34,6 +34,13 @@ class TestMT5TradeExecutor(unittest.TestCase):
 
         mock_symbol_info = MagicMock()
         mock_symbol_info.visible = True
+        mock_symbol_info.point = 0.00001
+        mock_symbol_info.digits = 5
+        mock_symbol_info.trade_tick_value = 1.0
+        mock_symbol_info.trade_tick_size = 0.00001
+        mock_symbol_info.volume_min = 0.01
+        mock_symbol_info.volume_step = 0.01
+        mock_symbol_info.volume_max = 100.0
         mock_sym_info.return_value = mock_symbol_info
 
         mock_tick_info = MagicMock()
@@ -83,6 +90,13 @@ class TestMT5TradeExecutor(unittest.TestCase):
 
         mock_symbol_info = MagicMock()
         mock_symbol_info.visible = True
+        mock_symbol_info.point = 0.00001
+        mock_symbol_info.digits = 5
+        mock_symbol_info.trade_tick_value = 1.0
+        mock_symbol_info.trade_tick_size = 0.00001
+        mock_symbol_info.volume_min = 0.01
+        mock_symbol_info.volume_step = 0.01
+        mock_symbol_info.volume_max = 100.0
         mock_sym_info.return_value = mock_symbol_info
 
         mock_tick_info = MagicMock()
@@ -134,6 +148,13 @@ class TestMT5TradeExecutor(unittest.TestCase):
 
         mock_symbol_info = MagicMock()
         mock_symbol_info.visible = True
+        mock_symbol_info.point = 0.00001
+        mock_symbol_info.digits = 5
+        mock_symbol_info.trade_tick_value = 1.0
+        mock_symbol_info.trade_tick_size = 0.00001
+        mock_symbol_info.volume_min = 0.01
+        mock_symbol_info.volume_step = 0.01
+        mock_symbol_info.volume_max = 100.0
         mock_sym_info.return_value = mock_symbol_info
 
         mock_tick_info = MagicMock()
@@ -184,6 +205,13 @@ class TestMT5TradeExecutor(unittest.TestCase):
 
         mock_symbol_info = MagicMock()
         mock_symbol_info.visible = True
+        mock_symbol_info.point = 0.00001
+        mock_symbol_info.digits = 5
+        mock_symbol_info.trade_tick_value = 1.0
+        mock_symbol_info.trade_tick_size = 0.00001
+        mock_symbol_info.volume_min = 0.01
+        mock_symbol_info.volume_step = 0.01
+        mock_symbol_info.volume_max = 100.0
         mock_symbol_info.digits = 5
         mock_sym_info.return_value = mock_symbol_info
 
@@ -222,7 +250,9 @@ class TestMT5TradeExecutor(unittest.TestCase):
 
         mock_term_info.return_value = True
         mock_acc_info.return_value = MagicMock(equity=10000.0, balance=10000.0)
-        mock_symbol_info = MagicMock(visible=True, digits=5)
+        mock_symbol_info = MagicMock(visible=True, digits=5, point=0.00001,
+                                     trade_tick_value=1.0, trade_tick_size=0.00001,
+                                     volume_min=0.01, volume_step=0.01, volume_max=100.0)
         mock_sym_info.return_value = mock_symbol_info
         mock_tick.return_value = MagicMock(ask=1.08500, bid=1.08480)
 
@@ -249,7 +279,7 @@ class TestMT5TradeExecutor(unittest.TestCase):
 
         mock_term_info.return_value = True
         mock_acc_info.return_value = MagicMock(equity=10000.0, balance=10000.0)
-        mock_sym_info.return_value = MagicMock(visible=True, digits=5)
+        mock_sym_info.return_value = MagicMock(visible=True, digits=5, point=0.00001)
         # ask-bid = 0.0010, far more than 50% of the ~0.0016 ATR-fallback stop
         mock_tick.return_value = MagicMock(ask=1.08600, bid=1.08500)
 

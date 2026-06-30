@@ -161,9 +161,9 @@ class DashboardServer:
         @self.app.post("/api/close_all")
         def close_all_positions():
             with self._lock:
-                if self.daemon and hasattr(self.daemon, "execution"):
-                    self.daemon.execution.close_all()
-                    return {"status": "success", "message": "Close all signal sent to MT5"}
+                if self.daemon and hasattr(self.daemon, "_close_all_positions"):
+                    n = self.daemon._close_all_positions("Manual close-all (dashboard)")
+                    return {"status": "success", "message": f"Closed {n} position(s)"}
                 return {"status": "error", "message": "Execution engine not available"}
 
         @self.app.post("/api/pause_llm")
@@ -277,8 +277,8 @@ class DashboardServer:
                         rates = mt5.copy_rates_range(symbol, mt5.TIMEFRAME_M1, entry_dt, exit_dt)
                         if rates is not None:
                             bars = [{"high": float(r["high"]), "low": float(r["low"])} for r in rates]
-                except Exception:
-                    pass
+                except Exception as e:
+                    logger.warning("DashboardServer: Failed to fetch MT5 historical rates: %s", e)
                     
                 # 2. Bridge Client mode
                 if not bars:
@@ -294,10 +294,10 @@ class DashboardServer:
                             client.request_historical(symbol, "M1", from_ts, to_ts, request_id=request_id)
                             try:
                                 bars = fut.result(timeout=1.5)
-                            except Exception:
-                                pass
-                    except Exception:
-                        pass
+                            except Exception as e:
+                                logger.warning("DashboardServer: Bridge historical data timeout: %s", e)
+                    except Exception as e:
+                        logger.warning("DashboardServer: Bridge historical request failed: %s", e)
                         
                 if bars:
                     try:
@@ -315,8 +315,8 @@ class DashboardServer:
                                 peak_pips = (entry_price - min_low) / pip_multiplier
                                 
                             return round(max(0.0, drawdown_pips), 1), round(max(0.0, peak_pips), 1)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("DashboardServer: Failed to calculate drawdown/peak: %s", e)
                         
                 # Fallback to estimate
                 drawdown_pips = 0.0
@@ -385,17 +385,23 @@ class DashboardServer:
                     if close_evt:
                         base.update(close_evt)
 
+                    # Safe access to trade_result fields
+                    trade_result = open_evt.get("trade_result") if open_evt and isinstance(open_evt.get("trade_result"), dict) else None
+
                     trade = {
                         "ticket": ticket,
                         "symbol": base.get("symbol") or base.get("mt5_symbol") or "EURUSD",
                         "system": base.get("system") or (open_evt and open_evt.get("system")) or (close_evt and close_evt.get("system")) or "optimized",
                         "direction": base.get("direction") or (open_evt and open_evt.get("decision", "").upper()) or "BUY",
-                        "volume": base.get("volume") or (open_evt and isinstance(open_evt.get("trade_result"), dict) and open_evt["trade_result"].get("volume")),
-                        "entry_price": base.get("entry_price") or (open_evt and isinstance(open_evt.get("trade_result"), dict) and open_evt["trade_result"].get("price")),
+                        "volume": base.get("volume") or (trade_result and trade_result.get("volume")),
+                        "entry_price": base.get("entry_price") or (trade_result and trade_result.get("price")),
                         "exit_price": base.get("exit_price"),
                         "profit": base.get("profit"),
                         "pips": base.get("pips"),
                         "reason": base.get("reason") or "Open Position",
+                        "exit_strategy": close_evt.get("exit_strategy") if close_evt else (base.get("exit_strategy") or "manual"),
+                        "exit_urgency": close_evt.get("exit_urgency", 0.0) if close_evt else (base.get("exit_urgency") or 0.0),
+                        "velocity_trailing_events": close_evt.get("velocity_trailing_events", []) if close_evt else base.get("velocity_trailing_events", []),
                         "outcome": base.get("outcome") or "OPEN",
                         "event_type": open_evt.get("event_type") if open_evt else base.get("event_type", "level_breach"),
                         "event_priority": open_evt.get("event_priority") if open_evt else base.get("event_priority", "INFO"),
@@ -486,11 +492,11 @@ class DashboardServer:
         @self.app.get("/api/logs/system")
         def get_system_log():
             import os
-            bridge_log_path = "bridge.log"
-            if not os.path.exists(bridge_log_path):
-                return {"status": "success", "lines": ["bridge.log does not exist yet."]}
+            log_path = os.path.join(os.path.expanduser("~"), ".axonai", "logs", "axon.log")
+            if not os.path.exists(log_path):
+                return {"status": "success", "lines": ["System log does not exist yet."]}
             try:
-                with open(bridge_log_path, "r", encoding="utf-8", errors="ignore") as f:
+                with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
                     lines = f.readlines()
                 return {"status": "success", "lines": [line.strip() for line in lines[-200:]]}
             except Exception as e:
@@ -593,6 +599,7 @@ class DashboardServer:
 
             # Copy cached states to local variables under lock
             account_data = self.history["account"]
+            logger.info("Hydrating client: account_data=%s", account_data if account_data else "None")
             tick_data = self.history["tick"]
             regime_data = self.history["regime"]
             levels_data = self.history["levels"]
@@ -703,12 +710,20 @@ class DashboardServer:
                 self._save_session()
 
             if not self.active_connections:
+                if msg_type == "account":
+                    import logging
+                    logger = logging.getLogger(__name__)
+                    logger.warning("broadcast(%s): no active WebSocket connections! Loop=%s", msg_type, bool(self._loop))
                 return
 
         # Uvicorn and FastAPI run inside an asyncio event loop.
         # Since daemon operates in a regular thread, we bridge the call to the loop.
         if hasattr(self, "_loop") and self._loop:
             asyncio.run_coroutine_threadsafe(self._async_broadcast(message), self._loop)
+        elif msg_type == "account":
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning("broadcast(%s): event loop not available!", msg_type)
 
     async def _async_broadcast(self, message: Dict[str, Any]):
         """Asynchronously send message to all sockets."""
@@ -789,10 +804,9 @@ class DashboardServer:
     def _news_poller(self):
         """Background thread: periodically polls news sources (non-blocking) and backfills."""
         import time
-        from datetime import datetime
+        from datetime import datetime, timezone
         from axonai.dataflows.yfinance_news import get_global_news_yfinance
         from axonai.dataflows.forex_social import fetch_forex_social_feed
-        from axonai.dataflows.reddit import fetch_reddit_posts
 
         logger.info("Dashboard API: Background News Sentiment poller started.")
         while not hasattr(self, "_poller_stop") or not self._poller_stop.is_set():
@@ -803,26 +817,74 @@ class DashboardServer:
                     ticker = self.daemon.yf_symbol
 
                 curr_date = datetime.now().strftime("%Y-%m-%d")
-                
+
+                # 2. Pull economic calendar events from NewsGuard
+                calendar_events = []
+                # Fall back to a local NewsGuard instance if daemon is not registered yet
+                ng = None
+                if self.daemon and hasattr(self.daemon, "news_guard"):
+                    ng = self.daemon.news_guard
+                else:
+                    if not hasattr(self, "_local_news_guard"):
+                        from axonai.realtime.news_guard import NewsGuard
+                        config = self.daemon.config if self.daemon else self.fallback_config
+                        self._local_news_guard = NewsGuard(config)
+                    ng = self._local_news_guard
+
+                if ng:
+                    # Refresh if stale (respects internal 6h throttle)
+                    try:
+                        ng.refresh()
+                    except Exception:
+                        pass
+                    now_utc = datetime.now(timezone.utc)
+                    for ev in getattr(ng, "_events", []):
+                        dt = ev["dt"]
+                        mins_away = (dt - now_utc).total_seconds() / 60.0
+                        # Show events within -12 hours and +24 hours
+                        if -720 <= mins_away <= 1440:
+                            blocked, _ = ng.should_block_entry(
+                                getattr(self.daemon, "mt5_symbol", "EURUSD") if self.daemon else "EURUSD", now_utc
+                            )
+                            is_this_event = abs(mins_away) <= 30
+                            calendar_events.append({
+                                "title": ev["title"],
+                                "currency": ev["currency"],
+                                "impact": ev["impact"],
+                                "time": dt.strftime("%H:%M UTC"),
+                                "forecast": ev.get("forecast", ""),
+                                "previous": ev.get("previous", ""),
+                                "actual": ev.get("actual", ""),
+                                "mins_away": round(mins_away, 0),
+                                "is_blocking": is_this_event and blocked,
+                            })
+                    calendar_events.sort(key=lambda x: x["mins_away"])
+
                 # 2. Fetch in non-blocking background mode
                 logger.info("Dashboard API: Refreshing News Sentiment Feed (cached continuous mode)...")
                 
-                # Fetch global news
-                news = get_global_news_yfinance(curr_date=curr_date, look_back_days=3, limit=10)
-                
                 # Fetch social feed (MT5 ticker mapping e.g. EURUSDm -> EURUSD)
                 fs_ticker = ticker.replace("=X", "").replace("=x", "")
-                forex_social = fetch_forex_social_feed(fs_ticker, limit=10)
-                
-                # Fetch reddit
-                reddit = fetch_reddit_posts(fs_ticker)
-                
+                forex_social_raw = fetch_forex_social_feed(fs_ticker, limit=10)
+
+                # Split social feed into lines
+                def _to_lines(raw) -> list:
+                    if isinstance(raw, list):
+                        return [str(x) for x in raw if str(x).strip()]
+                    if isinstance(raw, str):
+                        return [ln.strip() for ln in raw.splitlines() if ln.strip()]
+                    return []
+
+                news = []  # Global news removed as per user request
+                forex_social = _to_lines(forex_social_raw)
+
                 # 3. Update cache history and broadcast
                 payload = {
                     "type": "news_data",
                     "news": news,
                     "forex_social": forex_social,
-                    "reddit": reddit,
+                    "reddit": None,
+                    "calendar": calendar_events,
                     "timestamp": datetime.now().strftime("%H:%M:%S")
                 }
                 

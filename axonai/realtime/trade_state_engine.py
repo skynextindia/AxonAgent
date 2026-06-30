@@ -75,6 +75,7 @@ class TradeState:
     close_reason: Optional[str] = None
     close_price: Optional[float] = None
     close_time: Optional[datetime] = None
+    is_active: bool = True  # False once the trade has been closed/exited
 
 
 class TradeStateEngine:
@@ -171,30 +172,37 @@ class TradeStateEngine:
             self._state.current_profit_pips = (self._state.entry_price - price) / self._pip
 
         # Extract velocity and displacement from snapshot
-        vel_percentile = getattr(snapshot.velocity, "percentile", 0.0) if snapshot.velocity else 0.0
-        disp_class = getattr(snapshot.displacement, "classification", "NEUTRAL") if snapshot.displacement else "NEUTRAL"
+        vel_percentile = 0.0
+        disp_class = "NEUTRAL"
+        if snapshot is not None:
+            vel_percentile = getattr(snapshot.velocity, "percentile", 0.0) if snapshot.velocity else 0.0
+            disp_class = getattr(snapshot.displacement, "classification", "NEUTRAL") if snapshot.displacement else "NEUTRAL"
 
         self._state.last_velocity_percentile = vel_percentile
         self._state.last_displacement = disp_class
 
         # Determine if velocity/displacement are favorable
-        if snapshot.velocity:
-            vel_is_unusual = getattr(snapshot.velocity, "is_unusual", False)
-            self._state.last_velocity_direction_favorable = vel_is_unusual or vel_percentile > 50
+        if snapshot is not None:
+            if snapshot.velocity:
+                vel_is_unusual = getattr(snapshot.velocity, "is_unusual", False)
+                self._state.last_velocity_direction_favorable = vel_is_unusual or vel_percentile > 50
 
-        if snapshot.displacement:
-            disp_pips = getattr(snapshot.displacement, "net_displacement_pips", 0.0)
-            if self._state.direction == "BUY":
-                self._state.last_displacement_direction_favorable = disp_pips > 0
-            else:
-                self._state.last_displacement_direction_favorable = disp_pips < 0
+            if snapshot.displacement:
+                disp_pips = getattr(snapshot.displacement, "net_displacement_pips", 0.0)
+                if self._state.direction == "BUY":
+                    self._state.last_displacement_direction_favorable = disp_pips > 0
+                else:
+                    self._state.last_displacement_direction_favorable = disp_pips < 0
 
         # Update structural context
         if location_context:
             self._state.location_context = {
                 "distance_to_sr": location_context.distance_to_sr,
-                "at_structure": location_context.at_structure,
+                "distance_to_liquidity": location_context.distance_to_liquidity,
                 "room_available": location_context.room_available,
+                "at_structure": location_context.at_structure,
+                "nearest_level_type": location_context.nearest_level_type,
+                "nearest_level_price": location_context.nearest_level_price,
             }
         self._state.htf_context = htf_context
 
