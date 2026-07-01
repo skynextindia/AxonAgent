@@ -1383,12 +1383,24 @@ class AxonDaemon:
                         self._active_trade_initial_sl[ticket] = trade_result.get("sl")
                         self._active_trade_system[ticket] = system_name
                         # Store entry details for when position closes
+                        try:
+                            _entry_ws = self.live_state.snapshot()
+                        except Exception:
+                            _entry_ws = None
                         self._active_trade_entry_details[ticket] = {
                             "entry_price": snapshot.price,
                             "direction": snapshot.entry_decision.direction,
                             "entry_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                             "volume": trade_result.get("volume", 0.01),
-                            "entry_reason": snapshot.entry_decision.reason
+                            "entry_reason": snapshot.entry_decision.reason,
+                            # Entry microstructure snapshot (for trade-history detail panel)
+                            "velocity_divergence": getattr(getattr(snapshot, "displacement", None), "displacement_ratio", None),
+                            "price_per_tick_efficiency": getattr(getattr(snapshot, "velocity", None), "tick_efficiency", None),
+                            "peak_confidence": getattr(getattr(snapshot, "entry_decision", None), "signal_quality", None),
+                            "spread_pips": getattr(_entry_ws, "spread_pips", None) if _entry_ws else None,
+                            "dominant_regime": getattr(_entry_ws, "dominant_regime", None) if _entry_ws else None,
+                            "regime_confidence": getattr(_entry_ws, "regime_confidence", None) if _entry_ws else None,
+                            "volatility": getattr(_entry_ws, "volatility_regime", None) if _entry_ws else None,
                         }
                         logger.info(f"[ENTRY_TRACKED] Ticket {ticket}: {snapshot.entry_decision.direction} @ {snapshot.price}")
                         
@@ -2059,6 +2071,7 @@ class AxonDaemon:
 
             # Retrieve stored entry details from when position was opened (daemon-executed trades)
             stored_entry_info = self._active_trade_entry_details.pop(ticket, None)
+            entry_time_str_stored = stored_entry_info.get("entry_time") if stored_entry_info else None
             if stored_entry_info:
                 entry_price = stored_entry_info["entry_price"]
                 direction = stored_entry_info["direction"]
@@ -2224,7 +2237,20 @@ class AxonDaemon:
                     "exit_strategy": exit_strategy,
                     "exit_urgency": round(exit_urgency, 2),
                     "velocity_trailing_events": velocity_events,
-                    "outcome": outcome
+                    "outcome": outcome,
+                    # Entry context recovered from _active_trade_entry_details so the
+                    # trade-history detail panel populates even without an OPEN record.
+                    "entry_time": (entry_time_str_stored.split(" (recovered)")[0]
+                                   if isinstance(entry_time_str_stored, str) else entry_time_str_stored),
+                    "spread_pips": (stored_entry_info.get("spread_pips") if stored_entry_info else None),
+                    "dominant_regime": (stored_entry_info.get("dominant_regime") if stored_entry_info else None),
+                    "regime_confidence": (stored_entry_info.get("regime_confidence") if stored_entry_info else None),
+                    "volatility": (stored_entry_info.get("volatility") if stored_entry_info else None),
+                    "event_details": {
+                        "velocity_divergence": (stored_entry_info.get("velocity_divergence") if stored_entry_info else None),
+                        "price_per_tick_efficiency": (stored_entry_info.get("price_per_tick_efficiency") if stored_entry_info else None),
+                        "peak_confidence": (stored_entry_info.get("peak_confidence") if stored_entry_info else None),
+                    },
                 }
                 with open(os.path.join("reports", "signals.jsonl"), "a", encoding="utf-8") as f:
                     f.write(json.dumps(payload) + "\n")

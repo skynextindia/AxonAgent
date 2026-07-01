@@ -405,14 +405,18 @@ class DashboardServer:
                         "outcome": base.get("outcome") or "OPEN",
                         "event_type": open_evt.get("event_type") if open_evt else base.get("event_type", "level_breach"),
                         "event_priority": open_evt.get("event_priority") if open_evt else base.get("event_priority", "INFO"),
-                        "event_details": open_evt.get("event_details") if open_evt else base.get("event_details", {}),
-                        "dominant_regime": open_evt.get("dominant_regime") if open_evt else base.get("dominant_regime", "ranging"),
-                        "regime_confidence": open_evt.get("regime_confidence") if open_evt else base.get("regime_confidence", 0.5),
-                        "volatility": open_evt.get("volatility") if open_evt else base.get("volatility", "medium"),
-                        "spread_pips": open_evt.get("spread_pips") if open_evt else base.get("spread_pips", 0.0),
+                        "event_details": (open_evt.get("event_details") if open_evt else None) or (close_evt.get("event_details") if close_evt else None) or base.get("event_details", {}),
+                        "dominant_regime": (open_evt.get("dominant_regime") if open_evt else None) or (close_evt.get("dominant_regime") if close_evt else None) or base.get("dominant_regime", "ranging"),
+                        "regime_confidence": (open_evt.get("regime_confidence") if open_evt else None) or (close_evt.get("regime_confidence") if close_evt else None) or base.get("regime_confidence", 0.5),
+                        "volatility": (open_evt.get("volatility") if open_evt else None) or (close_evt.get("volatility") if close_evt else None) or base.get("volatility", "medium"),
+                        "spread_pips": (open_evt.get("spread_pips") if open_evt else None) or (close_evt.get("spread_pips") if close_evt else None) or base.get("spread_pips", 0.0),
                     }
 
-                    entry_time_str = open_evt.get("timestamp") if open_evt else (close_evt and close_evt.get("timestamp"))
+                    entry_time_str = (
+                        (open_evt.get("timestamp") if open_evt else None)
+                        or (close_evt.get("entry_time") if close_evt else None)
+                        or (close_evt.get("timestamp") if close_evt else None)
+                    )
                     exit_time_str = close_evt.get("timestamp") if close_evt else None
 
                     trade["entry_time"] = entry_time_str

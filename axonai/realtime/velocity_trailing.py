@@ -20,6 +20,15 @@ from axonai.realtime.regime_engine import RegimeState
 
 logger = logging.getLogger(__name__)
 
+# Reference volatility length-scale (pips) at which pip-distance constants are
+# unscaled. Chosen so EURUSD-normal behavior is IDENTICAL to today: the legacy
+# constants were tuned on EURUSD, whose typical 10s absolute-excursion length
+# sits around this value. ASSUMPTION: VOL_PIPS_REF = 3.0 pips.
+VOL_PIPS_REF = 3.0
+# Scaling clamp: effective constant stays within [0.4x, 2.5x] of its original.
+_VOL_SCALE_MIN = 0.4
+_VOL_SCALE_MAX = 2.5
+
 
 class VelocityTrailingManager:
     """
@@ -46,6 +55,21 @@ class VelocityTrailingManager:
         self.max_trail_distance = 15.0  # Never trail more than 15 pips from price
         self.base_trail_buffer = 5.0   # Base pips behind price, scaled by momentum
         self.min_trail_floor_pips = 2.0  # Never trail tighter than this (anti-spiral)
+
+    def _vol_scale(self, velocity: Optional[NormalizedVelocity]) -> float:
+        """Reference-ratio scale for pip-distance constants.
+
+        effective = original * (vol_pips / VOL_PIPS_REF), clamped to
+        [_VOL_SCALE_MIN, _VOL_SCALE_MAX]. Returns 1.0 (identity, behavior
+        unchanged) when vol_pips is unavailable or == VOL_PIPS_REF.
+        """
+        if velocity is None:
+            return 1.0
+        vp = getattr(velocity, "vol_pips", None)
+        if vp is None or vp <= 0.0:
+            return 1.0
+        ratio = vp / VOL_PIPS_REF
+        return max(_VOL_SCALE_MIN, min(ratio, _VOL_SCALE_MAX))
 
     def on_tick(
         self,
@@ -107,6 +131,10 @@ class VelocityTrailingManager:
 
         state = self._trail_state[ticket]
 
+        # Single volatility-length-scale multiplier reused for all pip-distance
+        # constants this tick. 1.0 (identity) when vol_pips unavailable/==REF.
+        vol_scale = self._vol_scale(velocity)
+
         # Compute dynamic market buffer (replaces static thresholds)
         if velocity and displacement and regime:
             dyn_buffer = self._buffer_engine.compute(
@@ -137,7 +165,8 @@ class VelocityTrailingManager:
 
         # Detect retest: price came back and touched SL area, now bouncing up
         retest_detected = self._detect_retest(
-            ticket, position_type, bid, ask, current_sl, lowest_price, pip
+            ticket, position_type, bid, ask, current_sl, lowest_price, pip,
+            retest_window_pips=self.retest_window_pips * vol_scale,
         )
 
         # Trail conditions:
@@ -148,7 +177,7 @@ class VelocityTrailingManager:
 
         should_trail = (
             (velocity_accelerating or retest_detected) and
-            distance_from_sl >= self.min_price_distance_to_trail and
+            distance_from_sl >= self.min_price_distance_to_trail * vol_scale and
             health_score >= 50.0
         )
 
@@ -167,7 +196,7 @@ class VelocityTrailingManager:
         # Momentum-aware trail distance: wide while the move is intact and in our
         # favor, tight as momentum exhausts. Replaces the proximity-driven collapse.
         width_mult = self._momentum_width_mult(velocity, position_type)
-        trail_distance = self._calculate_trail_distance(current_profit, width_mult)
+        trail_distance = self._calculate_trail_distance(current_profit, width_mult, vol_scale)
 
         # Include dynamic buffer info in log
         buffer_info = f" [buffer={dyn_buffer.threshold:.3f} regime={dyn_buffer.regime_name}]" if dyn_buffer else ""
@@ -207,19 +236,22 @@ class VelocityTrailingManager:
 
     def _detect_retest(
         self, ticket: int, position_type: str, bid: float, ask: float,
-        current_sl: float, lowest_price: float, pip: float
+        current_sl: float, lowest_price: float, pip: float,
+        retest_window_pips: Optional[float] = None,
     ) -> bool:
-        """Detect if price tested SL area (within 3 pips) and bounced back up."""
+        """Detect if price tested SL area (within window pips) and bounced back up."""
 
         state = self._trail_state[ticket]
+        if retest_window_pips is None:
+            retest_window_pips = self.retest_window_pips
 
         if position_type == "BUY":
             distance_to_sl = (bid - current_sl) / pip
-            # Retest: price got within 3 pips of SL and bounced back
-            retest = distance_to_sl <= self.retest_window_pips
+            # Retest: price got within window pips of SL and bounced back
+            retest = distance_to_sl <= retest_window_pips
         else:
             distance_to_sl = (current_sl - ask) / pip
-            retest = distance_to_sl <= self.retest_window_pips
+            retest = distance_to_sl <= retest_window_pips
 
         if retest:
             state["retest_count"] += 1
@@ -281,7 +313,7 @@ class VelocityTrailingManager:
         return max(0.4, min(mult, 2.5))
 
     def _calculate_trail_distance(
-        self, current_profit: float, width_mult: float
+        self, current_profit: float, width_mult: float, vol_scale: float = 1.0
     ) -> float:
         """Pips to keep behind price, driven by momentum state.
 
@@ -290,9 +322,9 @@ class VelocityTrailingManager:
         never collapse the stop (the old retest death-spiral).
         """
         profit_factor = min(current_profit / 20.0, 1.0)  # 20 pips = full profit lock
-        trail_distance = self.base_trail_buffer * width_mult * (1.0 - profit_factor * 0.2)
-        trail_distance = max(trail_distance, self.min_trail_floor_pips)
-        trail_distance = min(trail_distance, self.max_trail_distance)
+        trail_distance = self.base_trail_buffer * vol_scale * width_mult * (1.0 - profit_factor * 0.2)
+        trail_distance = max(trail_distance, self.min_trail_floor_pips * vol_scale)
+        trail_distance = min(trail_distance, self.max_trail_distance * vol_scale)
         return trail_distance
 
     def reset(self, ticket: Optional[int] = None):

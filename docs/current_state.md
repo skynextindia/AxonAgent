@@ -82,4 +82,6 @@ Resume this session with:
 claude --resume 0d4e5331-a40c-471f-85e8-20257edf3261
 PS C:\Users\rohan>  Esc to cancel
 
-
+ ❯ 1. Yes, I trust this folder ✔
+Resume this session with:
+claude --resume 0d4e5331-a40c-471f-85e8-20257edf3261

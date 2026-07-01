@@ -482,14 +482,18 @@ class TickEngine(threading.Thread):
 
             # ADAPTIVE stale threshold based on market session
             utc_hour = datetime.now(timezone.utc).hour
+            # Slow/low-liquidity ticks are NOT a dead feed. A true disconnect is
+            # caught separately by the [MT5_CHECK] path (terminal_info). These
+            # thresholds only exist to fall back to mock data when the feed is
+            # genuinely gone, so keep them well above normal inter-tick gaps.
             if 0 <= utc_hour < 9:  # Asian session (very slow)
-                stale_threshold = 30.0  # Allow 30s gaps (was 10s)
+                stale_threshold = 60.0
             elif 9 <= utc_hour < 15:  # London/morning NY
-                stale_threshold = 5.0   # Normal speed
-            elif 15 <= utc_hour < 20:  # NY session (very fast)
-                stale_threshold = 3.0   # Aggressive
+                stale_threshold = 30.0
+            elif 15 <= utc_hour < 20:  # NY session
+                stale_threshold = 20.0
             else:  # Evening/night
-                stale_threshold = 15.0  # Moderate
+                stale_threshold = 45.0
 
             is_stale = False
             if self.latest_timestamp is not None:

@@ -89,16 +89,20 @@ def serialize_position(p):
 async def handle_client(websocket):
     """Handle connection from daemon client."""
     remote = websocket.remote_address
-    print(f"Client connected to execution bridge: {remote}")
-    
+    # Routine dashboard polls (positions_get/account_info) open a short-lived
+    # connection every tick; logging each one floods the console. Only surface
+    # non-poll commands below.
+    _QUIET_CMDS = {"positions_get", "account_info"}
+
     try:
         async for message in websocket:
             try:
                 req = json.loads(message)
                 req_type = req.get("action", "")
                 
-                print(f"Execution command: {req_type} from {remote}")
-                
+                if req_type not in _QUIET_CMDS:
+                    print(f"Execution command: {req_type} from {remote}")
+
                 if req_type == "open":
                     # Send order request
                     symbol = req.get("symbol")
@@ -315,7 +319,7 @@ async def handle_client(websocket):
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
-        print(f"Client disconnected from execution bridge: {remote}")
+        pass
 
 
 # ── HTTP health check ──────────────────────────────────────────────
