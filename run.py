@@ -115,7 +115,7 @@ def main():
     )
     file_handler.setFormatter(logging.Formatter(fmt))
     logging.basicConfig(
-        level=logging.DEBUG,
+        level=logging.INFO,
         format=fmt,
         handlers=[logging.StreamHandler(), file_handler],
     )
@@ -204,14 +204,26 @@ def main():
         print(f"  Symbol: {args.symbol}")
         print()
 
-        # Import and start dashboard
+        # CRITICAL: Set feed terminal path BEFORE importing daemon/api_server
+        # to avoid early mt5_initialize() calls binding to wrong terminal
+        from axonai.default_config import DEFAULT_CONFIG
+        config = DEFAULT_CONFIG.copy()
+
+        # Apply feed path from CLI or use default (Exness)
+        feed_path = args.feed_path or config.get("mt5_terminal_path")
+        from axonai.dataflows.mt5_data import set_feed_terminal_path
+        if feed_path:
+            set_feed_terminal_path(feed_path)
+            print(f"  [+] Feed terminal path set to: {feed_path}")
+        else:
+            print("  [!] No feed terminal path configured")
+
+        # Now safe to import and start dashboard
         from axonai.realtime.api_server import start_dashboard
         server = start_dashboard(host=args.host, port=args.port)
 
         # Import and start daemon
         from axonai.realtime.daemon import AxonDaemon
-        from axonai.default_config import DEFAULT_CONFIG
-        config = DEFAULT_CONFIG.copy()
         config["symbol"] = args.symbol
         config["realtime_dry_run"] = not args.live
         # Paper-trade: simulate fills (no MT5 send). Default dry-run still sends real demo orders.

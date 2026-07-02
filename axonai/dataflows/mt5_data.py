@@ -49,16 +49,31 @@ def _load_mt5():
 
 
 def set_feed_terminal_path(path: str):
-    """Set the global fallback path for the feed terminal (e.g. Exness)."""
-    global _feed_terminal_path
+    """Set the global fallback path for the feed terminal (e.g. Exness).
+
+    CRITICAL: Shuts down and resets the cached MT5 connection so the next
+    mt5_initialize() call will reconnect to the new terminal.
+    """
+    global _feed_terminal_path, _initialized
+    logger.info("[FIX] set_feed_terminal_path(%s): shutting down existing connection to allow reconnect", path)
+    # Shutdown FIRST (while _initialized is still True), THEN reset the flag
+    mt5_shutdown()
     _feed_terminal_path = path
+    _initialized = False  # Ensure next init call actually reconnects
 
 
 def mt5_initialize(terminal_path: Optional[str] = None) -> bool:
     """Connect to the MT5 terminal. Cached — safe to call repeatedly."""
     global _initialized, _TF_MAP, _feed_terminal_path
     if _initialized:
+        logger.info("[TRACE] mt5_initialize: Already initialized with path, returning cached connection")
         return True
+
+    # Log call stack to see where init is being called from
+    import traceback
+    stack = traceback.format_stack()
+    caller = stack[-2].strip().split('\n')[-1] if len(stack) > 1 else "unknown"
+    logger.info("[INIT_TRACE] mt5_initialize called from: %s", caller)
     mt5 = _load_mt5()
 
     kwargs = {}
@@ -66,6 +81,7 @@ def mt5_initialize(terminal_path: Optional[str] = None) -> bool:
     if path_to_use:
         kwargs["path"] = path_to_use
 
+    logger.info("[TRACE] mt5_initialize: Connecting with path_to_use=%s kwargs=%s", path_to_use, kwargs)
     if not mt5.initialize(**kwargs):
         err = mt5.last_error()
         logger.warning("MT5 initialize failed: %s", err)
@@ -73,6 +89,13 @@ def mt5_initialize(terminal_path: Optional[str] = None) -> bool:
 
     _initialized = True
     atexit.register(mt5_shutdown)
+
+    # Log which terminal we're connected to
+    term_info = mt5.terminal_info()
+    logger.info("[TERMINAL_CONNECTED] company=%s name=%s path=%s",
+                term_info.company if term_info else "unknown",
+                term_info.name if term_info else "unknown",
+                term_info.path if term_info else "unknown")
 
     # Build timeframe map using actual MT5 constants
     _TF_MAP.update({
@@ -86,19 +109,20 @@ def mt5_initialize(terminal_path: Optional[str] = None) -> bool:
         "W1":  mt5.TIMEFRAME_W1,
         "MN1": mt5.TIMEFRAME_MN1,
     })
-    logger.info("MT5 connected: %s", mt5.terminal_info())
+    logger.info("MT5 connected: %s", term_info)
     return True
 
 
 def mt5_shutdown():
     """Disconnect from MT5 terminal."""
-    global _initialized
+    global _initialized, _mt5
     if _initialized:
         try:
             _load_mt5().shutdown()
         except Exception:
             pass
-        _initialized = False
+    _initialized = False
+    # Don't reset _mt5 here - keep the module reference but mark as uninitialized
 
 
 def set_trade_terminal_path(path: Optional[str]) -> None:

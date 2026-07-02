@@ -14,7 +14,10 @@ import math
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from axonai.realtime.regime_engine import RegimeState
 
 
 @dataclass
@@ -50,6 +53,9 @@ class NormalizedVelocity:
     # ── Raw (debug) ─────────────────────────────────────────────
     raw_velocity: float = 0.0
 
+    # ── Volatility length scale (EWMA of recent excursion, pips) ──
+    vol_pips: float = 0.5   # characteristic recent excursion in pips (floored)
+
 
 class VelocityNormalizer:
     """Converts raw tick-by-tick data into normalized velocity metrics.
@@ -73,6 +79,14 @@ class VelocityNormalizer:
         self._config = config or {}
         self._backtest_mode = self._config.get("backtest_mode", False)
 
+        # Dynamic velocity threshold engine
+        from axonai.realtime.velocity_threshold_engine import VelocityThresholdEngine
+        self._threshold_engine = VelocityThresholdEngine(config=config)
+        self._last_regime: Optional["RegimeState"] = None
+        self._regime_start_time: float = 0.0
+        self._pct_threshold: float = 90.0
+        self._z_threshold: float = 2.0
+
         # Rolling tick history: (price, timestamp_sec, volume)
         self._ticks: deque[tuple[float, float, float]] = deque(maxlen=window)
 
@@ -95,18 +109,49 @@ class VelocityNormalizer:
         self._session_sum: float = 0.0
         self._session_sum_sq: float = 0.0
 
-    def update(self, price: float, timestamp: datetime, volume: float = 1.0) -> NormalizedVelocity:
+        # Volatility length-scale (EWMA of per-window absolute excursion, in pips)
+        self._vol_alpha: float = 0.03      # EWMA smoothing (~ last ~33 windows)
+        self._vol_floor_pips: float = 0.5  # never let the scale collapse to ~0
+        self._vol_pips: float = self._vol_floor_pips  # seeded at floor
+
+    def update(
+        self,
+        price: float,
+        timestamp: datetime,
+        volume: float = 1.0,
+        regime: Optional["RegimeState"] = None,
+    ) -> NormalizedVelocity:
         """Process one tick and return normalized velocity state.
 
         Args:
             price: Mid price (bid+ask)/2
             timestamp: Tick timestamp (naive UTC or aware)
             volume: Tick volume (default 1)
+            regime: Optional RegimeState for dynamic thresholds
 
         Returns:
             NormalizedVelocity snapshot for this tick.
         """
         ts = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
+
+        # Compute dynamic velocity thresholds based on regime (if provided)
+        if regime and regime != self._last_regime:
+            self._last_regime = regime
+            self._regime_start_time = ts
+
+        time_in_regime = int(ts - self._regime_start_time) if self._last_regime else 0
+
+        if regime:
+            dyn_thresh = self._threshold_engine.compute(
+                regime=regime,
+                regime_confidence=regime.confidence if regime else 0.5,
+                time_in_regime_seconds=time_in_regime,
+            )
+            # Apply dynamic thresholds
+            self._pct_threshold = dyn_thresh.percentile_threshold
+            self._z_threshold = dyn_thresh.z_score_threshold
+            import logging
+            logging.getLogger(__name__).debug(f"VelocityThreshold: regime={dyn_thresh.regime_name} pct_threshold={self._pct_threshold} z_threshold={self._z_threshold}")
         
         # Reset peak on large tick gap (context transition)
         dt = ts - self._prev_timestamp if self._prev_timestamp > 0 else 1.0
@@ -125,7 +170,7 @@ class VelocityNormalizer:
         tick_rate_300s = self._tick_rate(ts, 300.0)
 
         # ── Displacement velocity (net pips/sec over window) ────
-        disp_vel, abs_vel = self._displacement_velocity(ts)
+        disp_vel, abs_vel, excursion_pips = self._displacement_velocity(ts)
 
         # ── Tick efficiency ─────────────────────────────────────
         efficiency = self._tick_efficiency(ts)
@@ -190,10 +235,18 @@ class VelocityNormalizer:
         vel_ratio = abs_vel / avg_300 if avg_300 > 0 else 1.0
 
         # ── Composite flags ─────────────────────────────────────
-        is_unusual = pct > 90.0 or z > 2.0
+        is_unusual = pct > self._pct_threshold or z > self._z_threshold
         decay_ticks_threshold = 3 if self._backtest_mode else 10
         is_decaying = decay_ratio < 0.5 and self._peak_decay_ticks > decay_ticks_threshold
         is_accelerating = self._accel_direction_count >= 3
+
+        # ── Volatility length-scale EWMA (self-updating, floored) ──
+        if excursion_pips > 0.0:
+            self._vol_pips = (
+                (1.0 - self._vol_alpha) * self._vol_pips
+                + self._vol_alpha * excursion_pips
+            )
+        self._vol_pips = max(self._vol_pips, self._vol_floor_pips)
 
         return NormalizedVelocity(
             tick_rate_10s=round(tick_rate_10s, 2),
@@ -211,6 +264,7 @@ class VelocityNormalizer:
             is_decaying=is_decaying,
             is_accelerating=is_accelerating,
             raw_velocity=round(abs_vel, 4),
+            vol_pips=round(self._vol_pips, 3),
         )
 
     def reset_session(self) -> None:
@@ -220,6 +274,7 @@ class VelocityNormalizer:
         self._session_sum_sq = 0.0
         self._peak_velocity = 0.0
         self._peak_decay_ticks = 0
+        self._vol_pips = self._vol_floor_pips
 
     def reset_peak(self) -> None:
         """Reset the peak velocity tracking (call when entering a trade)."""
@@ -234,23 +289,24 @@ class VelocityNormalizer:
         count = sum(1 for _, t, _ in self._ticks if t >= cutoff)
         return count / window_sec if window_sec > 0 else 0.0
 
-    def _displacement_velocity(self, now: float) -> tuple[float, float]:
+    def _displacement_velocity(self, now: float) -> tuple[float, float, float]:
         """Compute net and absolute velocity in pips/sec over the velocity window.
 
-        Returns (signed_displacement_pips_per_sec, absolute_pips_per_sec).
+        Returns (signed_displacement_pips_per_sec, absolute_pips_per_sec,
+        absolute_excursion_length_pips).
         """
         cutoff = now - self._vel_window_sec
         window_ticks = [(p, t) for p, t, _ in self._ticks if t >= cutoff]
 
         if len(window_ticks) < 2:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
 
         first_p, first_t = window_ticks[0]
         last_p, last_t = window_ticks[-1]
         elapsed = last_t - first_t
 
         if elapsed <= 0:
-            return 0.0, 0.0
+            return 0.0, 0.0, 0.0
 
         # Net displacement (directional)
         net_move = (last_p - first_p) / self._pip
@@ -263,7 +319,7 @@ class VelocityNormalizer:
         ) / self._pip
         abs_vel = abs_move / elapsed
 
-        return disp_vel, abs_vel
+        return disp_vel, abs_vel, abs_move
 
     def _tick_efficiency(self, now: float) -> float:
         """Ratio of net displacement to total path (0 = chop, 1 = impulse)."""

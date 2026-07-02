@@ -20,17 +20,13 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, TYPE_CHECKING
 
 from axonai.realtime.velocity_normalizer import NormalizedVelocity
-from axonai.realtime.displacement_engine import (
-    DisplacementState,
-    DISPLACEMENT_IMPULSE,
-    DISPLACEMENT_EXHAUSTION,
-    DISPLACEMENT_COMPRESSION,
-    DISPLACEMENT_TRAP,
-)
 from axonai.realtime.event_types import LiveCandle
+
+if TYPE_CHECKING:
+    from axonai.realtime.displacement_engine import DisplacementState
 
 
 # ── Regime constants ────────────────────────────────────────────────
@@ -82,6 +78,19 @@ class RegimeEngine:
     """
 
     def __init__(self, pip_mult: float = 0.0001, config: Optional[dict] = None):
+        # Late import to avoid circular dependency
+        from axonai.realtime.displacement_engine import (
+            DISPLACEMENT_IMPULSE,
+            DISPLACEMENT_EXHAUSTION,
+            DISPLACEMENT_COMPRESSION,
+            DISPLACEMENT_TRAP,
+        )
+
+        self.DISPLACEMENT_IMPULSE = DISPLACEMENT_IMPULSE
+        self.DISPLACEMENT_EXHAUSTION = DISPLACEMENT_EXHAUSTION
+        self.DISPLACEMENT_COMPRESSION = DISPLACEMENT_COMPRESSION
+        self.DISPLACEMENT_TRAP = DISPLACEMENT_TRAP
+
         self._pip = pip_mult
         self._config = config or {}
 
@@ -113,7 +122,7 @@ class RegimeEngine:
         self,
         candle: LiveCandle,
         velocity: NormalizedVelocity,
-        displacement: DisplacementState,
+        displacement: "DisplacementState",
     ) -> RegimeState:
         """Classify regime on a new candle close.
 
@@ -216,7 +225,7 @@ class RegimeEngine:
 
     # ── Scoring functions ───────────────────────────────────────
 
-    def _score_trend_expansion(self, vel: NormalizedVelocity, disp: DisplacementState) -> float:
+    def _score_trend_expansion(self, vel: NormalizedVelocity, disp: "DisplacementState") -> float:
         """Strong directional move: EMA alignment + velocity acceleration + high displacement."""
         score = 0.0
 
@@ -231,7 +240,7 @@ class RegimeEngine:
             score += 0.25
 
         # Displacement confirms direction
-        if disp.classification == DISPLACEMENT_IMPULSE:
+        if disp.classification == self.DISPLACEMENT_IMPULSE:
             score += 0.3
 
         # High tick efficiency
@@ -240,7 +249,7 @@ class RegimeEngine:
 
         return min(score, 1.0)
 
-    def _score_trend_continuation(self, vel: NormalizedVelocity, disp: DisplacementState) -> float:
+    def _score_trend_continuation(self, vel: NormalizedVelocity, disp: "DisplacementState") -> float:
         """Existing trend + moderate velocity."""
         score = 0.0
 
@@ -264,7 +273,7 @@ class RegimeEngine:
 
         return min(score, 1.0)
 
-    def _score_range_chop(self, vel: NormalizedVelocity, disp: DisplacementState) -> float:
+    def _score_range_chop(self, vel: NormalizedVelocity, disp: "DisplacementState") -> float:
         """No trend + low displacement."""
         score = 0.0
 
@@ -319,7 +328,7 @@ class RegimeEngine:
 
         return min(score, 1.0)
 
-    def _score_breakout(self, vel: NormalizedVelocity, disp: DisplacementState) -> float:
+    def _score_breakout(self, vel: NormalizedVelocity, disp: "DisplacementState") -> float:
         """Price beyond range + velocity spike + high displacement."""
         score = 0.0
 
@@ -332,7 +341,7 @@ class RegimeEngine:
             score += 0.25
 
         # High displacement (genuine move)
-        if disp.classification == DISPLACEMENT_IMPULSE:
+        if disp.classification == self.DISPLACEMENT_IMPULSE:
             score += 0.3
 
         # Previous regime was compression (breakout FROM compression)
@@ -341,7 +350,7 @@ class RegimeEngine:
 
         return min(score, 1.0)
 
-    def _score_exhaustion(self, vel: NormalizedVelocity, disp: DisplacementState) -> float:
+    def _score_exhaustion(self, vel: NormalizedVelocity, disp: "DisplacementState") -> float:
         """Velocity decaying, displacement divergence."""
         score = 0.0
 
@@ -350,7 +359,7 @@ class RegimeEngine:
             score += 0.35
 
         # Displacement confirms exhaustion
-        if disp.classification == DISPLACEMENT_EXHAUSTION:
+        if disp.classification == self.DISPLACEMENT_EXHAUSTION:
             score += 0.3
 
         # Low tick efficiency (lots of movement, no progress)
@@ -363,12 +372,12 @@ class RegimeEngine:
 
         return min(score, 1.0)
 
-    def _score_reversal(self, vel: NormalizedVelocity, disp: DisplacementState) -> float:
+    def _score_reversal(self, vel: NormalizedVelocity, disp: "DisplacementState") -> float:
         """Multi-factor reversal (scored conservatively)."""
         score = 0.0
 
         # Trap confirmed (high vel + low displacement = someone is absorbing)
-        if disp.classification == DISPLACEMENT_TRAP:
+        if disp.classification == self.DISPLACEMENT_TRAP:
             score += 0.25
 
         # Velocity decaying + displacement shifting direction
