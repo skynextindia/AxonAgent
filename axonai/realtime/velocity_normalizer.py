@@ -114,12 +114,58 @@ class VelocityNormalizer:
         self._vol_floor_pips: float = 0.5  # never let the scale collapse to ~0
         self._vol_pips: float = self._vol_floor_pips  # seeded at floor
 
+        # ── Session-bucketed velocity baselines (per-session z/percentile/vol) ──
+        # Keyed by the canonical labels produced by LiveWorldState.on_tick:
+        # 'asian','london','newyork','overlap','rollover'. Each bucket keeps its
+        # own running mean/std (count/sum/sum_sq), an in-memory percentile window,
+        # and its own vol_pips EWMA. Persisted (summary stats only) across runs so
+        # sessions warm-start instead of cold-starting each day.
+        self._buckets: dict[str, dict] = {}
+        self._bucket_warmup_min = int(self._config.get("velocity_bucket_warmup_min", 500))
+        self._bucket_save_interval = int(self._config.get("velocity_bucket_save_interval", 2000))
+        self._bucket_decay_cap = int(self._config.get("velocity_bucket_decay_cap", 20000))
+        self._bucket_pct_maxlen = int(self._config.get("velocity_bucket_pct_maxlen", 2000))
+        self._bucket_symbol = self._config.get("symbol") or self._config.get("mt5_symbol")
+        self._bucket_path = self._config.get("velocity_baselines_path") or (
+            f"reports/velocity_baselines_{self._bucket_symbol}.json"
+            if self._bucket_symbol
+            else "reports/velocity_baselines.json"
+        )
+        self._ticks_since_save = 0
+        self._load_baselines()  # warm-start from disk (if present)
+
+    def _get_bucket(self, session: str) -> dict:
+        """Lazily create/return the per-session baseline bucket.
+
+        Loaded buckets rehydrate summary stats only; percentile lists always
+        start empty and re-warm in-memory within the session.
+        """
+        b = self._buckets.get(session)
+        if b is None:
+            b = {
+                "count": 0.0,
+                "sum": 0.0,
+                "sum_sq": 0.0,
+                "vol_pips": self._vol_floor_pips,
+                "pct_hist": deque(maxlen=self._bucket_pct_maxlen),
+                "pct_sorted": [],
+            }
+            self._buckets[session] = b
+        else:
+            # Rehydrate transient percentile structures for a loaded bucket.
+            if "pct_hist" not in b:
+                b["pct_hist"] = deque(maxlen=self._bucket_pct_maxlen)
+            if "pct_sorted" not in b:
+                b["pct_sorted"] = []
+        return b
+
     def update(
         self,
         price: float,
         timestamp: datetime,
         volume: float = 1.0,
         regime: Optional["RegimeState"] = None,
+        session: Optional[str] = None,
     ) -> NormalizedVelocity:
         """Process one tick and return normalized velocity state.
 
@@ -128,6 +174,11 @@ class VelocityNormalizer:
             timestamp: Tick timestamp (naive UTC or aware)
             volume: Tick volume (default 1)
             regime: Optional RegimeState for dynamic thresholds
+            session: Optional canonical session label (asian/london/newyork/
+                overlap/rollover) supplied by the daemon. When provided, per-
+                session baselines are accumulated and used (once warmed up) for
+                z-score / percentile / vol_pips. When None (tests and any non-
+                daemon caller) behavior is byte-identical to the global path.
 
         Returns:
             NormalizedVelocity snapshot for this tick.
@@ -224,11 +275,58 @@ class VelocityNormalizer:
         bisect.insort(self._sorted_abs_velocities, abs_vel)
         self._velocity_history.append(abs_vel)
 
+        # ── Session-bucketed baseline accumulation (production path only) ──
+        # Mirrors the global maintenance above but as running stats (z) + a
+        # bounded in-memory percentile window, per session. Fallback-safe:
+        # entirely skipped when `session` is None (tests / non-daemon callers).
+        if session is not None:
+            b = self._get_bucket(session)
+            # Running z-stats with decay-at-cap (analogue of global maxlen=5000)
+            b["count"] += 1.0
+            b["sum"] += abs_vel
+            b["sum_sq"] += abs_vel * abs_vel
+            if b["count"] >= self._bucket_decay_cap:
+                # Halve all three: preserves current mean/std while letting the
+                # bucket keep adapting to regime drift across days.
+                b["count"] *= 0.5
+                b["sum"] *= 0.5
+                b["sum_sq"] *= 0.5
+            # Bounded percentile window (in-memory only; never persisted)
+            if len(b["pct_hist"]) >= self._bucket_pct_maxlen:
+                evicted = b["pct_hist"].popleft()
+                idx = bisect.bisect_left(b["pct_sorted"], evicted)
+                if idx < len(b["pct_sorted"]) and b["pct_sorted"][idx] == evicted:
+                    b["pct_sorted"].pop(idx)
+            b["pct_hist"].append(abs_vel)
+            bisect.insort(b["pct_sorted"], abs_vel)
+            # Per-bucket vol_pips EWMA (same alpha/floor as the global scale)
+            if excursion_pips > 0.0:
+                b["vol_pips"] = (
+                    (1.0 - self._vol_alpha) * b["vol_pips"]
+                    + self._vol_alpha * excursion_pips
+                )
+            b["vol_pips"] = max(b["vol_pips"], self._vol_floor_pips)
+            # Periodic autosave (bounded disk I/O)
+            self._ticks_since_save += 1
+            if self._ticks_since_save >= self._bucket_save_interval:
+                self._save_baselines()
+                self._ticks_since_save = 0
+
         # ── Percentile (rank among last N velocities) ───────────
+        # Global (blended) values are the default / warm-up fallback.
         pct = self._percentile(abs_vel)
 
         # ── Z-score against session baseline ────────────────────
         z = self._z_score(abs_vel)
+
+        # ── Session-bucketed override (only once the bucket is warm) ──
+        # Preserves current output during warm-up so existing tests stay green.
+        if session is not None:
+            b = self._buckets.get(session)
+            if b and b["count"] >= self._bucket_warmup_min:
+                z = self._bucket_z(b, abs_vel)
+            if b and len(b["pct_sorted"]) >= self._bucket_warmup_min:
+                pct = self._bucket_percentile(b, abs_vel)
 
         # ── Velocity ratio (current / 300s average) ─────────────
         avg_300 = self._avg_velocity(ts, 300.0)
@@ -248,6 +346,13 @@ class VelocityNormalizer:
             )
         self._vol_pips = max(self._vol_pips, self._vol_floor_pips)
 
+        # ── vol_pips output pick (bucketed once warm, else global) ──
+        vp = self._vol_pips
+        if session is not None:
+            b = self._buckets.get(session)
+            if b and b["count"] >= self._bucket_warmup_min:
+                vp = b["vol_pips"]
+
         return NormalizedVelocity(
             tick_rate_10s=round(tick_rate_10s, 2),
             tick_rate_60s=round(tick_rate_60s, 2),
@@ -264,7 +369,7 @@ class VelocityNormalizer:
             is_decaying=is_decaying,
             is_accelerating=is_accelerating,
             raw_velocity=round(abs_vel, 4),
-            vol_pips=round(self._vol_pips, 3),
+            vol_pips=round(vp, 3),
         )
 
     def reset_session(self) -> None:
@@ -370,6 +475,116 @@ class VelocityNormalizer:
         ) / self._pip
 
         return abs_move / elapsed
+
+    # ── Session-bucket helpers (mirror the global _z_score/_percentile math) ──
+
+    def _bucket_z(self, b: dict, value: float) -> float:
+        """Z-score of `value` against a session bucket's running stats.
+
+        Same guard/semantics as `_z_score` (returns 0.0 for count < 30).
+        """
+        n = b["count"]
+        if n < 30:
+            return 0.0
+        mean = b["sum"] / n
+        variance = (b["sum_sq"] / n) - (mean * mean)
+        std = math.sqrt(max(0.0, variance))
+        # Degenerate-variance guard: a near-constant (dead-quiet) session bucket
+        # would otherwise divide by ~0 and explode z into the thousands, latching
+        # is_unusual True every tick. Floor the denominator at 10% of the mean
+        # (plus a tiny absolute floor) so only genuine spikes read as unusual.
+        denom = max(std, 0.10 * abs(mean), 1e-6)
+        return (value - mean) / denom
+
+    def _bucket_percentile(self, b: dict, value: float) -> float:
+        """Percentile rank of `value` within a bucket's window (0-100).
+
+        Same guard/semantics as `_percentile` (returns 50.0 for < 10 samples).
+        """
+        sorted_vals = b["pct_sorted"]
+        if len(sorted_vals) < 10:
+            return 50.0
+        import bisect
+        below = bisect.bisect_left(sorted_vals, value)
+        return 100.0 * below / len(sorted_vals)
+
+    # ── Persistence (summary stats only; percentile samples stay in-memory) ──
+
+    def _load_baselines(self) -> None:
+        """Warm-start per-session baselines from disk (summary stats only).
+
+        Mirrors api_server._load_session: os.path.exists guard + try/except.
+        Percentile lists always start empty and re-warm within the session.
+        """
+        import os
+        import json
+        path = self._bucket_path
+        try:
+            if not path or not os.path.exists(path):
+                return
+            with open(path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+            buckets = state.get("buckets", {}) if isinstance(state, dict) else {}
+            for label, bs in buckets.items():
+                if not isinstance(bs, dict):
+                    continue
+                # Per-bucket guard: a single corrupt field must not abort the whole
+                # warm-start (which would silently cold-start every bucket).
+                try:
+                    self._buckets[label] = {
+                        "count": float(bs.get("count", 0.0)),
+                        "sum": float(bs.get("sum", 0.0)),
+                        "sum_sq": float(bs.get("sum_sq", 0.0)),
+                        "vol_pips": float(bs.get("vol_pips", self._vol_floor_pips)),
+                        "pct_hist": deque(maxlen=self._bucket_pct_maxlen),
+                        "pct_sorted": [],
+                    }
+                except (TypeError, ValueError):
+                    continue
+        except Exception as e:  # noqa: BLE001 - persistence must never crash the feed
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to load velocity baselines from %s: %s", path, e
+            )
+
+    def _save_baselines(self) -> None:
+        """Persist per-session baseline summary stats.
+
+        Mirrors exit_stats.to_json: mkdir parents + json.dump(indent=2), wrapped
+        in try/except -> logger.warning. Only count/sum/sum_sq/vol_pips are saved.
+        """
+        import json
+        from pathlib import Path
+        path = self._bucket_path
+        if not path:
+            return
+        try:
+            state = {
+                "version": 1,
+                "symbol": self._bucket_symbol,
+                "saved_at": datetime.utcnow().isoformat(),
+                "buckets": {
+                    label: {
+                        "count": b.get("count", 0.0),
+                        "sum": b.get("sum", 0.0),
+                        "sum_sq": b.get("sum_sq", 0.0),
+                        "vol_pips": b.get("vol_pips", self._vol_floor_pips),
+                    }
+                    for label, b in self._buckets.items()
+                },
+            }
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(state, f, indent=2)
+        except Exception as e:  # noqa: BLE001 - persistence must never crash the feed
+            import logging
+            logging.getLogger(__name__).warning(
+                "Failed to save velocity baselines to %s: %s", path, e
+            )
+
+    def save_baselines(self) -> None:
+        """Public thin wrapper for the daemon shutdown hook."""
+        self._save_baselines()
 
 
 __all__ = ["VelocityNormalizer", "NormalizedVelocity"]

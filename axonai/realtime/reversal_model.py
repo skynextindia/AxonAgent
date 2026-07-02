@@ -7,6 +7,7 @@ primary entry point for `daemon.py` and `backtester.py`.
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime
@@ -36,6 +37,8 @@ from axonai.realtime.location_engine import LocationEngine, LocationContext
 from axonai.realtime.trade_state_engine import TradeStateEngine, TradeState
 from axonai.realtime.exit_engine import ExitEngine
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass
 class EngineSnapshot:
@@ -53,6 +56,102 @@ class EngineSnapshot:
     # NEW: Lifecycle fields
     trade_state: Optional[TradeState] = None
     location_context: Optional[LocationContext] = None
+
+
+# ── Reversal-Confluence Gate constants (fail-closed MTF + level veto) ─────
+# Big-TF = daily/weekly/H4 structural levels. Micro intraday = session / M15 / H1
+# structure. Used to require a MAJOR + MICRO confluence at the reversal price.
+MAJOR_TFS = {"D1", "W1", "H4"}
+MAJOR_TYPES = {"PDH", "PDL", "PWH", "PWL", "H4_SWING"}
+MICRO_TFS = {"SESSION", "M15", "H1"}
+MICRO_TYPES = {"ASH", "ASL", "LDH", "LDL", "ROUND", "LNDH", "LNDL", "NYH", "NYL", "TODAY_H", "TODAY_L"}
+
+
+def _reversal_confluence_veto(
+    direction: Optional[str],
+    price: float,
+    pip: float,
+    h1_atr: float,
+    mtf: MTFState,
+    liq: LiquidityState,
+    vel: NormalizedVelocity,
+    disp: DisplacementState,
+    price_levels: Optional[List[PriceLevel]],
+) -> Optional[str]:
+    """Fail-closed reversal gate. Returns the FIRST skip_reason string, or None to allow.
+
+    Runs five ordered checks; any missing/ambiguous/unwarmed data => SKIP (never fire blind).
+    """
+    # GATE 1 - DIRECTION SANITY (fail-closed)
+    if direction not in ("BUY", "SELL"):
+        return "indeterminate direction"
+
+    want = 1.0 if direction == "BUY" else -1.0
+
+    # GATE 2 - MTF warm check + FADE-AT-EXTREMES context (fail-closed on unwarmed)
+    h4b, h1b, m15b = mtf.h4_bias, mtf.h1_bias, mtf.m15_bias
+    # Truly unwarmed only when ALL three biases are exactly 0.0 (EMA-None sentinel
+    # from _calculate_tf_bias). A warm-but-flat market keeps at least one non-zero
+    # bias, so it is NOT falsely blocked here.
+    if h4b == 0.0 and h1b == 0.0 and m15b == 0.0:
+        return "MTF not warm (all bias 0)"
+    # Fade-at-extremes policy: WITH-trend entries are always allowed; AGAINST the
+    # big-TF trend is allowed ONLY when the HTF move is exhausted / pulling back
+    # (a real reversal, not a falling knife). Open-space counter-trend is further
+    # blocked by GATE 3 (must be at a level) + GATE 4 (must show exhaustion/sweep).
+    big_lean = h4b + h1b
+    if big_lean * want < 0 and not (mtf.is_exhaustion_zone or mtf.is_pullback):
+        return f"against big-TF trend w/o exhaustion (H4={h4b:.2f},H1={h1b:.2f})"
+
+    # GATE 3 - MAJOR+MICRO LEVEL CONFLUENCE (no open-space / mid-move entries)
+    if not price_levels:
+        return "no levels synced (open space)"
+    side = "resistance" if direction == "SELL" else "support"  # fade resistance / bounce support
+    conf_pips = max(3.0, 0.3 * (h1_atr / pip))  # ATR-scaled 'at a level' window
+    has_major = False
+    has_micro = False
+    for lvl in price_levels:
+        if not getattr(lvl, "is_active", False):
+            continue
+        # Include the level price is sitting ON: within ~2 pips it gets relabeled
+        # "current" (not support/resistance), yet that is exactly the level being
+        # reversed. Accept "current" alongside the correct fade side.
+        lvl_dir = getattr(lvl, "direction", "")
+        if lvl_dir != side and lvl_dir != "current":
+            continue
+        if abs(price - lvl.price) / pip > conf_pips:
+            continue
+        tf = getattr(lvl, "timeframe", "")
+        lt = getattr(lvl, "level_type", "")
+        if tf in MAJOR_TFS or lt in MAJOR_TYPES:
+            has_major = True
+        if tf in MICRO_TFS or lt in MICRO_TYPES:
+            has_micro = True
+    if not has_major:
+        return "no MAJOR level at price (open space)"
+    if not has_micro:
+        return "no MICRO level confluence"
+
+    # GATE 4 - REVERSAL CONFIRMATION AT LEVEL (no falling knives; fail-closed)
+    # Falling-knife veto: an accepted/broken level = continuation, never fade it
+    if len(liq.active_breaks) > 0:
+        return "structural break in progress (falling knife)"
+    # SHARP: liquidity sweep at level + displacement flip/exhaustion
+    sharp = len(liq.active_sweeps) > 0 and (
+        disp.is_exhausting or disp.classification in ("EXHAUSTION", "TRAP", "ABSORPTION")
+    )
+    # DECAYED: momentum decay/exhaustion at level
+    decayed = vel.is_decaying and (
+        disp.is_exhausting or disp.classification == "EXHAUSTION" or disp.displacement_ratio < 0.3
+    )
+    if not (sharp or decayed):
+        return "no sharp/decayed reversal confirmation (knife)"
+
+    # GATE 5 - RAW-SPIKE-IN-VOID BACKSTOP (belt-and-suspenders)
+    if vel.is_unusual and liq.liquidity_void_active:
+        return "velocity spike in liquidity void"
+
+    return None  # all checks passed -> allow the reversal
 
 
 class ReversalModel:
@@ -99,9 +198,14 @@ class ReversalModel:
 
         self.latest_snapshot = None  # Populated on every tick by daemon.py (bug #3 fix)
 
+        # Stash of latest synced levels for the reversal-confluence gate scan
+        self._price_levels: List[PriceLevel] = []
+
     def sync_levels(self, price_levels: List[PriceLevel]) -> None:
         """Update structural support/resistance levels."""
         self.liquidity.sync_levels(price_levels)
+        # Reuse the same call for the confluence gate (only new data plumbing)
+        self._price_levels = price_levels or []
 
     def on_candle_close(self, candle: LiveCandle) -> None:
         """Process a completed candle."""
@@ -129,6 +233,7 @@ class ReversalModel:
         volume: float = 1.0,
         location_context: Optional[LocationContext] = None,  # NEW: FIX 2 - optional param
         displacement_normalizer=None,  # Optional: DisplacementNormalizer instance
+        session: Optional[str] = None,  # Canonical session label for velocity baselines
     ) -> EngineSnapshot:
         """
         Process a new tick through the entire pipeline.
@@ -138,11 +243,14 @@ class ReversalModel:
             timestamp: Tick time
             volume: Tick volume
             location_context: Optional LocationContext (if None, computed internally as fallback)
+            session: Optional canonical session label (asian/london/newyork/
+                overlap/rollover); forwarded to VelocityNormalizer for
+                session-bucketed baselines. None disables bucketing (fallback).
         """
         ts_float = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
 
         # --- TIER 1: DATA PIPELINE ---
-        vel_state = self.velocity.update(price, timestamp, volume, regime=self._last_regime_state)
+        vel_state = self.velocity.update(price, timestamp, volume, regime=self._last_regime_state, session=session)
         self._last_vel_state = vel_state
         disp_state = self.displacement.update(
             price, timestamp, volume, vel_state,
@@ -170,6 +278,20 @@ class ReversalModel:
         entry_decision = self.entry.evaluate(
             price, timestamp, vel_state, disp_state, self._last_liquidity_state, self._last_regime_state, self._last_mtf_state
         )
+
+        # 1b. FAIL-CLOSED reversal-confluence gate (single source for live + backtest).
+        # Only vet a genuine trigger; otherwise pass through unchanged.
+        if entry_decision.is_valid_entry:
+            skip = _reversal_confluence_veto(
+                entry_decision.direction, price, self._pip, self._h1_atr,
+                self._last_mtf_state, self._last_liquidity_state,
+                vel_state, disp_state, self._price_levels,
+            )
+            if skip:
+                entry_decision.is_valid_entry = False
+                entry_decision.skip_reason = skip
+                entry_decision.reason = f"GATE_SKIP: {skip}"  # observable in dashboard/logs
+                logger.info("REVERSAL GATE veto dir=%s: %s", entry_decision.direction, skip)
 
         # 2. Evaluate Active Trade Health
         phase_snap = self.phase_tracker.update(price, vel_state, disp_state, liq_state)

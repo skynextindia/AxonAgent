@@ -49,6 +49,7 @@ class EntryDecision:
     direction: Optional[str] = None              # "BUY" or "SELL"
     signal_quality: float = 0.0                  # 0.0 to 1.0
     reason: str = "Awaiting anomaly"
+    skip_reason: str = ""                         # populated by reversal-confluence gate veto (observability)
 
     # New optional fields (populated by daemon.py dependency injection)
     entry_location_context: Optional[dict] = None      # from LocationEngine

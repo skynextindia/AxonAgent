@@ -52,6 +52,10 @@ class AxonDaemon:
         self.yf_symbol = clean_sym + "=X"  # e.g. "EURUSD=X"
         self.mt5_symbol = _to_mt5_symbol(symbol, config)
         self.config = config
+        # Ensure the per-symbol velocity-baseline file is keyed correctly on every
+        # entrypoint (the `daemon` CLI path doesn't set config["symbol"]); prevents
+        # cross-pair baseline contamination. setdefault preserves an explicit value.
+        config.setdefault("symbol", self.mt5_symbol)
         self._trade_terminal_path = config.get("mt5_trade_terminal_path")
         self.offset_hours = 0
         self.tz = timezone.utc
@@ -1018,7 +1022,10 @@ class AxonDaemon:
         _t0 = time.perf_counter()
         snapshot = self.reversal_model.on_tick(
             mid, timestamp, volume, location_context=location_context,
-            displacement_normalizer=self.displacement_normalizer
+            displacement_normalizer=self.displacement_normalizer,
+            # Reuse the canonical session label already computed one line above by
+            # live_state.on_tick (DST-aware) -> session-bucketed velocity baselines.
+            session=getattr(self.live_state._state, "session", None),
         )
         _t1 = time.perf_counter()
         self._last_snapshot = snapshot
@@ -1700,6 +1707,12 @@ class AxonDaemon:
             self.tick_engine.join(timeout=5)
         except RuntimeError:
             pass
+        # Persist session-bucketed velocity baselines (tick engine already
+        # stopped, so no tick/save race). Never let this block shutdown.
+        try:
+            self.reversal_model.velocity.save_baselines()
+        except Exception as e:
+            logger.warning("Failed to save velocity baselines on shutdown: %s", e)
         stop_bridge()
         mt5_shutdown()
         self._log_stats()
