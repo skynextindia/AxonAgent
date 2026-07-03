@@ -279,19 +279,19 @@ class ReversalModel:
             price, timestamp, vel_state, disp_state, self._last_liquidity_state, self._last_regime_state, self._last_mtf_state
         )
 
-        # 1b. FAIL-CLOSED reversal-confluence gate (single source for live + backtest).
-        # Only vet a genuine trigger; otherwise pass through unchanged.
-        if entry_decision.is_valid_entry:
-            skip = _reversal_confluence_veto(
-                entry_decision.direction, price, self._pip, self._h1_atr,
-                self._last_mtf_state, self._last_liquidity_state,
-                vel_state, disp_state, self._price_levels,
-            )
-            if skip:
-                entry_decision.is_valid_entry = False
-                entry_decision.skip_reason = skip
-                entry_decision.reason = f"GATE_SKIP: {skip}"  # observable in dashboard/logs
-                logger.info("REVERSAL GATE veto dir=%s: %s", entry_decision.direction, skip)
+        # 1b. FAIL-CLOSED reversal-confluence gate — DISABLED (was blocking all entries).
+        # Re-enable by uncommenting when level/MTF data pipeline is verified.
+        # if entry_decision.is_valid_entry:
+        #     skip = _reversal_confluence_veto(
+        #         entry_decision.direction, price, self._pip, self._h1_atr,
+        #         self._last_mtf_state, self._last_liquidity_state,
+        #         vel_state, disp_state, self._price_levels,
+        #     )
+        #     if skip:
+        #         entry_decision.is_valid_entry = False
+        #         entry_decision.skip_reason = skip
+        #         entry_decision.reason = f"GATE_SKIP: {skip}"  # observable in dashboard/logs
+        #         logger.info("REVERSAL GATE veto dir=%s: %s", entry_decision.direction, skip)
 
         # 2. Evaluate Active Trade Health
         phase_snap = self.phase_tracker.update(price, vel_state, disp_state, liq_state)
