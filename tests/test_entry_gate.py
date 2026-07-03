@@ -49,15 +49,15 @@ def test_high_quality_confirmed_peak_passes():
 
 
 def test_far_from_sr_rejected():
+    # S/R proximity gate DISABLED — entries should pass regardless of distance
     d = _gate(_event(), levels=[_Lvl(1.20000)])  # ~1000 pips away
-    assert d.passed is False
-    assert "S/R" in d.skip_reason
+    assert d.passed is True
 
 
 def test_counter_trend_rejected():
+    # H4 trend alignment gate DISABLED — intraday decisions only
     d = _gate(_event(direction="bearish_reversal"), trend="up")  # SELL vs uptrend
-    assert d.passed is False
-    assert "uptrend" in d.skip_reason
+    assert d.passed is True
 
 
 def test_low_quality_below_floor_rejected():

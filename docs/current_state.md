@@ -95,3 +95,41 @@ claude --resume 0d4e5331-a40c-471f-85e8-20257edf3261
 PS C:\Users\rohan>  Esc to cancel
 PS C:\Users\rohan>
 
+
+Fixed and verified — compiles clean, 35/35 tests pass, default path still byte-identical.
+
+Session-bucketed velocity baselines — done (working tree, NOT committed)
+
+What it does: velocity z-score/percentile/vol_pips are now computed against the current session's own history (asian/london/newyork/overlap/rollover — reusing your existing DST-aware live_state labels), not one blended 5000-tick buffer. So a London-open surge is judged against London norms, not stale Asian ticks.
+
+Files: velocity_normalizer.py (buckets + persistence + warm-up fallback), reversal_model.py + daemon.py (one optional session param threaded through; symbol injected into config).
+
+Safety properties baked in:
+- Behavior-preserving — session=None (all tests / non-daemon) → global path verbatim. Live path uses the bucket only after ≥500 samples; below that, global values. That's why the 35 tests stay green.
+- Persisted + warm-started — reports/velocity_baselines_{symbol}.json, saved every 2000 ticks + on shutdown, reloaded on init.
+- Bounded — 5 buckets, decay-cap at 20000 to keep adapting across days.
+
+Adversarial-review defects I fixed:
+1. [HIGH] Exploding z in dead-quiet sessions — _bucket_z divided by a ~0 std → z blew to ry tick. Now the denominator is floored at max(std, 10%·mean, 1e-6): real spikes stillflag, jitter doesn't. (Left global _z_score untouched to keep behavior-preservation.)
+2. [HIGH] Cross-pair contamination — the daemon CLI path never set config["symbol"], so afile. Now the daemon injects symbol centrally + the normalizer falls back to mt5_symbol.
+3. [MED] Loader fragility — one corrupt field no longer aborts the whole warm-start (per-bucket try/except).
+
+Accepted (watch on paper, not blocking): the z/percentile switch from global→bucket is a hard flip at 500 samples (small discontinuity), and the autosave does a small synchronous JSON write every 2000 ticks.
+
+Whole session — uncommitted state
+
+Two independent changes now sit in the working tree, both verified, nothing committed (your rule):
+- Entry confluence gate (reversal_model.py, entry_state_machine.py) — fade-at-extremes, f/R, no falling knives.
+- Session velocity baselines (velocity_normalizer.py, reversal_model.py, daemon.py).
+
+Paper-test plan (both at once)
+
+python run.py --direct --paper --symbol EURUSD, then check:
+1. It takes some trades (entry gate not frozen) and refuses open-space counter-trend sell
+2. reports/velocity_baselines_EURUSD.json appears and fills across sessions.
+3. At London/NY open, velocity no longer reads as absurdly "unusual" once the bucket warm
+4. No is_unusual-spamming during a dead-quiet Asian patch.
+
+Want me to save a session checkpoint, or add the vol_pips debug log so you can capture the calibration number in the same paper run?
+Resume this session with:
+claude --resume 0d4e5331-a40c-471f-85e8-20257edf3261

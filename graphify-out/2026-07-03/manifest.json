@@ -165,8 +165,8 @@
     "semantic_hash": "5f4fc7eeb24a2e175d7a39806e70010c"
   },
   "axonai/realtime/daemon.py": {
-    "mtime": 1783018006.174228,
-    "ast_hash": "14c5cbebf48ca5eafd0783f55d45f7ce",
+    "mtime": 1782933783.4781284,
+    "ast_hash": "af4be890cf12ff433a31f62910f3d048",
     "semantic_hash": ""
   },
   "axonai/realtime/displacement_buffer_engine.py": {
@@ -190,9 +190,9 @@
     "semantic_hash": "2771b5709058e3d0947ed9db32c035b1"
   },
   "axonai/realtime/entry_state_machine.py": {
-    "mtime": 1783015710.1163874,
-    "ast_hash": "996162b527944f326f889866ca2feb1c",
-    "semantic_hash": ""
+    "mtime": 1782425169.3873208,
+    "ast_hash": "91dd249a9cff7dcdccc63b6d23fad539",
+    "semantic_hash": "91dd249a9cff7dcdccc63b6d23fad539"
   },
   "axonai/realtime/event_detector.py": {
     "mtime": 1782158738.6829994,
@@ -280,9 +280,9 @@
     "semantic_hash": "5a51d3fe6780608a4c15330bb5bd4163"
   },
   "axonai/realtime/reversal_model.py": {
-    "mtime": 1783017551.2469661,
-    "ast_hash": "c6332c517b7c2a9c2ed680b227053d7f",
-    "semantic_hash": ""
+    "mtime": 1782591219.9574037,
+    "ast_hash": "3134059f6419ea7902063306bbb1b3ad",
+    "semantic_hash": "3134059f6419ea7902063306bbb1b3ad"
   },
   "axonai/realtime/risk_guard.py": {
     "mtime": 1782032583.0,
@@ -330,8 +330,8 @@
     "semantic_hash": "3bfd0d6d9f55bbf43aa92bf10139202d"
   },
   "axonai/realtime/velocity_normalizer.py": {
-    "mtime": 1783017995.8872564,
-    "ast_hash": "768e31839508dae49b5d12fefb5d7ad2",
+    "mtime": 1782933863.573916,
+    "ast_hash": "37a6f576369f656d13a29f0bb7f00604",
     "semantic_hash": ""
   },
   "axonai/realtime/velocity_threshold_engine.py": {
@@ -880,8 +880,8 @@
     "semantic_hash": "ffac51812f90de0534bfebf7a5d67a36"
   },
   "docs/current_state.md": {
-    "mtime": 1782939838.839689,
-    "ast_hash": "2203440f3ea292a6b81846af95dbacd2",
+    "mtime": 1782851612.28732,
+    "ast_hash": "3f4edc7e60f00e7c2b67a7c8d97e533d",
     "semantic_hash": ""
   },
   "docs/progress.md": {

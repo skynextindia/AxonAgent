@@ -1,16 +1,16 @@
-# Graph Report - AxonAgent-Agy  (2026-07-03)
+# Graph Report - AxonAgent-Agy  (2026-07-02)
 
 ## Corpus Check
-- 177 files · ~365,137 words
+- 177 files · ~363,350 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 2562 nodes · 4083 edges · 226 communities (152 shown, 74 thin omitted)
-- Extraction: 94% EXTRACTED · 6% INFERRED · 0% AMBIGUOUS · INFERRED: 239 edges (avg confidence: 0.52)
+- 2540 nodes · 4159 edges · 231 communities (151 shown, 80 thin omitted)
+- Extraction: 93% EXTRACTED · 7% INFERRED · 0% AMBIGUOUS · INFERRED: 291 edges (avg confidence: 0.51)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `689a7319`
+- Built from commit: `7c980730`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -78,10 +78,15 @@
 - [[_COMMUNITY_Community 60|Community 60]]
 - [[_COMMUNITY_Community 61|Community 61]]
 - [[_COMMUNITY_Community 62|Community 62]]
+- [[_COMMUNITY_Community 63|Community 63]]
+- [[_COMMUNITY_Community 64|Community 64]]
 - [[_COMMUNITY_Community 65|Community 65]]
 - [[_COMMUNITY_Community 66|Community 66]]
 - [[_COMMUNITY_Community 67|Community 67]]
+- [[_COMMUNITY_Community 68|Community 68]]
 - [[_COMMUNITY_Community 69|Community 69]]
+- [[_COMMUNITY_Community 70|Community 70]]
+- [[_COMMUNITY_Community 71|Community 71]]
 - [[_COMMUNITY_Community 72|Community 72]]
 - [[_COMMUNITY_Community 75|Community 75]]
 - [[_COMMUNITY_Community 76|Community 76]]
@@ -218,15 +223,15 @@
 
 ## God Nodes (most connected - your core abstractions)
 1. `Chat Conversation` - 102 edges
-2. `NormalizedVelocity` - 84 edges
-3. `LiveCandle` - 70 edges
-4. `DisplacementState` - 59 edges
-5. `BacktestEngine` - 47 edges
-6. `AxonDaemon` - 42 edges
-7. `EventDetector` - 41 edges
-8. `MarketContextBuilder` - 40 edges
-9. `RegimeState` - 40 edges
-10. `EntryStateMachine` - 35 edges
+2. `NormalizedVelocity` - 83 edges
+3. `LiveCandle` - 74 edges
+4. `DisplacementState` - 70 edges
+5. `RegimeState` - 48 edges
+6. `BacktestEngine` - 47 edges
+7. `LiquidityState` - 44 edges
+8. `AxonDaemon` - 43 edges
+9. `EventDetector` - 41 edges
+10. `EntryStateMachine` - 40 edges
 
 ## Surprising Connections (you probably didn't know these)
 - `Multi-AI backtest review (58% WR, PF 1.69)` --semantically_similar_to--> `Backtest credibility concern (95.5% WR / 62x PF)`  [INFERRED] [semantically similar]
@@ -237,8 +242,8 @@
   tests/test_daemon_e2e.py → axonai/realtime/daemon.py
 - `TestSmartCooldown` --uses--> `AxonDaemon`  [INFERRED]
   tests/test_smart_cooldown.py → axonai/realtime/daemon.py
-- `TestVelocitySpikeQuietMarket` --uses--> `EntryStateMachine`  [INFERRED]
-  tests/test_velocity_spike_quiet_market.py → axonai/realtime/entry_state_machine.py
+- `TestCandleBuilder` --uses--> `CandleBuilder`  [INFERRED]
+  tests/test_realtime_core.py → axonai/realtime/tick_engine.py
 
 ## Import Cycles
 - None detected.
@@ -251,35 +256,35 @@
 - **Six math engines aggregated into MarketContext** — docs_marketcontext_dataclass, docs_marketcontext_builder, docs_marketcontext_six_engines, docs_phase_5_1_evaluate_with_context [EXTRACTED 0.75]
 - **Velocity/displacement reversal entry pipeline** — docs_progress_velocity_normalizer, docs_displacement_normalizer_concept, docs_displacement_engine_classify, docs_progress_entry_state_machine, docs_live_trade_smart_cooldown [INFERRED 0.75]
 
-## Communities (226 total, 74 thin omitted)
+## Communities (231 total, 80 thin omitted)
 
 ### Community 0 - "Displacement & Entry State Machine"
-Cohesion: 0.08
-Nodes (26): EntryStateMachine, datetime, DisplacementState, LiquidityState, MTFState, Evaluate conditions and transition states., Evaluate entry decision using MarketContext quality scores.          Uses qual, Look for the initial anomaly (Microstructure Peak). (+18 more)
+Cohesion: 0.07
+Nodes (25): EntryDecision, EntryStateMachine, datetime, Evaluate conditions and transition states., Evaluate entry decision using MarketContext quality scores.          Uses qual, Look for the initial anomaly (Microstructure Peak)., Wait for the anomaly to form a trap or show absorption., Wait for the price to break away from the trap in our direction. (+17 more)
 
 ### Community 1 - "Adaptive Exit Engine"
 Cohesion: 0.28
 Nodes (5): MTFContext, Calculate a -1.0 to 1.0 bias score for a specific timeframe., Computes multi-timeframe alignment scores using EMAs and structure., Update state when a candle closes on any timeframe., Calculate the current multi-timeframe alignment.
 
 ### Community 2 - "MT5 Data & Evidence Extraction"
-Cohesion: 0.06
-Nodes (56): extract_market_evidence(), MarketEvidence, Extract structured facts from raw MT5 data in pure Python. Fail safe if MT5 is u, _ensure_symbol_visible(), _fetch_bars(), get_broker_tz_offset(), get_mt5_atr(), get_mt5_indicators() (+48 more)
+Cohesion: 0.08
+Nodes (47): extract_market_evidence(), Extract structured facts from raw MT5 data in pure Python. Fail safe if MT5 is u, _ensure_symbol_visible(), _fetch_bars(), get_broker_tz_offset(), get_mt5_atr(), get_mt5_indicators(), get_mt5_live_price() (+39 more)
 
 ### Community 3 - "Event Detection Engine"
-Cohesion: 0.07
-Nodes (32): get_dashboard(), Get the active global dashboard server instance., EventDetector, datetime, Pure Python event detection engine.  Watches the live state for structural mar, Add trigger candle details to the event details if available., Set pip multiplier based on pair type., Lightweight per-tick checks. (+24 more)
+Cohesion: 0.06
+Nodes (44): EventDetector, datetime, Pure Python event detection engine.  Watches the live state for structural mar, Add trigger candle details to the event details if available., Set pip multiplier based on pair type., Lightweight per-tick checks., Invoke microstructure peak and climax exhaustion detector for both systems., Structural checks on candle close. (+36 more)
 
 ### Community 4 - "API Server & Backtester"
-Cohesion: 0.09
-Nodes (14): datetime, LiveCandle, Dedicated thread that polls MT5 for ticks and feeds candle builders.      Call, Expose tick_buffer as a list., Calculate order imbalance across 10s, 60s, and 300s windows., Lazy-load and initialize MT5., Pre-seed active incomplete candles from MT5., Fetch new ticks since last known tick time. (+6 more)
+Cohesion: 0.06
+Nodes (22): CandleBuilder, datetime, LiveCandle, Dedicated thread that polls MT5 for ticks and feeds candle builders.      Call, Expose tick_buffer as a list., Calculate order imbalance across 10s, 60s, and 300s windows., Lazy-load and initialize MT5., Pre-seed active incomplete candles from MT5. (+14 more)
 
 ### Community 5 - "Charting Library (minified JS)"
-Cohesion: 0.07
-Nodes (24): EntryDecision, Entry State Machine.  Replaces the legacy stateless boolean EntryGate. Impleme, The output of the entry state machine., LevelState, LiquidityEngine, LiquidityEvent, datetime, Liquidity Pool Engine.  Upgrades the legacy LevelBehaviorTracker. Instead of jus (+16 more)
+Cohesion: 0.10
+Nodes (13): LevelState, LiquidityEngine, LiquidityEvent, datetime, Process one tick against all active levels., Determine if an active breach is a sweep or a structural break., Represents a specific interaction with a price level., Live state of a single price level. (+5 more)
 
 ### Community 6 - "Charting Library (minified JS)"
-Cohesion: 0.08
-Nodes (27): High-fidelity historical backtesting engine with candle, peak, reversal, and swe, AxonAI real-time trading daemon.  Always-alive process that monitors MT5 tick, EventPriority, EventType, Event type definitions for the real-time trading engine., axonai.realtime – Real-time trading engine components., CandleBuilder, Real-time tick ingestion engine.  Continuously polls MT5 for raw tick data and (+19 more)
+Cohesion: 0.18
+Nodes (10): LevelBehavior, datetime, Tick-level behavior tracking around price levels.  Monitors how price interacts, Process one tick across all active levels. O(n) where n = levels., Direct access for EventDetector queries., Per-level real-time tick behavior tracking state., Initialize a new approach tracking cycle., Enforce max approach duration. (+2 more)
 
 ### Community 7 - "Market Context Builder"
 Cohesion: 0.09
@@ -298,68 +303,68 @@ Cohesion: 0.25
 Nodes (4): Manage velocity-based trailing stops on active MT5 positions., Send an order via the bridge subprocess., Flatten all positions on the active → wind-down session transition.          F, Close every open position for this symbol/magic. Returns count closed.
 
 ### Community 11 - "Charting Library (minified JS)"
-Cohesion: 0.22
-Nodes (6): Notification and alert dispatch module for AxonAI., Dispatch an alert message to configured destinations (Telegram, Webhook)., send_alert(), Risk management and drawdown circuit breaker for AxonAI.  Monitors daily profit/, Trade execution module for MetaTrader 5.  Performs live order routing, positio, Unit and integration tests for MT5TradeExecutor.
+Cohesion: 0.17
+Nodes (11): get_mt5_trade(), mt5_initialize_trade(), Initialize separate MT5 connection for trade execution. Supports dual-terminal s, Get the MT5 instance for trade execution., Notification and alert dispatch module for AxonAI., Dispatch an alert message to configured destinations (Telegram, Webhook)., send_alert(), Trade execution module for MetaTrader 5.  Performs live order routing, positio (+3 more)
 
 ### Community 12 - "Charting Library (minified JS)"
-Cohesion: 0.23
+Cohesion: 0.21
 Nodes (8): MT5TradeExecutor, Any, Handles sending order requests to MetaTrader 5 (either directly or via Execution, Simulate an instant fill at the requested price (paper-trade mode)., Helper to convert OrderSendResult to a dictionary., Get MT5 instance: prefer trade terminal (dual-terminal), fall back to main MT5., Convert a 5-tier signal into an MT5 order action.          Signals: Buy, Overw, Send a market order with dynamic SL/TP and position sizing to MT5.
 
 ### Community 13 - "Charting Library (minified JS)"
-Cohesion: 0.25
+Cohesion: 0.29
 Nodes (3): ExitRecord, ExitStats, Exit Statistics Collector.  Records every exit event with reason, pips, phase, c
 
 ### Community 14 - "Level Behavior Tracker"
-Cohesion: 0.08
-Nodes (23): LevelBehavior, LevelBehaviorTracker, datetime, Tick-level behavior tracking around price levels.  Monitors how price interacts, Process one tick across all active levels. O(n) where n = levels., Return current level behavior state for serialization into MarketEvidence., Direct access for EventDetector queries., Quick check: is price absorbing at this level? (+15 more)
+Cohesion: 0.13
+Nodes (11): LevelBehaviorTracker, Quick check: is price absorbing at this level?, How many times has this level been attacked?, How many consecutive approaches without full pullback?, Remove behaviors for levels no longer active or not seen for a while., Clear all tracked behavior state., Tracks tick-level interactions with all active PriceLevels.      Call ``update(m, make_tick() (+3 more)
 
 ### Community 15 - "Community 15"
 Cohesion: 0.08
 Nodes (32): generate_session_summary(), Read reports/dry_run_session.jsonl and print a formatted summary., lookup(), MatrixAction, Velocity-Displacement Matrix Lookup.  Pure function that maps velocity percentil, Actions from velocity-displacement matrix lookup., Matrix lookup: velocity × displacement × location → action.      Args:         v, backtest() (+24 more)
 
 ### Community 16 - "Community 16"
-Cohesion: 0.13
-Nodes (11): Detect if price tested SL area (within window pips) and bounced back up., Calculate aggressiveness based on LIVE conditions, not fixed thresholds., Momentum-state multiplier in [0.4, 2.5].          High (give the move room) when, Pips to keep behind price, driven by momentum state.          width_mult (from m, Clear trail state when position closes., Real-time velocity trailing with dynamic market buffer adaptation.      Key insi, Reference-ratio scale for pip-distance constants.          effective = original, Real-time velocity trailing with retest detection and dynamic market buffer. (+3 more)
+Cohesion: 0.12
+Nodes (12): Detect if price tested SL area (within window pips) and bounced back up., Calculate aggressiveness based on LIVE conditions, not fixed thresholds., Momentum-state multiplier in [0.4, 2.5].          High (give the move room) when, Pips to keep behind price, driven by momentum state.          width_mult (from m, Clear trail state when position closes., Real-time velocity trailing with dynamic market buffer adaptation.      Key insi, Reference-ratio scale for pip-distance constants.          effective = original, Real-time velocity trailing with retest detection and dynamic market buffer. (+4 more)
 
 ### Community 17 - "Community 17"
 Cohesion: 0.11
 Nodes (31): AlphaVantageRateLimitError, _filter_csv_by_date_range(), format_datetime_for_api(), get_api_key(), _make_api_request(), Retrieve the API key for Alpha Vantage from environment variables., Convert various date formats to YYYYMMDDTHHMM format required by Alpha Vantage A, Exception raised when Alpha Vantage API rate limit is exceeded. (+23 more)
 
 ### Community 18 - "Community 18"
-Cohesion: 0.09
-Nodes (18): PeakDetector, PeakSignal, datetime, Peak and climax exhaustion detection engine with advanced tick microstructure me, Detects price exhaustion peaks, volume climaxes, price-per-tick efficiency colla, Update indicators with new tick data and check for peaks.                  Retur, Live tick behavior analysis — velocity, imbalance, microstructure peaks, level i, Process one tick through all detectors.          Args:             bid: Current (+10 more)
+Cohesion: 0.16
+Nodes (8): PeakDetector, PeakSignal, datetime, Peak and climax exhaustion detection engine with advanced tick microstructure me, Detects price exhaustion peaks, volume climaxes, price-per-tick efficiency colla, Update indicators with new tick data and check for peaks.                  Retur, Live tick behavior analysis — velocity, imbalance, microstructure peaks, level i, TestPeakDetector
 
 ### Community 19 - "Community 19"
-Cohesion: 0.20
-Nodes (5): Main thread: blocks on event queue, fires graph on valid events., Smart dynamic cooldown based on trade outcome and direction., Log daemon statistics., Handle SIGINT/SIGTERM for graceful shutdown., Append an event to the dry run session log.
+Cohesion: 0.13
+Nodes (10): AxonDaemon, Main thread: blocks on event queue, fires graph on valid events., Poll slow MT5 endpoints every 1s via bridge. Never blocks tick thread., Persistently log every generated signal to reports/signals.jsonl and reports/sig, Smart dynamic cooldown based on trade outcome and direction., Log daemon statistics., Handle SIGINT/SIGTERM for graceful shutdown., Append an event to the dry run session log. (+2 more)
 
 ### Community 20 - "Community 20"
 Cohesion: 0.08
-Nodes (19): get_dst_session_hours(), LiveMarketEvidence, PriceLevel, datetime, Reset and recalculate all institutional levels daily using local history., Reset PWH/PWL weekly using local history., Update indicators and handle level invalidation on candle close., Scan self._m15_candles to find local swing highs and swing lows (window of 3) as (+11 more)
+Nodes (19): get_dst_session_hours(), LiveMarketEvidence, datetime, Reset and recalculate all institutional levels daily using local history., Reset PWH/PWL weekly using local history., Update indicators and handle level invalidation on candle close., Scan self._m15_candles to find local swing highs and swing lows (window of 3) as, Invalidate levels if closed through, too old, etc. (+11 more)
 
 ### Community 21 - "Community 21"
 Cohesion: 0.24
-Nodes (11): Set the global fallback path for the feed terminal (e.g. Exness).      CRITICA, set_feed_terminal_path(), get_windows_host_ip(), is_windows(), is_wsl(), main(), Check if running inside WSL., Check if running on native Windows. (+3 more)
+Nodes (7): MarketContext, Test MarketContext immutability and structure., MarketContext dataclass must be frozen (immutable)., MarketContext includes all 6 math engine outputs., Summary should be human-readable., Create a basic MarketContext for testing., TestMarketContext
 
 ### Community 22 - "Community 22"
-Cohesion: 0.10
-Nodes (13): LiveCandle, The unified Market-State-Aware Reversal Engine., Process a completed candle., Tell the engine a trade was executed so it can manage it., Tell the engine a trade was closed., Expose config for update propagation., ReversalModel, Complete the trade record and write to disk. (+5 more)
+Cohesion: 0.13
+Nodes (10): AxonAI real-time trading daemon.  Always-alive process that monitors MT5 tick, axonai.realtime – Real-time trading engine components., Real-time tick ingestion engine.  Continuously polls MT5 for raw tick data and, Trade Analytics Tracker.  Captures comprehensive pre-trade context and post-trad, Complete the trade record and write to disk., Complete lifecycle record of a single trade., Records trade history for off-line evaluation., Create a new trade record with pre-trade context. (+2 more)
 
 ### Community 23 - "Community 23"
-Cohesion: 0.06
-Nodes (28): datetime, DisplacementState, LiquidityState, MTFState, Update structural support/resistance levels., Process a new tick through the entire pipeline.          Args:             pr, Fail-closed reversal gate. Returns the FIRST skip_reason string, or None to allo, _reversal_confluence_veto() (+20 more)
+Cohesion: 0.12
+Nodes (12): datetime, Process one tick and return normalized velocity state.          Args:, Reset session baseline (call on session boundary)., Reset the peak velocity tracking (call when entering a trade)., Ticks per second over the last `window_sec` seconds., Compute net and absolute velocity in pips/sec over the velocity window., Ratio of net displacement to total path (0 = chop, 1 = impulse)., Rank `value` among the rolling velocity window (0-100). (+4 more)
 
 ### Community 24 - "Community 24"
 Cohesion: 0.14
 Nodes (19): get_category_for_method(), get_vendor(), Get the category that contains the specified method., Get the configured vendor for a data category or specific tool method.     Tool-, Route method calls to appropriate vendor implementation with fallback support., route_to_vendor(), Execute a yfinance call with exponential backoff on rate limits.      yfinance r, yf_retry() (+11 more)
 
 ### Community 25 - "Community 25"
-Cohesion: 0.36
-Nodes (3): Test session labels from world_state.py session logic., Replicate the session logic from world_state.py lines 167-186., TestSessionDetection
+Cohesion: 0.25
+Nodes (6): FastAPI WebSocket server for real-time visual signaling dashboard.  Integrates, Launch the API and web server in a daemon thread., Helper to initialize and start the global dashboard server., start_dashboard(), main(), Start dashboard server + mock feeder.
 
 ### Community 26 - "Community 26"
-Cohesion: 0.38
-Nodes (6): get_mt5_trade(), mt5_initialize_trade(), Initialize separate MT5 connection for trade execution. Supports dual-terminal s, Get the MT5 instance for trade execution., 1. Initialize MT5 (trade terminal)     2. Get current price     3. Calculate SL/, test_live_entry()
+Cohesion: 0.15
+Nodes (10): Process one tick through all detectors.          Args:             bid: Current, Return current rolling statistics as a dict (for dashboard / debug)., Return level behavior summary., Flush and close the current log file., Append one JSON line to the rolling log file., Remove oldest log files beyond max_log_files., Serialisable snapshot of tick behaviour at a point in time., Processes live ticks through multiple detectors and logs results.      Usage: (+2 more)
 
 ### Community 27 - "Community 27"
 Cohesion: 0.25
@@ -370,48 +375,48 @@ Cohesion: 0.10
 Nodes (17): DisplacementNormalizer, NormalizedDisplacement, Displacement ratio normalization layer.  Converts raw displacement ratios into z, Clear rolling window (call on session boundary)., Output snapshot of displacement normalization on every tick., Computes z-scores for displacement ratios over rolling time windows.      Design, Args:             window_sec: Rolling time window in seconds (default 300 = 5 mi, Process one displacement ratio and return normalized state.          Args: (+9 more)
 
 ### Community 29 - "Community 29"
-Cohesion: 0.09
-Nodes (19): FakeDisplacement, FakeLocationContext, FakeSnapshot, FakeVelocity, datetime, Trade State Engine: Lifecycle Phase Tracking.  Tracks trade lifecycle phases (, Register a new trade with the state engine., Update trade state every tick.          Args:             price: Current pric (+11 more)
+Cohesion: 0.08
+Nodes (17): FakeDisplacement, FakeLocationContext, FakeSnapshot, FakeVelocity, datetime, Trade State Engine: Lifecycle Phase Tracking.  Tracks trade lifecycle phases (, Register a new trade with the state engine., Update trade state every tick.          Args:             price: Current pric (+9 more)
 
 ### Community 30 - "Community 30"
-Cohesion: 0.12
-Nodes (19): Execution engine for filtering and dispatching trades via MT5., LLM bridge for high-value decision making., MarketContext, MarketContextBuilder, Any, Compressed, complete picture of current market conditions passed to the LLM., Constructs MarketContext snapshorts from multiple live components., Classify trading session using DST-aware timezone boundaries. (+11 more)
+Cohesion: 0.14
+Nodes (15): LLM bridge for high-value decision making., MarketContext, MarketContextBuilder, Any, Compressed, complete picture of current market conditions passed to the LLM., Constructs MarketContext snapshorts from multiple live components., Classify trading session using DST-aware timezone boundaries., Assemble the complete context object. (+7 more)
 
 ### Community 31 - "Community 31"
 Cohesion: 0.10
 Nodes (15): Test smart dynamic cooldown logic.  Smart cooldown adjusts based on trade outcom, After cooldown expires, _seconds_until_ready returns 0., With multiple active positions, uses their collective state., Scenario: Trade loses 5 pips, next signal within 20 sec should be allowed., Scenario: Trade wins +5 pips, cooldown should be long (120s)., Test dynamic cooldown based on trade profit/loss., Create a mock daemon with trade state., No active trade → 30 second fast recovery cooldown. (+7 more)
 
 ### Community 32 - "Community 32"
-Cohesion: 0.05
-Nodes (47): DisplacementBufferEngine, DynamicDisplacementThresholds, Dynamic Displacement Buffer Engine for Adaptive Entry Thresholds.  Replaces stat, Compute dynamic displacement thresholds from regime.          Args:, Output: dynamic entry thresholds based on market regime., Computes dynamic displacement thresholds from market regime.      Adapts impulse, Args:             config: Optional config dict with:               - impulse_rat, DisplacementEngine (+39 more)
+Cohesion: 0.06
+Nodes (44): DisplacementBufferEngine, DynamicDisplacementThresholds, Dynamic Displacement Buffer Engine for Adaptive Entry Thresholds.  Replaces stat, Compute dynamic displacement thresholds from regime.          Args:, Output: dynamic entry thresholds based on market regime., Computes dynamic displacement thresholds from market regime.      Adapts impulse, Args:             config: Optional config dict with:               - impulse_rat, DisplacementEngine (+36 more)
 
 ### Community 33 - "Community 33"
-Cohesion: 0.14
-Nodes (11): DashboardServer, FastAPI WebSocket server for real-time visual signaling dashboard.  Integrates, Manages the FastAPI lifecycle and WebSocket broadcasts., Send all cached state history to a newly connected client., Load session state from disk on startup., Launch the API and web server in a daemon thread., Bind endpoints to FastAPI app., Target for Uvicorn runner inside the thread. (+3 more)
+Cohesion: 0.20
+Nodes (7): DashboardServer, Manages the FastAPI lifecycle and WebSocket broadcasts., Send all cached state history to a newly connected client., Load session state from disk on startup., Bind endpoints to FastAPI app., Target for Uvicorn runner inside the thread., WebSocket
 
 ### Community 34 - "Community 34"
-Cohesion: 0.13
-Nodes (10): AxonDaemon, LiveCandle, Warm MTF EMAs, regime, and daily levels from historical bars before         the, Called by TickEngine when any timeframe candle closes., Persistently log every generated signal to reports/signals.jsonl and reports/sig, Poll slow MT5 endpoints every 1s via bridge. Never blocks tick thread., Describe the daemon's execution mode for the dashboard badge., Always-alive trading daemon.      Lifecycle:     1. Initialize MT5 connection (+2 more)
+Cohesion: 0.20
+Nodes (5): LiveCandle, Warm MTF EMAs, regime, and daily levels from historical bars before         the, Called by TickEngine when any timeframe candle closes., Describe the daemon's execution mode for the dashboard badge., Cold start and enter main event loop.
 
 ### Community 35 - "Community 35"
 Cohesion: 0.17
-Nodes (7): datetime, MarketContext, Detect if stops are being hunted/manipulated.          Returns: (stop_hunt_detec, Estimate how many ticks the reversal signal is lagged.          A lagged reversa, Track how long displacement has been in current classification., How many ticks until this signal becomes stale/invalid?          Signals expire, Assemble MarketContext with all quality scores calculated.
+Nodes (7): datetime, MarketContext, Score 0-100: How clear/strong is the reversal signal?          Multi-factor scor, Estimate how many ticks the reversal signal is lagged.          A lagged reversa, Track how long displacement has been in current classification., How many ticks until this signal becomes stale/invalid?          Signals expire, Assemble MarketContext with all quality scores calculated.
 
 ### Community 36 - "Community 36"
-Cohesion: 0.33
-Nodes (4): load_dataset(), main(), patched_load_historical_data(), run_simulation_job()
+Cohesion: 0.17
+Nodes (6): Manages raw tick polling threads and normalized ingestion from MT5., Stop all polling threads and shutdown MT5 link., Register a callback for processing SignalState updates., Initialize connection to MetaTrader 5., Tight loop polling for symbol ticks., TickReceiver
 
 ### Community 37 - "Community 37"
-Cohesion: 0.17
-Nodes (14): When displacement shows absorption/trap, transition ANOMALY → ARMING., When in ARMING and price breaks away with impulse, transition to TRIGGERED., Full state machine cycle in quiet market: IDLE → ANOMALY → ARMING → TRIGGERED., At exactly 36th percentile, velocity is NOT unusual yet., Above 36th percentile WITH is_unusual=True triggers anomaly., Velocity spike detection in RANGE_CHOP (quiet) market., Create a mock NormalizedVelocity., Create a mock DisplacementState. (+6 more)
+Cohesion: 0.19
+Nodes (13): When displacement shows absorption/trap, transition ANOMALY → ARMING., When in ARMING and price breaks away with impulse, transition to TRIGGERED., Full state machine cycle in quiet market: IDLE → ANOMALY → ARMING → TRIGGERED., At exactly 36th percentile, velocity is NOT unusual yet., Above 36th percentile WITH is_unusual=True triggers anomaly., Velocity spike detection in RANGE_CHOP (quiet) market., Create a mock NormalizedVelocity., Create a mock DisplacementState. (+5 more)
 
 ### Community 38 - "Community 38"
 Cohesion: 0.16
 Nodes (18): get_account_info_via_bridge(), _get_bridge_script(), get_positions_via_bridge(), Any, MT5 Order Bridge for dual-terminal architecture.  Maintains data feed on Exness, Start the order bridge subprocess., Send a command through the bridge subprocess., Send an order through the bridge subprocess.      Args:         mt5_trade_termin (+10 more)
 
 ### Community 39 - "Community 39"
-Cohesion: 0.08
-Nodes (34): AdaptiveExitManager, ExitDecision, Adaptive Exit Engine.  Replaces fixed ATR TP/SL. Uses the Trade Health Monitor a, Evaluate if we should hold, adjust SL/TP, or force close., Output of the exit evaluation., Manages active trades, adjusting targets or cutting losses dynamically., Register the trade to track., Clear active tracking. (+26 more)
+Cohesion: 0.09
+Nodes (41): AdaptiveExitManager, ExitDecision, Adaptive Exit Engine.  Replaces fixed ATR TP/SL. Uses the Trade Health Monitor a, Evaluate if we should hold, adjust SL/TP, or force close., Output of the exit evaluation., Manages active trades, adjusting targets or cutting losses dynamically., DisplacementState, Output snapshot of displacement analysis on every tick. (+33 more)
 
 ### Community 40 - "Community 40"
 Cohesion: 0.11
@@ -422,8 +427,8 @@ Cohesion: 0.15
 Nodes (24): broadcast(), data_loop(), ensure_symbol(), get_account_data(), get_candles_data(), get_historical_bars(), get_levels_data(), get_regime_data() (+16 more)
 
 ### Community 42 - "Community 42"
-Cohesion: 0.08
-Nodes (21): BacktestEngine, Any, datetime, Generate realistic multi-phase synthetic market dataset.                  Market, Pre-populate the H1 and H4 candle deques from the beginning of historical data t, Historical data simulator and backtesting engine for AxonAI., Execute the backtest simulation sequentially, detecting events and managing trad, Evaluate engine decisions with backtester specific constraints. (+13 more)
+Cohesion: 0.09
+Nodes (24): MarketEvidence, BacktestEngine, Any, datetime, Generate realistic multi-phase synthetic market dataset.                  Market, Pre-populate the H1 and H4 candle deques from the beginning of historical data t, Historical data simulator and backtesting engine for AxonAI., Execute the backtest simulation sequentially, detecting events and managing trad (+16 more)
 
 ### Community 43 - "Community 43"
 Cohesion: 0.02
@@ -438,40 +443,40 @@ Cohesion: 0.22
 Nodes (7): Any, convert_numpy(), Recursively convert numpy types to native Python types for JSON serialization., Thread-safe queueing of message broadcast across all websockets., Asynchronously send message to all sockets., Save event history, agent traces, latest decision, and levels state to disk., Background thread: periodically polls news sources (non-blocking) and backfills.
 
 ### Community 46 - "Community 46"
-Cohesion: 0.08
-Nodes (15): MT5 tick receiver and normalizer., Start receiver threads for all configured symbols., Manages raw tick polling threads and normalized ingestion from MT5., Stop all polling threads and shutdown MT5 link., Register a callback for processing SignalState updates., Initialize connection to MetaTrader 5., Tight loop polling for symbol ticks., TickReceiver (+7 more)
+Cohesion: 0.10
+Nodes (15): MT5 tick receiver and normalizer., Start receiver threads for all configured symbols., MockTick, ConfirmedSignal, DecisionEngine, Root tick engine containing interfaces for high-frequency tick processing., Thread-safe deque for storing ticks., Pre-confirmed trading signal. (+7 more)
 
 ### Community 47 - "Community 47"
 Cohesion: 0.19
 Nodes (20): _direction_from(), EntryDecision, evaluate_peak_entry(), Shared entry-quality gate for microstructure-peak reversals.  Single source of t, Map an event direction string to a trade side (fail closed)., Decide whether a PEAK_DETECTION event qualifies for entry.      Returns an Entry, _event(), _gate() (+12 more)
 
 ### Community 48 - "Community 48"
-Cohesion: 0.10
-Nodes (12): BridgeClient, MT5 Bridge Client — runs in WSL, connects to the Windows MT5 Bridge Service and, Receive and relay messages from the bridge., Send an arbitrary JSON message to the bridge., Send a request for historical data through the bridge., Send a message via WebSocket., Check if connected to the bridge., Connects to the Windows MT5 Bridge and relays data to the dashboard.      The br (+4 more)
+Cohesion: 0.07
+Nodes (23): Set the global fallback path for the feed terminal (e.g. Exness).      CRITICA, set_feed_terminal_path(), BridgeClient, MT5 Bridge Client — runs in WSL, connects to the Windows MT5 Bridge Service and, Receive and relay messages from the bridge., Send an arbitrary JSON message to the bridge., Send a request for historical data through the bridge., Send a message via WebSocket. (+15 more)
 
 ### Community 49 - "Community 49"
-Cohesion: 0.12
-Nodes (24): build_account_payload(), build_agent_payload(), build_decision_payload(), build_event_payload(), build_levels_payload(), build_regime_payload(), build_tick_payload(), feeder_thread() (+16 more)
+Cohesion: 0.13
+Nodes (22): build_account_payload(), build_agent_payload(), build_decision_payload(), build_event_payload(), build_levels_payload(), build_regime_payload(), build_tick_payload(), feeder_thread() (+14 more)
 
 ### Community 50 - "Community 50"
 Cohesion: 0.40
 Nodes (3): datetime, Process one tick and return displacement state.          Args:             price, Multi-factor displacement classification.          Decision matrix:           Hi
 
 ### Community 51 - "Community 51"
-Cohesion: 0.28
-Nodes (4): datetime, Compute active/inactive state + progress for each forex session with dynamic DST, Detect closed positions and log outcomes., Called by TickEngine on every new tick.
+Cohesion: 0.24
+Nodes (6): get_dashboard(), Get the active global dashboard server instance., datetime, Compute active/inactive state + progress for each forex session with dynamic DST, Detect closed positions and log outcomes., Called by TickEngine on every new tick.
 
 ### Community 52 - "Community 52"
 Cohesion: 0.05
 Nodes (37): [0.1.0] — 2025-06-05, [0.1.1] — 2025-06-07, [0.2.0] — 2026-02-04, [0.2.1] — 2026-03-15, [0.2.2] — 2026-03-22, [0.2.3] — 2026-03-29, [0.2.4] — 2026-04-25, [0.2.5] — 2026-05-11 (+29 more)
 
 ### Community 53 - "Community 53"
-Cohesion: 0.33
-Nodes (4): ConfirmedSignal, DecisionEngine, Pre-confirmed trading signal., Combines signal and candle states to form a pre-confirmed signal.
+Cohesion: 0.14
+Nodes (4): Args:             legacy_exit_manager: AdaptiveExitManager instance (fallback), Tell the engine a trade was executed so it can manage it., Register a new open position., Clear active trade state.
 
 ### Community 54 - "Community 54"
-Cohesion: 0.33
-Nodes (4): MarketBufferEngine, Computes dynamic velocity exit trail thresholds from market conditions.      Ada, Args:             config: Optional config dict with:               - realtime_ve, Compute dynamic buffer (exit trail threshold) from market state.          Args:
+Cohesion: 0.25
+Nodes (6): DynamicBuffer, MarketBufferEngine, Output: dynamic exit trail threshold for velocity decay., Computes dynamic velocity exit trail thresholds from market conditions.      Ada, Args:             config: Optional config dict with:               - realtime_ve, Compute dynamic buffer (exit trail threshold) from market state.          Args:
 
 ### Community 55 - "Community 55"
 Cohesion: 0.15
@@ -482,8 +487,8 @@ Cohesion: 0.24
 Nodes (5): Validate ``value`` is safe to interpolate into a filesystem path.      Tickers c, safe_ticker_component(), Tests for the ticker path-component validator that blocks directory traversal., Sanity: sanitized values stay within base when joined., TestSafeTickerComponent
 
 ### Community 57 - "Community 57"
-Cohesion: 0.18
-Nodes (6): Update indicators when a candle closes., Update ATR, EMA, RSI on H1 candle close., Update H4 EMA on H4 candle close., Recompute regime scores on M15 candle close., Lightweight volume update on M5., Recompute belief score and gate decision with dynamic thresholds.
+Cohesion: 0.16
+Nodes (9): LiveWorldState, Update indicators when a candle closes., Update ATR, EMA, RSI on H1 candle close., Update H4 EMA on H4 candle close., Recompute regime scores on M15 candle close., Lightweight volume update on M5., Recompute belief score and gate decision with dynamic thresholds., Update base and quote currency strength dynamically using cross-pair correlation (+1 more)
 
 ### Community 58 - "Community 58"
 Cohesion: 0.29
@@ -517,25 +522,21 @@ Nodes (32): 1. Live Market Monitoring, 2. Log Parsing, 3. Quick Metrics Script, 
 Cohesion: 0.12
 Nodes (9): Test suite for MT5TradeExecutor with mocked MT5 interface., Test that HOLD signals return None and make no calls., Test that dryrun config overrides lot size to 1.00 and returns sl., Paper-trade mode returns a simulated fill and NEVER calls order_send., Successive paper fills get distinct, incrementing synthetic tickets., A spread wider than max_spread_frac of the stop rejects the entry., Test BUY signal order composition and execution., Test SELL signal order composition and execution. (+1 more)
 
-### Community 69 - "Community 69"
-Cohesion: 0.33
-Nodes (4): LocationEngine, Computes market location (distance to levels, at_structure flag)., Args:             pip_mult: 0.0001 for majors, 0.01 for JPY pairs             co, Compute market location metrics.          Args:             price: Current bid/a
-
 ### Community 76 - "Community 76"
 Cohesion: 0.27
 Nodes (11): get_account(), get_candles(), get_levels(), get_regime(), get_tick(), main(), mock_broadcast(), MockState (+3 more)
 
 ### Community 77 - "Community 77"
-Cohesion: 0.20
-Nodes (11): ExecutionEngine, MarketContext, Historical log of trade attempts and executions., Fetch pip value from cache or fallback to $10/pip using dynamic MT5 lookup., Helper to log trade rejection reasons., Checks if there is already an open position globally., Validates trade setups, calculates dynamic risk sizes, and manages broker execut, Evaluates entry filters and executes the trade if they all pass. (+3 more)
+Cohesion: 0.18
+Nodes (12): ExecutionEngine, MarketContext, Execution engine for filtering and dispatching trades via MT5., Historical log of trade attempts and executions., Fetch pip value from cache or fallback to $10/pip using dynamic MT5 lookup., Helper to log trade rejection reasons., Checks if there is already an open position globally., Validates trade setups, calculates dynamic risk sizes, and manages broker execut (+4 more)
 
 ### Community 78 - "Community 78"
-Cohesion: 0.12
-Nodes (14): ExitEngine, ExitSignal, FakeDisplacement, FakeLegacyExit, FakeLocationContext, FakeSnapshot, FakeTradeState, FakeVelocity (+6 more)
+Cohesion: 0.14
+Nodes (11): ExitSignal, FakeDisplacement, FakeLegacyExit, FakeLocationContext, FakeSnapshot, FakeTradeState, FakeVelocity, Exit Engine: Priority-Based Trade Exit Logic.  Evaluates exit conditions using (+3 more)
 
 ### Community 79 - "Community 79"
-Cohesion: 0.21
-Nodes (6): Helper checking if circuit breaker has tripped., Drawdown Circuit Breaker.          Tracks daily profit/loss and halts all execut, Seed daily starting equity on first call of the day., Update realized PnL for the day., Check if circuit breaker has tripped., RiskGuard
+Cohesion: 0.17
+Nodes (7): Risk management and drawdown circuit breaker for AxonAI.  Monitors daily profit/, Helper checking if circuit breaker has tripped., Drawdown Circuit Breaker.          Tracks daily profit/loss and halts all execut, Seed daily starting equity on first call of the day., Update realized PnL for the day., Check if circuit breaker has tripped., RiskGuard
 
 ### Community 80 - "Community 80"
 Cohesion: 0.07
@@ -586,8 +587,8 @@ Cohesion: 0.08
 Nodes (23): 10. Critical Action Items (Priority-Ordered), 11. Overall Project Health Score, 1. Project Identity, 2. Codebase Statistics (Real Numbers), 3. Architecture — What's Actually Built, 4. Real Progress Assessment, 5. Live Session Data Analysis, 6. Code Quality & Bug Assessment (+15 more)
 
 ### Community 111 - "Community 111"
-Cohesion: 0.29
-Nodes (5): LLMBridge, MarketContext, Coordinates conditional queries to DeepSeek model based on market context., Determines if the state transition warrants an LLM decision., Query the LLM to get a structured decision.
+Cohesion: 0.20
+Nodes (6): LLMBridge, MarketContext, Coordinates conditional queries to DeepSeek model based on market context., Determines if the state transition warrants an LLM decision., Query the LLM to get a structured decision., Helper to create independent callback scopes per symbol.
 
 ### Community 115 - "Community 115"
 Cohesion: 0.27
@@ -662,8 +663,8 @@ Cohesion: 0.14
 Nodes (13): Calculate real ATR from candle data, Check what candle patterns form near those levels, Planner Response, Planner Response, Planner Response, Planner Response, Planner Response, Planner Response (+5 more)
 
 ### Community 157 - "Community 157"
-Cohesion: 0.29
-Nodes (4): patched_fetch_bars(), patched_load_historical_data(), Return our pre-built candles instead of calling MT5., Return pre-built candles and ticks, bypassing MT5 entirely.
+Cohesion: 0.07
+Nodes (20): High-fidelity historical backtesting engine with candle, peak, reversal, and swe, LiveCandle, Event type definitions for the real-time trading engine., An in-memory OHLCV candle built from raw ticks., Process a completed candle., patched_fetch_bars(), patched_load_historical_data(), Return our pre-built candles instead of calling MT5. (+12 more)
 
 ### Community 158 - "Community 158"
 Cohesion: 0.18
@@ -760,22 +761,22 @@ Nodes (3): Backtest credibility concern (95.5% WR / 62x PF), Backtester, Multi-A
 ## Knowledge Gaps
 - **682 isolated node(s):** `What this is`, `Completed work (this session)`, `Verified`, `Known issues (PRE-EXISTING, not regressions)`, `Pending / next steps` (+677 more)
   These have ≤1 connection - possible missing edges or undocumented components.
-- **74 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
+- **80 thin communities (<3 nodes) omitted from report** — run `graphify query` to explore isolated nodes.
 
 ## Suggested Questions
 _Questions this graph is uniquely positioned to answer:_
 
-- **Why does `NormalizedVelocity` connect `Community 39` to `Community 32`, `Displacement & Entry State Machine`, `Community 35`, `Charting Library (minified JS)`, `Community 37`, `Market Context Builder`, `Market Regime Classifier`, `Community 16`, `Community 50`, `Community 54`, `Community 23`, `Community 22`?**
-  _High betweenness centrality (0.073) - this node is a cross-community bridge._
-- **Why does `LiveCandle` connect `Event Detection Engine` to `Community 32`, `Adaptive Exit Engine`, `MT5 Data & Evidence Extraction`, `Community 36`, `Charting Library (minified JS)`, `Charting Library (minified JS)`, `Community 39`, `Market Regime Classifier`, `Community 42`, `Community 83`, `Community 20`, `Community 57`, `Community 157`?**
-  _High betweenness centrality (0.056) - this node is a cross-community bridge._
-- **Why does `AxonDaemon` connect `Community 34` to `Charting Library (minified JS)`, `Community 38`, `Charting Library (minified JS)`, `Community 15`, `Community 19`, `Community 51`, `Community 21`, `Community 22`, `Community 126`, `Community 31`?**
-  _High betweenness centrality (0.040) - this node is a cross-community bridge._
+- **Why does `AxonDaemon` connect `Community 19` to `Community 34`, `Event Detection Engine`, `API Server & Backtester`, `Community 38`, `Charting Library (minified JS)`, `Community 15`, `Community 16`, `Community 48`, `Community 51`, `Community 22`, `Community 126`, `Community 31`?**
+  _High betweenness centrality (0.051) - this node is a cross-community bridge._
+- **Why does `LiveCandle` connect `Community 157` to `Community 32`, `Adaptive Exit Engine`, `MT5 Data & Evidence Extraction`, `Event Detection Engine`, `Charting Library (minified JS)`, `Community 39`, `Market Regime Classifier`, `Community 42`, `Community 83`, `Community 20`, `Community 57`?**
+  _High betweenness centrality (0.048) - this node is a cross-community bridge._
+- **Why does `NormalizedVelocity` connect `Community 39` to `Community 32`, `Displacement & Entry State Machine`, `Community 35`, `Charting Library (minified JS)`, `Community 37`, `Market Context Builder`, `Market Regime Classifier`, `Community 16`, `Community 50`, `Community 21`, `Community 54`, `Community 23`?**
+  _High betweenness centrality (0.046) - this node is a cross-community bridge._
 - **Are the 28 inferred relationships involving `NormalizedVelocity` (e.g. with `AdaptiveExitManager` and `ExitDecision`) actually correct?**
   _`NormalizedVelocity` has 28 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 12 inferred relationships involving `LiveCandle` (e.g. with `BacktestEngine` and `EventDetector`) actually correct?**
-  _`LiveCandle` has 12 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 23 inferred relationships involving `DisplacementState` (e.g. with `AdaptiveExitManager` and `ExitDecision`) actually correct?**
-  _`DisplacementState` has 23 INFERRED edges - model-reasoned connections that need verification._
-- **Are the 14 inferred relationships involving `BacktestEngine` (e.g. with `MarketEvidence` and `EventPriority`) actually correct?**
-  _`BacktestEngine` has 14 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 14 inferred relationships involving `LiveCandle` (e.g. with `BacktestEngine` and `EventDetector`) actually correct?**
+  _`LiveCandle` has 14 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 27 inferred relationships involving `DisplacementState` (e.g. with `AdaptiveExitManager` and `ExitDecision`) actually correct?**
+  _`DisplacementState` has 27 INFERRED edges - model-reasoned connections that need verification._
+- **Are the 24 inferred relationships involving `RegimeState` (e.g. with `AdaptiveExitManager` and `ExitDecision`) actually correct?**
+  _`RegimeState` has 24 INFERRED edges - model-reasoned connections that need verification._
