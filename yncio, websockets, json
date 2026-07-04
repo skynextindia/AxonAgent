@@ -1,0 +1,1967 @@
+[1mdiff --git a/.dockerignore b/.dockerignore[m
+[1mindex cac7101..42cf0ed 100644[m
+[1m--- a/.dockerignore[m
+[1m+++ b/.dockerignore[m
+[36m@@ -1,15 +1,15 @@[m
+[31m-.git[m
+[31m-.venv[m
+[31m-.env[m
+[31m-.claude[m
+[31m-.idea[m
+[31m-.vscode[m
+[31m-.DS_Store[m
+[31m-__pycache__[m
+[31m-*.egg-info[m
+[31m-build[m
+[31m-dist[m
+[31m-results[m
+[31m-eval_results[m
+[31m-Dockerfile[m
+[31m-docker-compose.yml[m
+[32m+[m[32m.git[m[41m[m
+[32m+[m[32m.venv[m[41m[m
+[32m+[m[32m.env[m[41m[m
+[32m+[m[32m.claude[m[41m[m
+[32m+[m[32m.idea[m[41m[m
+[32m+[m[32m.vscode[m[41m[m
+[32m+[m[32m.DS_Store[m[41m[m
+[32m+[m[32m__pycache__[m[41m[m
+[32m+[m[32m*.egg-info[m[41m[m
+[32m+[m[32mbuild[m[41m[m
+[32m+[m[32mdist[m[41m[m
+[32m+[m[32mresults[m[41m[m
+[32m+[m[32meval_results[m[41m[m
+[32m+[m[32mDockerfile[m[41m[m
+[32m+[m[32mdocker-compose.yml[m[41m[m
+[1mdiff --git a/.env.enterprise.example b/.env.enterprise.example[m
+[1mindex 4f7bda3..298bec0 100644[m
+[1m--- a/.env.enterprise.example[m
+[1m+++ b/.env.enterprise.example[m
+[36m@@ -1,5 +1,5 @@[m
+[31m-# Azure OpenAI[m
+[31m-AZURE_OPENAI_API_KEY=[m
+[31m-AZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com/[m
+[31m-AZURE_OPENAI_DEPLOYMENT_NAME=[m
+[31m-# OPENAI_API_VERSION=2024-10-21  # optional, required for non-v1 API[m
+[32m+[m[32m# Azure OpenAI[m[41m[m
+[32m+[m[32mAZURE_OPENAI_API_KEY=[m[41m[m
+[32m+[m[32mAZURE_OPENAI_ENDPOINT=https://your-resource-name.openai.azure.com/[m[41m[m
+[32m+[m[32mAZURE_OPENAI_DEPLOYMENT_NAME=[m[41m[m
+[32m+[m[32m# OPENAI_API_VERSION=2024-10-21  # optional, required for non-v1 API[m[41m[m
+[1mdiff --git a/.env.example b/.env.example[m
+[1mindex 48c128a..344f186 100644[m
+[1m--- a/.env.example[m
+[1m+++ b/.env.example[m
+[36m@@ -1,32 +1,32 @@[m
+[31m-# LLM Providers (set the one you use)[m
+[31m-OPENAI_API_KEY=[m
+[31m-GOOGLE_API_KEY=[m
+[31m-ANTHROPIC_API_KEY=[m
+[31m-XAI_API_KEY=[m
+[31m-DEEPSEEK_API_KEY=[m
+[31m-DASHSCOPE_API_KEY=[m
+[31m-DASHSCOPE_CN_API_KEY=[m
+[31m-ZHIPU_API_KEY=[m
+[31m-ZHIPU_CN_API_KEY=[m
+[31m-MINIMAX_API_KEY=[m
+[31m-MINIMAX_CN_API_KEY=[m
+[31m-OPENROUTER_API_KEY=[m
+[31m-[m
+[31m-# Optional: point at a remote Ollama server. When unset, defaults to[m
+[31m-# the local instance at http://localhost:11434/v1. Convention follows[m
+[31m-# the broader Ollama ecosystem; both the CLI dropdown and programmatic[m
+[31m-# client pick this up.[m
+[31m-#OLLAMA_BASE_URL=http://your-ollama-host:11434/v1[m
+[31m-[m
+[31m-# Optional: override DEFAULT_CONFIG without editing code.[m
+[31m-# Any AXONAI_* variable below, when set, replaces the matching key[m
+[31m-# in axonai/default_config.py. Values are coerced to the type of[m
+[31m-# the existing default (bool / int / str), so "true"/"3" work as expected.[m
+[31m-#AXONAI_LLM_PROVIDER=openai[m
+[31m-#AXONAI_DEEP_THINK_LLM=gpt-5.4[m
+[31m-#AXONAI_QUICK_THINK_LLM=gpt-5.4-mini[m
+[31m-#AXONAI_LLM_BACKEND_URL=[m
+[31m-#AXONAI_OUTPUT_LANGUAGE=English[m
+[31m-#AXONAI_MAX_DEBATE_ROUNDS=1[m
+[31m-#AXONAI_MAX_RISK_ROUNDS=1[m
+[31m-#AXONAI_CHECKPOINT_ENABLED=false[m
+[32m+[m[32m# LLM Providers (set the one you use)[m[41m[m
+[32m+[m[32mOPENAI_API_KEY=[m[41m[m
+[32m+[m[32mGOOGLE_API_KEY=[m[41m[m
+[32m+[m[32mANTHROPIC_API_KEY=[m[41m[m
+[32m+[m[32mXAI_API_KEY=[m[41m[m
+[32m+[m[32mDEEPSEEK_API_KEY=[m[41m[m
+[32m+[m[32mDASHSCOPE_API_KEY=[m[41m[m
+[32m+[m[32mDASHSCOPE_CN_API_KEY=[m[41m[m
+[32m+[m[32mZHIPU_API_KEY=[m[41m[m
+[32m+[m[32mZHIPU_CN_API_KEY=[m[41m[m
+[32m+[m[32mMINIMAX_API_KEY=[m[41m[m
+[32m+[m[32mMINIMAX_CN_API_KEY=[m[41m[m
+[32m+[m[32mOPENROUTER_API_KEY=[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Optional: point at a remote Ollama server. When unset, defaults to[m[41m[m
+[32m+[m[32m# the local instance at http://localhost:11434/v1. Convention follows[m[41m[m
+[32m+[m[32m# the broader Ollama ecosystem; both the CLI dropdown and programmatic[m[41m[m
+[32m+[m[32m# client pick this up.[m[41m[m
+[32m+[m[32m#OLLAMA_BASE_URL=http://your-ollama-host:11434/v1[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Optional: override DEFAULT_CONFIG without editing code.[m[41m[m
+[32m+[m[32m# Any AXONAI_* variable below, when set, replaces the matching key[m[41m[m
+[32m+[m[32m# in axonai/default_config.py. Values are coerced to the type of[m[41m[m
+[32m+[m[32m# the existing default (bool / int / str), so "true"/"3" work as expected.[m[41m[m
+[32m+[m[32m#AXONAI_LLM_PROVIDER=openai[m[41m[m
+[32m+[m[32m#AXONAI_DEEP_THINK_LLM=gpt-5.4[m[41m[m
+[32m+[m[32m#AXONAI_QUICK_THINK_LLM=gpt-5.4-mini[m[41m[m
+[32m+[m[32m#AXONAI_LLM_BACKEND_URL=[m[41m[m
+[32m+[m[32m#AXONAI_OUTPUT_LANGUAGE=English[m[41m[m
+[32m+[m[32m#AXONAI_MAX_DEBATE_ROUNDS=1[m[41m[m
+[32m+[m[32m#AXONAI_MAX_RISK_ROUNDS=1[m[41m[m
+[32m+[m[32m#AXONAI_CHECKPOINT_ENABLED=false[m[41m[m
+[1mdiff --git a/.gitignore b/.gitignore[m
+[1mindex 530f20b..fd6c6f8 100644[m
+[1m--- a/.gitignore[m
+[1m+++ b/.gitignore[m
+[36m@@ -1,223 +1,223 @@[m
+[31m-# Byte-compiled / optimized / DLL files[m
+[31m-__pycache__/[m
+[31m-*.py[codz][m
+[31m-*$py.class[m
+[31m-[m
+[31m-# C extensions[m
+[31m-*.so[m
+[31m-[m
+[31m-# Distribution / packaging[m
+[31m-.Python[m
+[31m-build/[m
+[31m-develop-eggs/[m
+[31m-dist/[m
+[31m-downloads/[m
+[31m-eggs/[m
+[31m-.eggs/[m
+[31m-lib/[m
+[31m-lib64/[m
+[31m-parts/[m
+[31m-sdist/[m
+[31m-var/[m
+[31m-wheels/[m
+[31m-share/python-wheels/[m
+[31m-*.egg-info/[m
+[31m-.installed.cfg[m
+[31m-*.egg[m
+[31m-MANIFEST[m
+[31m-[m
+[31m-# PyInstaller[m
+[31m-#   Usually these files are written by a python script from a template[m
+[31m-#   before PyInstaller builds the exe, so as to inject date/other infos into it.[m
+[31m-*.manifest[m
+[31m-*.spec[m
+[31m-[m
+[31m-# Installer logs[m
+[31m-pip-log.txt[m
+[31m-pip-delete-this-directory.txt[m
+[31m-[m
+[31m-# Unit test / coverage reports[m
+[31m-htmlcov/[m
+[31m-.tox/[m
+[31m-.nox/[m
+[31m-.coverage[m
+[31m-.coverage.*[m
+[31m-.cache[m
+[31m-nosetests.xml[m
+[31m-coverage.xml[m
+[31m-*.cover[m
+[31m-*.py.cover[m
+[31m-.hypothesis/[m
+[31m-.pytest_cache/[m
+[31m-cover/[m
+[31m-[m
+[31m-# Translations[m
+[31m-*.mo[m
+[31m-*.pot[m
+[31m-[m
+[31m-# Django stuff:[m
+[31m-*.log[m
+[31m-local_settings.py[m
+[31m-db.sqlite3[m
+[31m-db.sqlite3-journal[m
+[31m-[m
+[31m-# Flask stuff:[m
+[31m-instance/[m
+[31m-.webassets-cache[m
+[31m-[m
+[31m-# Scrapy stuff:[m
+[31m-.scrapy[m
+[31m-[m
+[31m-# Sphinx documentation[m
+[31m-docs/_build/[m
+[31m-[m
+[31m-# PyBuilder[m
+[31m-.pybuilder/[m
+[31m-target/[m
+[31m-[m
+[31m-# Jupyter Notebook[m
+[31m-.ipynb_checkpoints[m
+[31m-[m
+[31m-# IPython[m
+[31m-profile_default/[m
+[31m-ipython_config.py[m
+[31m-[m
+[31m-# pyenv[m
+[31m-#   For a library or package, you might want to ignore these files since the code is[m
+[31m-#   intended to run in multiple environments; otherwise, check them in:[m
+[31m-# .python-version[m
+[31m-[m
+[31m-# pipenv[m
+[31m-#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.[m
+[31m-#   However, in case of collaboration, if having platform-specific dependencies or dependencies[m
+[31m-#   having no cross-platform support, pipenv may install dependencies that don't work, or not[m
+[31m-#   install all needed dependencies.[m
+[31m-# Pipfile.lock[m
+[31m-[m
+[31m-# UV[m
+[31m-#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.[m
+[31m-#   This is especially recommended for binary packages to ensure reproducibility, and is more[m
+[31m-#   commonly ignored for libraries.[m
+[31m-# uv.lock[m
+[31m-[m
+[31m-# poetry[m
+[31m-#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.[m
+[31m-#   This is especially recommended for binary packages to ensure reproducibility, and is more[m
+[31m-#   commonly ignored for libraries.[m
+[31m-#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control[m
+[31m-# poetry.lock[m
+[31m-# poetry.toml[m
+[31m-[m
+[31m-# pdm[m
+[31m-#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.[m
+[31m-#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.[m
+[31m-#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control[m
+[31m-# pdm.lock[m
+[31m-# pdm.toml[m
+[31m-.pdm-python[m
+[31m-.pdm-build/[m
+[31m-[m
+[31m-# pixi[m
+[31m-#   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.[m
+[31m-# pixi.lock[m
+[31m-#   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one[m
+[31m-#   in the .venv directory. It is recommended not to include this directory in version control.[m
+[31m-.pixi[m
+[31m-[m
+[31m-# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm[m
+[31m-__pypackages__/[m
+[31m-[m
+[31m-# Celery stuff[m
+[31m-celerybeat-schedule[m
+[31m-celerybeat.pid[m
+[31m-[m
+[31m-# Redis[m
+[31m-*.rdb[m
+[31m-*.aof[m
+[31m-*.pid[m
+[31m-[m
+[31m-# RabbitMQ[m
+[31m-mnesia/[m
+[31m-rabbitmq/[m
+[31m-rabbitmq-data/[m
+[31m-[m
+[31m-# ActiveMQ[m
+[31m-activemq-data/[m
+[31m-[m
+[31m-# SageMath parsed files[m
+[31m-*.sage.py[m
+[31m-[m
+[31m-# Environments[m
+[31m-.env[m
+[31m-.envrc[m
+[31m-.venv[m
+[31m-env/[m
+[31m-venv/[m
+[31m-ENV/[m
+[31m-env.bak/[m
+[31m-venv.bak/[m
+[31m-[m
+[31m-# Spyder project settings[m
+[31m-.spyderproject[m
+[31m-.spyproject[m
+[31m-[m
+[31m-# Rope project settings[m
+[31m-.ropeproject[m
+[31m-[m
+[31m-# mkdocs documentation[m
+[31m-/site[m
+[31m-[m
+[31m-# mypy[m
+[31m-.mypy_cache/[m
+[31m-.dmypy.json[m
+[31m-dmypy.json[m
+[31m-[m
+[31m-# Pyre type checker[m
+[31m-.pyre/[m
+[31m-[m
+[31m-# pytype static type analyzer[m
+[31m-.pytype/[m
+[31m-[m
+[31m-# Cython debug symbols[m
+[31m-cython_debug/[m
+[31m-[m
+[31m-# PyCharm[m
+[31m-#   JetBrains specific template is maintained in a separate JetBrains.gitignore that can[m
+[31m-#   be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore[m
+[31m-#   and can be added to the global gitignore or merged into this file.  For a more nuclear[m
+[31m-#   option (not recommended) you can uncomment the following to ignore the entire idea folder.[m
+[31m-# .idea/[m
+[31m-[m
+[31m-# Abstra[m
+[31m-#   Abstra is an AI-powered process automation framework.[m
+[31m-#   Ignore directories containing user credentials, local state, and settings.[m
+[31m-#   Learn more at https://abstra.io/docs[m
+[31m-.abstra/[m
+[31m-[m
+[31m-# Visual Studio Code[m
+[31m-#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore [m
+[31m-#   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore[m
+[31m-#   and can be added to the global gitignore or merged into this file. However, if you prefer, [m
+[31m-#   you could uncomment the following to ignore the entire vscode folder[m
+[31m-# .vscode/[m
+[31m-[m
+[31m-# Ruff stuff:[m
+[31m-.ruff_cache/[m
+[31m-[m
+[31m-# PyPI configuration file[m
+[31m-.pypirc[m
+[31m-[m
+[31m-# Marimo[m
+[31m-marimo/_static/[m
+[31m-marimo/_lsp/[m
+[31m-__marimo__/[m
+[31m-[m
+[31m-# Streamlit[m
+[31m-.streamlit/secrets.toml[m
+[31m-[m
+[31m-# Cache[m
+[31m-**/data_cache/[m
+[31m-[m
+[31m-# AxonAI session and reports[m
+[31m-.axon_session.json[m
+[31m-reports/[m
+[32m+[m[32m# Byte-compiled / optimized / DLL files[m[41m[m
+[32m+[m[32m__pycache__/[m[41m[m
+[32m+[m[32m*.py[codz][m[41m[m
+[32m+[m[32m*$py.class[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# C extensions[m[41m[m
+[32m+[m[32m*.so[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Distribution / packaging[m[41m[m
+[32m+[m[32m.Python[m[41m[m
+[32m+[m[32mbuild/[m[41m[m
+[32m+[m[32mdevelop-eggs/[m[41m[m
+[32m+[m[32mdist/[m[41m[m
+[32m+[m[32mdownloads/[m[41m[m
+[32m+[m[32meggs/[m[41m[m
+[32m+[m[32m.eggs/[m[41m[m
+[32m+[m[32mlib/[m[41m[m
+[32m+[m[32mlib64/[m[41m[m
+[32m+[m[32mparts/[m[41m[m
+[32m+[m[32msdist/[m[41m[m
+[32m+[m[32mvar/[m[41m[m
+[32m+[m[32mwheels/[m[41m[m
+[32m+[m[32mshare/python-wheels/[m[41m[m
+[32m+[m[32m*.egg-info/[m[41m[m
+[32m+[m[32m.installed.cfg[m[41m[m
+[32m+[m[32m*.egg[m[41m[m
+[32m+[m[32mMANIFEST[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# PyInstaller[m[41m[m
+[32m+[m[32m#   Usually these files are written by a python script from a template[m[41m[m
+[32m+[m[32m#   before PyInstaller builds the exe, so as to inject date/other infos into it.[m[41m[m
+[32m+[m[32m*.manifest[m[41m[m
+[32m+[m[32m*.spec[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Installer logs[m[41m[m
+[32m+[m[32mpip-log.txt[m[41m[m
+[32m+[m[32mpip-delete-this-directory.txt[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Unit test / coverage reports[m[41m[m
+[32m+[m[32mhtmlcov/[m[41m[m
+[32m+[m[32m.tox/[m[41m[m
+[32m+[m[32m.nox/[m[41m[m
+[32m+[m[32m.coverage[m[41m[m
+[32m+[m[32m.coverage.*[m[41m[m
+[32m+[m[32m.cache[m[41m[m
+[32m+[m[32mnosetests.xml[m[41m[m
+[32m+[m[32mcoverage.xml[m[41m[m
+[32m+[m[32m*.cover[m[41m[m
+[32m+[m[32m*.py.cover[m[41m[m
+[32m+[m[32m.hypothesis/[m[41m[m
+[32m+[m[32m.pytest_cache/[m[41m[m
+[32m+[m[32mcover/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Translations[m[41m[m
+[32m+[m[32m*.mo[m[41m[m
+[32m+[m[32m*.pot[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Django stuff:[m[41m[m
+[32m+[m[32m*.log[m[41m[m
+[32m+[m[32mlocal_settings.py[m[41m[m
+[32m+[m[32mdb.sqlite3[m[41m[m
+[32m+[m[32mdb.sqlite3-journal[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Flask stuff:[m[41m[m
+[32m+[m[32minstance/[m[41m[m
+[32m+[m[32m.webassets-cache[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Scrapy stuff:[m[41m[m
+[32m+[m[32m.scrapy[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Sphinx documentation[m[41m[m
+[32m+[m[32mdocs/_build/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# PyBuilder[m[41m[m
+[32m+[m[32m.pybuilder/[m[41m[m
+[32m+[m[32mtarget/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Jupyter Notebook[m[41m[m
+[32m+[m[32m.ipynb_checkpoints[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# IPython[m[41m[m
+[32m+[m[32mprofile_default/[m[41m[m
+[32m+[m[32mipython_config.py[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# pyenv[m[41m[m
+[32m+[m[32m#   For a library or package, you might want to ignore these files since the code is[m[41m[m
+[32m+[m[32m#   intended to run in multiple environments; otherwise, check them in:[m[41m[m
+[32m+[m[32m# .python-version[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# pipenv[m[41m[m
+[32m+[m[32m#   According to pypa/pipenv#598, it is recommended to include Pipfile.lock in version control.[m[41m[m
+[32m+[m[32m#   However, in case of collaboration, if having platform-specific dependencies or dependencies[m[41m[m
+[32m+[m[32m#   having no cross-platform support, pipenv may install dependencies that don't work, or not[m[41m[m
+[32m+[m[32m#   install all needed dependencies.[m[41m[m
+[32m+[m[32m# Pipfile.lock[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# UV[m[41m[m
+[32m+[m[32m#   Similar to Pipfile.lock, it is generally recommended to include uv.lock in version control.[m[41m[m
+[32m+[m[32m#   This is especially recommended for binary packages to ensure reproducibility, and is more[m[41m[m
+[32m+[m[32m#   commonly ignored for libraries.[m[41m[m
+[32m+[m[32m# uv.lock[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# poetry[m[41m[m
+[32m+[m[32m#   Similar to Pipfile.lock, it is generally recommended to include poetry.lock in version control.[m[41m[m
+[32m+[m[32m#   This is especially recommended for binary packages to ensure reproducibility, and is more[m[41m[m
+[32m+[m[32m#   commonly ignored for libraries.[m[41m[m
+[32m+[m[32m#   https://python-poetry.org/docs/basic-usage/#commit-your-poetrylock-file-to-version-control[m[41m[m
+[32m+[m[32m# poetry.lock[m[41m[m
+[32m+[m[32m# poetry.toml[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# pdm[m[41m[m
+[32m+[m[32m#   Similar to Pipfile.lock, it is generally recommended to include pdm.lock in version control.[m[41m[m
+[32m+[m[32m#   pdm recommends including project-wide configuration in pdm.toml, but excluding .pdm-python.[m[41m[m
+[32m+[m[32m#   https://pdm-project.org/en/latest/usage/project/#working-with-version-control[m[41m[m
+[32m+[m[32m# pdm.lock[m[41m[m
+[32m+[m[32m# pdm.toml[m[41m[m
+[32m+[m[32m.pdm-python[m[41m[m
+[32m+[m[32m.pdm-build/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# pixi[m[41m[m
+[32m+[m[32m#   Similar to Pipfile.lock, it is generally recommended to include pixi.lock in version control.[m[41m[m
+[32m+[m[32m# pixi.lock[m[41m[m
+[32m+[m[32m#   Pixi creates a virtual environment in the .pixi directory, just like venv module creates one[m[41m[m
+[32m+[m[32m#   in the .venv directory. It is recommended not to include this directory in version control.[m[41m[m
+[32m+[m[32m.pixi[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm[m[41m[m
+[32m+[m[32m__pypackages__/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Celery stuff[m[41m[m
+[32m+[m[32mcelerybeat-schedule[m[41m[m
+[32m+[m[32mcelerybeat.pid[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Redis[m[41m[m
+[32m+[m[32m*.rdb[m[41m[m
+[32m+[m[32m*.aof[m[41m[m
+[32m+[m[32m*.pid[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# RabbitMQ[m[41m[m
+[32m+[m[32mmnesia/[m[41m[m
+[32m+[m[32mrabbitmq/[m[41m[m
+[32m+[m[32mrabbitmq-data/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# ActiveMQ[m[41m[m
+[32m+[m[32mactivemq-data/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# SageMath parsed files[m[41m[m
+[32m+[m[32m*.sage.py[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Environments[m[41m[m
+[32m+[m[32m.env[m[41m[m
+[32m+[m[32m.envrc[m[41m[m
+[32m+[m[32m.venv[m[41m[m
+[32m+[m[32menv/[m[41m[m
+[32m+[m[32mvenv/[m[41m[m
+[32m+[m[32mENV/[m[41m[m
+[32m+[m[32menv.bak/[m[41m[m
+[32m+[m[32mvenv.bak/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Spyder project settings[m[41m[m
+[32m+[m[32m.spyderproject[m[41m[m
+[32m+[m[32m.spyproject[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Rope project settings[m[41m[m
+[32m+[m[32m.ropeproject[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# mkdocs documentation[m[41m[m
+[32m+[m[32m/site[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# mypy[m[41m[m
+[32m+[m[32m.mypy_cache/[m[41m[m
+[32m+[m[32m.dmypy.json[m[41m[m
+[32m+[m[32mdmypy.json[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Pyre type checker[m[41m[m
+[32m+[m[32m.pyre/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# pytype static type analyzer[m[41m[m
+[32m+[m[32m.pytype/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Cython debug symbols[m[41m[m
+[32m+[m[32mcython_debug/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# PyCharm[m[41m[m
+[32m+[m[32m#   JetBrains specific template is maintained in a separate JetBrains.gitignore that can[m[41m[m
+[32m+[m[32m#   be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore[m[41m[m
+[32m+[m[32m#   and can be added to the global gitignore or merged into this file.  For a more nuclear[m[41m[m
+[32m+[m[32m#   option (not recommended) you can uncomment the following to ignore the entire idea folder.[m[41m[m
+[32m+[m[32m# .idea/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Abstra[m[41m[m
+[32m+[m[32m#   Abstra is an AI-powered process automation framework.[m[41m[m
+[32m+[m[32m#   Ignore directories containing user credentials, local state, and settings.[m[41m[m
+[32m+[m[32m#   Learn more at https://abstra.io/docs[m[41m[m
+[32m+[m[32m.abstra/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Visual Studio Code[m[41m[m
+[32m+[m[32m#   Visual Studio Code specific template is maintained in a separate VisualStudioCode.gitignore[m[41m [m
+[32m+[m[32m#   that can be found at https://github.com/github/gitignore/blob/main/Global/VisualStudioCode.gitignore[m[41m[m
+[32m+[m[32m#   and can be added to the global gitignore or merged into this file. However, if you prefer,[m[41m [m
+[32m+[m[32m#   you could uncomment the following to ignore the entire vscode folder[m[41m[m
+[32m+[m[32m# .vscode/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Ruff stuff:[m[41m[m
+[32m+[m[32m.ruff_cache/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# PyPI configuration file[m[41m[m
+[32m+[m[32m.pypirc[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Marimo[m[41m[m
+[32m+[m[32mmarimo/_static/[m[41m[m
+[32m+[m[32mmarimo/_lsp/[m[41m[m
+[32m+[m[32m__marimo__/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Streamlit[m[41m[m
+[32m+[m[32m.streamlit/secrets.toml[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# Cache[m[41m[m
+[32m+[m[32m**/data_cache/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m# AxonAI session and reports[m[41m[m
+[32m+[m[32m.axon_session.json[m[41m[m
+[32m+[m[32mreports/[m[41m[m
+[1mdiff --git a/.vscode/settings.json b/.vscode/settings.json[m
+[1mindex e0979ba..d275880 100644[m
+[1m--- a/.vscode/settings.json[m
+[1m+++ b/.vscode/settings.json[m
+[36m@@ -1,3 +1,3 @@[m
+[31m-{[m
+[31m-    "files.autoSave": "afterDelay"[m
+[32m+[m[32m{[m[41m[m
+[32m+[m[32m    "files.autoSave": "afterDelay"[m[41m[m
+ }[m
+\ No newline at end of file[m
+[1mdiff --git a/CHANGELOG.md b/CHANGELOG.md[m
+[1mindex fcb8c59..1517f62 100644[m
+[1m--- a/CHANGELOG.md[m
+[1m+++ b/CHANGELOG.md[m
+[36m@@ -1,341 +1,341 @@[m
+[31m-# Changelog[m
+[31m-[m
+[31m-All notable changes to AxonAI are documented here.[m
+[31m-[m
+[31m-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),[m
+[31m-and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).[m
+[31m-Breaking changes within the 0.x line are called out explicitly.[m
+[31m-[m
+[31m-## [0.2.5] — 2026-05-11[m
+[31m-[m
+[31m-### Added[m
+[31m-[m
+[31m-- **Grounded Sentiment Analyst.** The renamed `sentiment_analyst` now reads[m
+[31m-  real Yahoo News, StockTwits, and Reddit data before generating its report,[m
+[31m-  replacing the prior flow that could fabricate social posts under prompt[m
+[31m-  pressure. (#557, #607)[m
+[31m-- **MiniMax provider** with the full M2.x catalog (M2.7 / M2.5 / M2.1 / M2[m
+[31m-  plus highspeed variants, 204K context). Dual-region: Global[m
+[31m-  (`MINIMAX_API_KEY`) and China (`MINIMAX_CN_API_KEY`).[m
+[31m-- **Dual-region Qwen and GLM** with separate keys per region — international[m
+[31m-  (`DASHSCOPE_API_KEY`, `ZHIPU_API_KEY`) and China (`DASHSCOPE_CN_API_KEY`,[m
+[31m-  `ZHIPU_CN_API_KEY`), selectable via a secondary region prompt. (#758)[m
+[31m-- **`AXONAI_*` env-var configurability for `DEFAULT_CONFIG`.** Override[m
+[31m-  `llm_provider`, deep/quick model IDs, `backend_url`, `output_language`,[m
+[31m-  debate-round counts, checkpoint flag, and benchmark ticker via `.env` with[m
+[31m-  type-aware coercion (string / int / bool). (#602)[m
+[31m-- **Interactive API-key detection in the CLI.** When the selected provider's[m
+[31m-  key is missing, the CLI prompts for it and persists the value to `.env`[m
+[31m-  so the analysis run continues without restart.[m
+[31m-- **Remote Ollama support.** `OLLAMA_BASE_URL` points the CLI and the[m
+[31m-  programmatic client at a remote `ollama-serve`. The CLI surfaces the[m
+[31m-  resolved endpoint and warns on common malformed inputs. Adds a[m
+[31m-  `"Custom model ID"` option for models pulled via `ollama pull`. (#648, #768)[m
+[31m-- **Configurable news-fetch parameters** in `DEFAULT_CONFIG` — per-ticker[m
+[31m-  article limit, macro headline limit, lookback window, and macro search[m
+[31m-  queries. (#606, #683)[m
+[31m-- **Configurable alpha benchmark** for non-US tickers. Replaces hardcoded[m
+[31m-  SPY with regional indices for `.NS` (^NSEI), `.T` (^N225), `.HK` (^HSI),[m
+[31m-  `.L` (^FTSE), `.TO` (^GSPTSE), `.AX` (^AXJO), `.BO` (^BSESN); explicit[m
+[31m-  `benchmark_ticker` override available. Eliminates FX drift dominating[m
+[31m-  alpha for non-USD listings. (#628, #684)[m
+[31m-- **Multi-language output covers every user-facing agent** — researchers,[m
+[31m-  risk debators, research manager, and trader, ending the previous[m
+[31m-  partial-localization reports. (#575)[m
+[31m-- **Model catalog refresh.** OpenAI GPT-5.5 frontier, Anthropic Claude Opus[m
+[31m-  4.7, Gemini 3.1 Flash-Lite GA, xAI Grok 4.20, Qwen 3.6 line. Versioned IDs[m
+[31m-  only; auto-shifting aliases moved to the `"Custom model ID"` option.[m
+[31m-[m
+[31m-### Changed[m
+[31m-[m
+[31m-- **Sentiment Analyst** is now consistently named across the CLI dropdown,[m
+[31m-  status panel, and final reports (previously the backend was renamed but[m
+[31m-  the CLI still said "Social Analyst"). The `AnalystType.SOCIAL = "social"`[m
+[31m-  wire value is kept for saved-config back-compat.[m
+[31m-[m
+[31m-### Fixed[m
+[31m-[m
+[31m-- **Structured output works on DeepSeek V4 / reasoner and MiniMax M2.x.**[m
+[31m-  Those providers reject `tool_choice` per their tool-calling docs; the[m
+[31m-  binding flow now skips it automatically via a capability table.[m
+[31m-- **`pip install .` installations pick up the project `.env`** when running[m
+[31m-  the CLI as a console script. (#747)[m
+[31m-- **Reports save end-to-end** — streamed chunks were previously dropped from[m
+[31m-  `complete_report.md`. (#719, #736)[m
+[31m-- **Ticker prompt preserves exchange suffixes** (`.SH`, `.SZ`, `.SS`, `.HK`,[m
+[31m-  `.T`, etc.) for A-share, HK, Tokyo, and other non-US flows. (#770)[m
+[31m-- **Docker permission errors** no longer block first-run write to[m
+[31m-  `~/.axonai/`. (#519, #627, #672, #771)[m
+[31m-- **Config state no longer leaks between runs** when sub-dicts are mutated;[m
+[31m-  `set_config` partial updates preserve sibling defaults. (#788)[m
+[31m-- **`max_recur_limit` config actually applies** — previously read but not[m
+[31m-  forwarded to the propagator. (#764)[m
+[31m-- **Missing-API-key error** names the exact env var to set. (#680)[m
+[31m-- **Quieter startup** — suppressed the noisy upstream[m
+[31m-  `LangChainPendingDeprecationWarning` from langgraph-checkpoint; will be[m
+[31m-  removed once that package ships its fix.[m
+[31m-[m
+[31m-### Security[m
+[31m-[m
+[31m-- **Ticker path-traversal validation** at every filesystem-path site (cache,[m
+[31m-  checkpoint database, results) so a malicious ticker cannot escape its[m
+[31m-  intended directory. (#618)[m
+[31m-[m
+[31m-## [0.2.4] — 2026-04-25[m
+[31m-[m
+[31m-### Added[m
+[31m-[m
+[31m-- **Structured-output decision agents.** Research Manager, Trader, and Portfolio[m
+[31m-  Manager now use `llm.with_structured_output(Schema)` on their primary call[m
+[31m-  and return typed Pydantic instances. Each provider's native structured-output[m
+[31m-  mode is used (`json_schema` for OpenAI / xAI, `response_schema` for Gemini,[m
+[31m-  tool-use for Anthropic, function-calling for OpenAI-compatible providers).[m
+[31m-  Render helpers preserve the existing markdown shape so memory log, CLI[m
+[31m-  display, and saved reports keep working unchanged. (#434)[m
+[31m-- **LangGraph checkpoint resume** — opt-in via `--checkpoint`. State is saved[m
+[31m-  after each node so crashed or interrupted runs resume from the last[m
+[31m-  successful step. Per-ticker SQLite databases under[m
+[31m-  `~/.axonai/cache/checkpoints/`. `--clear-checkpoints` resets them. (#594)[m
+[31m-- **Persistent decision log** replacing the per-agent BM25 memory. Decisions[m
+[31m-  are stored automatically at the end of `propagate()`; the next same-ticker[m
+[31m-  run resolves prior pending entries with realised return, alpha vs SPY, and[m
+[31m-  a one-paragraph reflection. Override path with `AXONAI_MEMORY_LOG_PATH`.[m
+[31m-  Optional `memory_log_max_entries` config caps resolved entries; pending[m
+[31m-  entries are never pruned. (#578, #563, #564, #579)[m
+[31m-- **DeepSeek, Qwen (Alibaba DashScope), GLM (Zhipu), and Azure OpenAI**[m
+[31m-  providers, plus dynamic OpenRouter model selection.[m
+[31m-- **Docker support** — multi-stage build with separate dev and runtime images.[m
+[31m-- **`scripts/smoke_structured_output.py`** — diagnostic that exercises the[m
+[31m-  three structured-output agents against any provider so contributors can[m
+[31m-  verify their setup with one command.[m
+[31m-- **5-tier rating scale** (Buy / Overweight / Hold / Underweight / Sell) used[m
+[31m-  consistently by Research Manager, Portfolio Manager, signal processor, and[m
+[31m-  the memory log; Trader keeps 3-tier (Buy / Hold / Sell) since transaction[m
+[31m-  direction is naturally ternary.[m
+[31m-- **Pytest fixtures** — lazy LLM client imports plus placeholder API keys so[m
+[31m-  the test suite runs cleanly without credentials. (#588)[m
+[31m-[m
+[31m-### Changed[m
+[31m-[m
+[31m-- **`backend_url` default is now `None`** rather than the OpenAI URL. Each[m
+[31m-  provider client falls back to its native default. The previous default[m
+[31m-  leaked the OpenAI URL into non-OpenAI clients (e.g. Gemini), producing[m
+[31m-  malformed request URLs for Python users who switched providers without[m
+[31m-  overriding `backend_url`. The CLI flow is unaffected.[m
+[31m-- All file I/O passes explicit `encoding="utf-8"` so Windows users no longer[m
+[31m-  hit `UnicodeEncodeError` with the cp1252 default. (#543, #550, #576)[m
+[31m-- Cache and log directories moved to `~/.axonai/` to resolve Docker[m
+[31m-  permission issues. (#519)[m
+[31m-- `SignalProcessor` reads the rating from the Portfolio Manager's rendered[m
+[31m-  markdown via a deterministic heuristic — no extra LLM call.[m
+[31m-- OpenAI structured-output calls default to `method="function_calling"` to[m
+[31m-  avoid noisy `PydanticSerializationUnexpectedValue` warnings emitted by[m
+[31m-  langchain-openai's Responses-API parse path. Same typed result, no warnings.[m
+[31m-[m
+[31m-### Fixed[m
+[31m-[m
+[31m-- Empty memory no longer triggers fabricated past-lessons in agent prompts;[m
+[31m-  the memory-log redesign makes this structurally impossible since only the[m
+[31m-  Portfolio Manager consults memory and only when entries exist. (#572)[m
+[31m-- Tool-call logging processes every chunk message, not just the last one, and[m
+[31m-  memory score normalization handles empty score arrays. (#534, #531)[m
+[31m-[m
+[31m-### Removed[m
+[31m-[m
+[31m-- `FinancialSituationMemory` (the per-agent BM25 system) and the dead[m
+[31m-  `reflect_and_remember()` plumbing; subsumed by the persistent decision log.[m
+[31m-- Hardcoded Google endpoint that caused 404 when `langchain-google-genai`[m
+[31m-  changed its API path. (#493, #496)[m
+[31m-[m
+[31m-### Contributors[m
+[31m-[m
+[31m-Thanks to everyone who shaped this release through code, design, and reports:[m
+[31m-[m
+[31m-- [@claytonbrown](https://github.com/claytonbrown) — checkpoint resume (#594), test fixtures (#588), design feedback on cost tracking (#582) and structured validation (#583)[m
+[31m-- [@Bcardo](https://github.com/Bcardo) — memory-log redesign (#579), empty-memory hallucination report (#572), encoding fix proposal (#570)[m
+[31m-- [@voidborne-d](https://github.com/voidborne-d) — memory persistence design (#564), portfolio manager state fix (#503)[m
+[31m-- [@mannubaveja007](https://github.com/mannubaveja007) — structured-output feature request (#434)[m
+[31m-- [@kelder66](https://github.com/kelder66) — RAM-only memory issue (#563)[m
+[31m-- [@Gujiassh](https://github.com/Gujiassh) — tool-call logging fix (#534), test stub PR (#533)[m
+[31m-- [@iuyup](https://github.com/iuyup) — memory score normalization fix (#531)[m
+[31m-- [@kaihg](https://github.com/kaihg) — Google base_url fix (#496)[m
+[31m-- [@32ryh98yfe](https://github.com/32ryh98yfe) — Gemini 404 report (#493)[m
+[31m-- [@uppb](https://github.com/uppb) — OpenRouter dynamic model selection (#482)[m
+[31m-- [@guoz14](https://github.com/guoz14) — OpenRouter limited-model report (#337)[m
+[31m-- [@samchenku](https://github.com/samchenku) — indicator name normalization (#490)[m
+[31m-- [@JasonOA888](https://github.com/JasonOA888) — y_finance pandas import fix (#488)[m
+[31m-- [@tiffanychum](https://github.com/tiffanychum) — stale import cleanup (#499)[m
+[31m-- [@zaizou](https://github.com/zaizou) — Docker permission issue (#519)[m
+[31m-- [@Stosman123](https://github.com/Stosman123), [@mauropuga](https://github.com/mauropuga), [@hotwind2015](https://github.com/hotwind2015) — Windows encoding bug reports (#543, #550, #576)[m
+[31m-- [@nnishad](https://github.com/nnishad), [@atharvajoshi01](https://github.com/atharvajoshi01) — encoding fix proposals (#568, #549)[m
+[31m-[m
+[31m-## [0.2.3] — 2026-03-29[m
+[31m-[m
+[31m-### Added[m
+[31m-[m
+[31m-- **Multi-language output** for analyst reports and final decisions, with a[m
+[31m-  CLI selector. Internal agent debate stays in English for reasoning quality. (#472)[m
+[31m-- **GPT-5.4 family models** in the default catalog, with deep/quick model split.[m
+[31m-- **Unified model catalog** as a single source of truth for CLI options and[m
+[31m-  provider validation.[m
+[31m-[m
+[31m-### Changed[m
+[31m-[m
+[31m-- `base_url` is forwarded to Google and Anthropic clients so corporate proxies[m
+[31m-  work consistently across providers. (#427)[m
+[31m-- Standardised the Google `api_key` parameter to the unified `api_key` form.[m
+[31m-[m
+[31m-### Fixed[m
+[31m-[m
+[31m-- Backtesting fetchers no longer leak look-ahead data when `curr_date` is in[m
+[31m-  the middle of a fetched window. (#475)[m
+[31m-- Invalid indicator names from the LLM are caught at the tool boundary instead[m
+[31m-  of crashing the run. (#429)[m
+[31m-- yfinance news fetchers respect the same exponential-backoff retry as price[m
+[31m-  fetchers. (#445)[m
+[31m-[m
+[31m-### Contributors[m
+[31m-[m
+[31m-- [@ahmedk20](https://github.com/ahmedk20) — multi-language output (#472)[m
+[31m-- [@CadeYu](https://github.com/CadeYu) — model catalog typing (#464)[m
+[31m-- [@javierdejesusda](https://github.com/javierdejesusda) — unified Google API key parameter (#453)[m
+[31m-- [@voidborne-d](https://github.com/voidborne-d) — yfinance news retry (#445)[m
+[31m-- [@kostakost2](https://github.com/kostakost2) — look-ahead bias report (#475)[m
+[31m-- [@lu-zhengda](https://github.com/lu-zhengda) — proxy/base_url support request (#427)[m
+[31m-- [@VamsiKrishna2021](https://github.com/VamsiKrishna2021) — invalid indicator crash report (#429)[m
+[31m-[m
+[31m-## [0.2.2] — 2026-03-22[m
+[31m-[m
+[31m-### Added[m
+[31m-[m
+[31m-- **Five-tier rating scale** (Buy / Overweight / Hold / Underweight / Sell)[m
+[31m-  introduced for the Portfolio Manager.[m
+[31m-- **Anthropic effort level** support for Claude models.[m
+[31m-- **OpenAI Responses API** path for native OpenAI models.[m
+[31m-[m
+[31m-### Changed[m
+[31m-[m
+[31m-- `risk_manager` renamed to `portfolio_manager` to match the role description[m
+[31m-  shown in the CLI display.[m
+[31m-- Exchange-qualified tickers (e.g. `7203.T`, `BRK.B`) preserved across all[m
+[31m-  agent prompts and tool calls.[m
+[31m-- Process-level UTF-8 default attempted for cross-platform consistency[m
+[31m-  (note: this approach did not actually take effect; replaced in v0.2.4 with[m
+[31m-  explicit per-call `encoding="utf-8"` arguments).[m
+[31m-[m
+[31m-### Fixed[m
+[31m-[m
+[31m-- yfinance rate-limit errors are retried with exponential backoff. (#426)[m
+[31m-- HTTP client SSL customisation is supported for environments that need[m
+[31m-  custom certificate bundles. (#379)[m
+[31m-- Report-section writes handle list-of-string content gracefully.[m
+[31m-[m
+[31m-### Contributors[m
+[31m-[m
+[31m-- [@CadeYu](https://github.com/CadeYu) — exchange-qualified ticker preservation (#413)[m
+[31m-- [@yang1002378395-cmyk](https://github.com/yang1002378395-cmyk) — HTTP client SSL customisation (#379)[m
+[31m-[m
+[31m-## [0.2.1] — 2026-03-15[m
+[31m-[m
+[31m-### Security[m
+[31m-[m
+[31m-- Patched `langchain-core` vulnerability (LangGrinch). (#335)[m
+[31m-- Removed `chainlit` dependency affected by CVE-2026-22218.[m
+[31m-[m
+[31m-### Added[m
+[31m-[m
+[31m-- `pyproject.toml` build-system configuration; the project now installs via[m
+[31m-  modern packaging tooling.[m
+[31m-[m
+[31m-### Removed[m
+[31m-[m
+[31m-- `setup.py` — dependencies consolidated to `pyproject.toml`.[m
+[31m-[m
+[31m-### Fixed[m
+[31m-[m
+[31m-- Risk manager reads the correct fundamental report source. (#341)[m
+[31m-- All `open()` calls receive an explicit UTF-8 encoding (initial pass).[m
+[31m-- `get_indicators` tool handles comma-separated indicator names from the LLM. (#368)[m
+[31m-- `Propagation` initialises every debate-state field so risk debaters never[m
+[31m-  see missing keys.[m
+[31m-- Stock data parsing tolerates malformed CSVs and NaN values.[m
+[31m-- Conditional debate logic respects the configured round count. (#361)[m
+[31m-[m
+[31m-### Contributors[m
+[31m-[m
+[31m-- [@RinZ27](https://github.com/RinZ27) — `langchain-core` security patch (#335)[m
+[31m-- [@Ljx-007](https://github.com/Ljx-007) — risk manager fundamental-report fix (#341)[m
+[31m-- [@makk9](https://github.com/makk9) — debate-rounds config issue (#361)[m
+[31m-[m
+[31m-## [0.2.0] — 2026-02-04[m
+[31m-[m
+[31m-This is the largest release since the initial public version. The framework[m
+[31m-moved from single-provider to a multi-provider architecture and grew several[m
+[31m-production-ready surfaces.[m
+[31m-[m
+[31m-### Added[m
+[31m-[m
+[31m-- **Multi-provider LLM support** (OpenAI, Google, Anthropic, xAI, OpenRouter,[m
+[31m-  Ollama) via a factory pattern, with provider-specific thinking configurations.[m
+[31m-- **Alpha Vantage** integration as a configurable primary data provider, with[m
+[31m-  yfinance as a community-stability fallback.[m
+[31m-- **Footer statistics** in the CLI: real-time tracking of LLM calls, tool[m
+[31m-  calls, and token usage via LangChain callbacks.[m
+[31m-- **Post-analysis report saving** — the framework writes per-section markdown[m
+[31m-  files (analyst reports, debate transcripts, final decision) when a run[m
+[31m-  completes.[m
+[31m-- **Announcements panel** — fetches updates from `api.axonai.ai/v1/announcements`[m
+[31m-  for the CLI welcome screen.[m
+[31m-- **Tool fallbacks** so a single vendor outage does not stop the pipeline.[m
+[31m-[m
+[31m-### Changed[m
+[31m-[m
+[31m-- Risky / Safe risk debaters renamed to **Aggressive / Conservative** for[m
+[31m-  consistency with the displayed agent labels.[m
+[31m-- Default data vendor switched to balance reliability and quota across[m
+[31m-  community deployments.[m
+[31m-- Ollama and OpenRouter model lists updated; default endpoints clarified.[m
+[31m-[m
+[31m-### Fixed[m
+[31m-[m
+[31m-- Analyst status tracking and message deduplication in the live display.[m
+[31m-- Infinite-loop guard in the agent loop; reflection and logging hardened.[m
+[31m-- Various data-vendor implementation bugs and tool-signature mismatches.[m
+[31m-[m
+[31m-### Contributors[m
+[31m-[m
+[31m-This release is the first with substantial outside contributions; many community[m
+[31m-PRs from late 2025 also landed here.[m
+[31m-[m
+[31m-- [@luohy15](https://github.com/luohy15) — Alpha Vantage data-vendor integration (#235)[m
+[31m-- [@EdwardoSunny](https://github.com/EdwardoSunny) — yfinance fetching optimisations (#245)[m
+[31m-- [@Mirza-Samad-Ahmed-Baig](https://github.com/Mirza-Samad-Ahmed-Baig) — infinite-loop guard, reflection, and logging fixes (#89)[m
+[31m-- [@ZeroAct](https://github.com/ZeroAct) — saved results path support (#29)[m
+[31m-- [@Zhongyi-Lu](https://github.com/Zhongyi-Lu) — `.env` gitignore (#49)[m
+[31m-- [@csoboy](https://github.com/csoboy) — local Ollama setup (#53)[m
+[31m-- [@chauhang](https://github.com/chauhang) — initial Docker support attempt (#47, later reverted; the merged Docker support shipped in v0.2.4)[m
+[31m-[m
+[31m-## [0.1.1] — 2025-06-07[m
+[31m-[m
+[31m-### Removed[m
+[31m-[m
+[31m-- Static site assets that had been bundled with v0.1.0; the public site now[m
+[31m-  lives separately.[m
+[31m-[m
+[31m-## [0.1.0] — 2025-06-05[m
+[31m-[m
+[31m-### Added[m
+[31m-[m
+[31m-- **Initial public release** of the AxonAI multi-agent trading[m
+[31m-  framework: market / sentiment / news / fundamentals analysts; bull and bear[m
+[31m-  researchers; trader; aggressive, conservative, and neutral risk debaters;[m
+[31m-  portfolio manager. LangGraph orchestration, yfinance data, per-agent[m
+[31m-  BM25 memory, single-provider OpenAI integration, interactive CLI.[m
+[31m-[m
+[31m-[0.2.4]: https://github.com/AxonAI/AxonAI/compare/v0.2.3...v0.2.4[m
+[31m-[0.2.3]: https://github.com/AxonAI/AxonAI/compare/v0.2.2...v0.2.3[m
+[31m-[0.2.2]: https://github.com/AxonAI/AxonAI/compare/v0.2.1...v0.2.2[m
+[31m-[0.2.1]: https://github.com/AxonAI/AxonAI/compare/v0.2.0...v0.2.1[m
+[31m-[0.2.0]: https://github.com/AxonAI/AxonAI/compare/v0.1.1...v0.2.0[m
+[31m-[0.1.1]: https://github.com/AxonAI/AxonAI/compare/v0.1.0...v0.1.1[m
+[31m-[0.1.0]: https://github.com/AxonAI/AxonAI/releases/tag/v0.1.0[m
+[32m+[m[32m# Changelog[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mAll notable changes to AxonAI are documented here.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mThe format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),[m[41m[m
+[32m+[m[32mand this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).[m[41m[m
+[32m+[m[32mBreaking changes within the 0.x line are called out explicitly.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## [0.2.5] — 2026-05-11[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Added[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- **Grounded Sentiment Analyst.** The renamed `sentiment_analyst` now reads[m[41m[m
+[32m+[m[32m  real Yahoo News, StockTwits, and Reddit data before generating its report,[m[41m[m
+[32m+[m[32m  replacing the prior flow that could fabricate social posts under prompt[m[41m[m
+[32m+[m[32m  pressure. (#557, #607)[m[41m[m
+[32m+[m[32m- **MiniMax provider** with the full M2.x catalog (M2.7 / M2.5 / M2.1 / M2[m[41m[m
+[32m+[m[32m  plus highspeed variants, 204K context). Dual-region: Global[m[41m[m
+[32m+[m[32m  (`MINIMAX_API_KEY`) and China (`MINIMAX_CN_API_KEY`).[m[41m[m
+[32m+[m[32m- **Dual-region Qwen and GLM** with separate keys per region — international[m[41m[m
+[32m+[m[32m  (`DASHSCOPE_API_KEY`, `ZHIPU_API_KEY`) and China (`DASHSCOPE_CN_API_KEY`,[m[41m[m
+[32m+[m[32m  `ZHIPU_CN_API_KEY`), selectable via a secondary region prompt. (#758)[m[41m[m
+[32m+[m[32m- **`AXONAI_*` env-var configurability for `DEFAULT_CONFIG`.** Override[m[41m[m
+[32m+[m[32m  `llm_provider`, deep/quick model IDs, `backend_url`, `output_language`,[m[41m[m
+[32m+[m[32m  debate-round counts, checkpoint flag, and benchmark ticker via `.env` with[m[41m[m
+[32m+[m[32m  type-aware coercion (string / int / bool). (#602)[m[41m[m
+[32m+[m[32m- **Interactive API-key detection in the CLI.** When the selected provider's[m[41m[m
+[32m+[m[32m  key is missing, the CLI prompts for it and persists the value to `.env`[m[41m[m
+[32m+[m[32m  so the analysis run continues without restart.[m[41m[m
+[32m+[m[32m- **Remote Ollama support.** `OLLAMA_BASE_URL` points the CLI and the[m[41m[m
+[32m+[m[32m  programmatic client at a remote `ollama-serve`. The CLI surfaces the[m[41m[m
+[32m+[m[32m  resolved endpoint and warns on common malformed inputs. Adds a[m[41m[m
+[32m+[m[32m  `"Custom model ID"` option for models pulled via `ollama pull`. (#648, #768)[m[41m[m
+[32m+[m[32m- **Configurable news-fetch parameters** in `DEFAULT_CONFIG` — per-ticker[m[41m[m
+[32m+[m[32m  article limit, macro headline limit, lookback window, and macro search[m[41m[m
+[32m+[m[32m  queries. (#606, #683)[m[41m[m
+[32m+[m[32m- **Configurable alpha benchmark** for non-US tickers. Replaces hardcoded[m[41m[m
+[32m+[m[32m  SPY with regional indices for `.NS` (^NSEI), `.T` (^N225), `.HK` (^HSI),[m[41m[m
+[32m+[m[32m  `.L` (^FTSE), `.TO` (^GSPTSE), `.AX` (^AXJO), `.BO` (^BSESN); explicit[m[41m[m
+[32m+[m[32m  `benchmark_ticker` override available. Eliminates FX drift dominating[m[41m[m
+[32m+[m[32m  alpha for non-USD listings. (#628, #684)[m[41m[m
+[32m+[m[32m- **Multi-language output covers every user-facing agent** — researchers,[m[41m[m
+[32m+[m[32m  risk debators, research manager, and trader, ending the previous[m[41m[m
+[32m+[m[32m  partial-localization reports. (#575)[m[41m[m
+[32m+[m[32m- **Model catalog refresh.** OpenAI GPT-5.5 frontier, Anthropic Claude Opus[m[41m[m
+[32m+[m[32m  4.7, Gemini 3.1 Flash-Lite GA, xAI Grok 4.20, Qwen 3.6 line. Versioned IDs[m[41m[m
+[32m+[m[32m  only; auto-shifting aliases moved to the `"Custom model ID"` option.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Changed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- **Sentiment Analyst** is now consistently named across the CLI dropdown,[m[41m[m
+[32m+[m[32m  status panel, and final reports (previously the backend was renamed but[m[41m[m
+[32m+[m[32m  the CLI still said "Social Analyst"). The `AnalystType.SOCIAL = "social"`[m[41m[m
+[32m+[m[32m  wire value is kept for saved-config back-compat.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Fixed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- **Structured output works on DeepSeek V4 / reasoner and MiniMax M2.x.**[m[41m[m
+[32m+[m[32m  Those providers reject `tool_choice` per their tool-calling docs; the[m[41m[m
+[32m+[m[32m  binding flow now skips it automatically via a capability table.[m[41m[m
+[32m+[m[32m- **`pip install .` installations pick up the project `.env`** when running[m[41m[m
+[32m+[m[32m  the CLI as a console script. (#747)[m[41m[m
+[32m+[m[32m- **Reports save end-to-end** — streamed chunks were previously dropped from[m[41m[m
+[32m+[m[32m  `complete_report.md`. (#719, #736)[m[41m[m
+[32m+[m[32m- **Ticker prompt preserves exchange suffixes** (`.SH`, `.SZ`, `.SS`, `.HK`,[m[41m[m
+[32m+[m[32m  `.T`, etc.) for A-share, HK, Tokyo, and other non-US flows. (#770)[m[41m[m
+[32m+[m[32m- **Docker permission errors** no longer block first-run write to[m[41m[m
+[32m+[m[32m  `~/.axonai/`. (#519, #627, #672, #771)[m[41m[m
+[32m+[m[32m- **Config state no longer leaks between runs** when sub-dicts are mutated;[m[41m[m
+[32m+[m[32m  `set_config` partial updates preserve sibling defaults. (#788)[m[41m[m
+[32m+[m[32m- **`max_recur_limit` config actually applies** — previously read but not[m[41m[m
+[32m+[m[32m  forwarded to the propagator. (#764)[m[41m[m
+[32m+[m[32m- **Missing-API-key error** names the exact env var to set. (#680)[m[41m[m
+[32m+[m[32m- **Quieter startup** — suppressed the noisy upstream[m[41m[m
+[32m+[m[32m  `LangChainPendingDeprecationWarning` from langgraph-checkpoint; will be[m[41m[m
+[32m+[m[32m  removed once that package ships its fix.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Security[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- **Ticker path-traversal validation** at every filesystem-path site (cache,[m[41m[m
+[32m+[m[32m  checkpoint database, results) so a malicious ticker cannot escape its[m[41m[m
+[32m+[m[32m  intended directory. (#618)[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## [0.2.4] — 2026-04-25[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Added[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- **Structured-output decision agents.** Research Manager, Trader, and Portfolio[m[41m[m
+[32m+[m[32m  Manager now use `llm.with_structured_output(Schema)` on their primary call[m[41m[m
+[32m+[m[32m  and return typed Pydantic instances. Each provider's native structured-output[m[41m[m
+[32m+[m[32m  mode is used (`json_schema` for OpenAI / xAI, `response_schema` for Gemini,[m[41m[m
+[32m+[m[32m  tool-use for Anthropic, function-calling for OpenAI-compatible providers).[m[41m[m
+[32m+[m[32m  Render helpers preserve the existing markdown shape so memory log, CLI[m[41m[m
+[32m+[m[32m  display, and saved reports keep working unchanged. (#434)[m[41m[m
+[32m+[m[32m- **LangGraph checkpoint resume** — opt-in via `--checkpoint`. State is saved[m[41m[m
+[32m+[m[32m  after each node so crashed or interrupted runs resume from the last[m[41m[m
+[32m+[m[32m  successful step. Per-ticker SQLite databases under[m[41m[m
+[32m+[m[32m  `~/.axonai/cache/checkpoints/`. `--clear-checkpoints` resets them. (#594)[m[41m[m
+[32m+[m[32m- **Persistent decision log** replacing the per-agent BM25 memory. Decisions[m[41m[m
+[32m+[m[32m  are stored automatically at the end of `propagate()`; the next same-ticker[m[41m[m
+[32m+[m[32m  run resolves prior pending entries with realised return, alpha vs SPY, and[m[41m[m
+[32m+[m[32m  a one-paragraph reflection. Override path with `AXONAI_MEMORY_LOG_PATH`.[m[41m[m
+[32m+[m[32m  Optional `memory_log_max_entries` config caps resolved entries; pending[m[41m[m
+[32m+[m[32m  entries are never pruned. (#578, #563, #564, #579)[m[41m[m
+[32m+[m[32m- **DeepSeek, Qwen (Alibaba DashScope), GLM (Zhipu), and Azure OpenAI**[m[41m[m
+[32m+[m[32m  providers, plus dynamic OpenRouter model selection.[m[41m[m
+[32m+[m[32m- **Docker support** — multi-stage build with separate dev and runtime images.[m[41m[m
+[32m+[m[32m- **`scripts/smoke_structured_output.py`** — diagnostic that exercises the[m[41m[m
+[32m+[m[32m  three structured-output agents against any provider so contributors can[m[41m[m
+[32m+[m[32m  verify their setup with one command.[m[41m[m
+[32m+[m[32m- **5-tier rating scale** (Buy / Overweight / Hold / Underweight / Sell) used[m[41m[m
+[32m+[m[32m  consistently by Research Manager, Portfolio Manager, signal processor, and[m[41m[m
+[32m+[m[32m  the memory log; Trader keeps 3-tier (Buy / Hold / Sell) since transaction[m[41m[m
+[32m+[m[32m  direction is naturally ternary.[m[41m[m
+[32m+[m[32m- **Pytest fixtures** — lazy LLM client imports plus placeholder API keys so[m[41m[m
+[32m+[m[32m  the test suite runs cleanly without credentials. (#588)[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Changed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- **`backend_url` default is now `None`** rather than the OpenAI URL. Each[m[41m[m
+[32m+[m[32m  provider client falls back to its native default. The previous default[m[41m[m
+[32m+[m[32m  leaked the OpenAI URL into non-OpenAI clients (e.g. Gemini), producing[m[41m[m
+[32m+[m[32m  malformed request URLs for Python users who switched providers without[m[41m[m
+[32m+[m[32m  overriding `backend_url`. The CLI flow is unaffected.[m[41m[m
+[32m+[m[32m- All file I/O passes explicit `encoding="utf-8"` so Windows users no longer[m[41m[m
+[32m+[m[32m  hit `UnicodeEncodeError` with the cp1252 default. (#543, #550, #576)[m[41m[m
+[32m+[m[32m- Cache and log directories moved to `~/.axonai/` to resolve Docker[m[41m[m
+[32m+[m[32m  permission issues. (#519)[m[41m[m
+[32m+[m[32m- `SignalProcessor` reads the rating from the Portfolio Manager's rendered[m[41m[m
+[32m+[m[32m  markdown via a deterministic heuristic — no extra LLM call.[m[41m[m
+[32m+[m[32m- OpenAI structured-output calls default to `method="function_calling"` to[m[41m[m
+[32m+[m[32m  avoid noisy `PydanticSerializationUnexpectedValue` warnings emitted by[m[41m[m
+[32m+[m[32m  langchain-openai's Responses-API parse path. Same typed result, no warnings.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Fixed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- Empty memory no longer triggers fabricated past-lessons in agent prompts;[m[41m[m
+[32m+[m[32m  the memory-log redesign makes this structurally impossible since only the[m[41m[m
+[32m+[m[32m  Portfolio Manager consults memory and only when entries exist. (#572)[m[41m[m
+[32m+[m[32m- Tool-call logging processes every chunk message, not just the last one, and[m[41m[m
+[32m+[m[32m  memory score normalization handles empty score arrays. (#534, #531)[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Removed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- `FinancialSituationMemory` (the per-agent BM25 system) and the dead[m[41m[m
+[32m+[m[32m  `reflect_and_remember()` plumbing; subsumed by the persistent decision log.[m[41m[m
+[32m+[m[32m- Hardcoded Google endpoint that caused 404 when `langchain-google-genai`[m[41m[m
+[32m+[m[32m  changed its API path. (#493, #496)[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Contributors[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mThanks to everyone who shaped this release through code, design, and reports:[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- [@claytonbrown](https://github.com/claytonbrown) — checkpoint resume (#594), test fixtures (#588), design feedback on cost tracking (#582) and structured validation (#583)[m[41m[m
+[32m+[m[32m- [@Bcardo](https://github.com/Bcardo) — memory-log redesign (#579), empty-memory hallucination report (#572), encoding fix proposal (#570)[m[41m[m
+[32m+[m[32m- [@voidborne-d](https://github.com/voidborne-d) — memory persistence design (#564), portfolio manager state fix (#503)[m[41m[m
+[32m+[m[32m- [@mannubaveja007](https://github.com/mannubaveja007) — structured-output feature request (#434)[m[41m[m
+[32m+[m[32m- [@kelder66](https://github.com/kelder66) — RAM-only memory issue (#563)[m[41m[m
+[32m+[m[32m- [@Gujiassh](https://github.com/Gujiassh) — tool-call logging fix (#534), test stub PR (#533)[m[41m[m
+[32m+[m[32m- [@iuyup](https://github.com/iuyup) — memory score normalization fix (#531)[m[41m[m
+[32m+[m[32m- [@kaihg](https://github.com/kaihg) — Google base_url fix (#496)[m[41m[m
+[32m+[m[32m- [@32ryh98yfe](https://github.com/32ryh98yfe) — Gemini 404 report (#493)[m[41m[m
+[32m+[m[32m- [@uppb](https://github.com/uppb) — OpenRouter dynamic model selection (#482)[m[41m[m
+[32m+[m[32m- [@guoz14](https://github.com/guoz14) — OpenRouter limited-model report (#337)[m[41m[m
+[32m+[m[32m- [@samchenku](https://github.com/samchenku) — indicator name normalization (#490)[m[41m[m
+[32m+[m[32m- [@JasonOA888](https://github.com/JasonOA888) — y_finance pandas import fix (#488)[m[41m[m
+[32m+[m[32m- [@tiffanychum](https://github.com/tiffanychum) — stale import cleanup (#499)[m[41m[m
+[32m+[m[32m- [@zaizou](https://github.com/zaizou) — Docker permission issue (#519)[m[41m[m
+[32m+[m[32m- [@Stosman123](https://github.com/Stosman123), [@mauropuga](https://github.com/mauropuga), [@hotwind2015](https://github.com/hotwind2015) — Windows encoding bug reports (#543, #550, #576)[m[41m[m
+[32m+[m[32m- [@nnishad](https://github.com/nnishad), [@atharvajoshi01](https://github.com/atharvajoshi01) — encoding fix proposals (#568, #549)[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## [0.2.3] — 2026-03-29[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Added[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- **Multi-language output** for analyst reports and final decisions, with a[m[41m[m
+[32m+[m[32m  CLI selector. Internal agent debate stays in English for reasoning quality. (#472)[m[41m[m
+[32m+[m[32m- **GPT-5.4 family models** in the default catalog, with deep/quick model split.[m[41m[m
+[32m+[m[32m- **Unified model catalog** as a single source of truth for CLI options and[m[41m[m
+[32m+[m[32m  provider validation.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Changed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- `base_url` is forwarded to Google and Anthropic clients so corporate proxies[m[41m[m
+[32m+[m[32m  work consistently across providers. (#427)[m[41m[m
+[32m+[m[32m- Standardised the Google `api_key` parameter to the unified `api_key` form.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Fixed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- Backtesting fetchers no longer leak look-ahead data when `curr_date` is in[m[41m[m
+[32m+[m[32m  the middle of a fetched window. (#475)[m[41m[m
+[32m+[m[32m- Invalid indicator names from the LLM are caught at the tool boundary instead[m[41m[m
+[32m+[m[32m  of crashing the run. (#429)[m[41m[m
+[32m+[m[32m- yfinance news fetchers respect the same exponential-backoff retry as price[m[41m[m
+[32m+[m[32m  fetchers. (#445)[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Contributors[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- [@ahmedk20](https://github.com/ahmedk20) — multi-language output (#472)[m[41m[m
+[32m+[m[32m- [@CadeYu](https://github.com/CadeYu) — model catalog typing (#464)[m[41m[m
+[32m+[m[32m- [@javierdejesusda](https://github.com/javierdejesusda) — unified Google API key parameter (#453)[m[41m[m
+[32m+[m[32m- [@voidborne-d](https://github.com/voidborne-d) — yfinance news retry (#445)[m[41m[m
+[32m+[m[32m- [@kostakost2](https://github.com/kostakost2) — look-ahead bias report (#475)[m[41m[m
+[32m+[m[32m- [@lu-zhengda](https://github.com/lu-zhengda) — proxy/base_url support request (#427)[m[41m[m
+[32m+[m[32m- [@VamsiKrishna2021](https://github.com/VamsiKrishna2021) — invalid indicator crash report (#429)[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## [0.2.2] — 2026-03-22[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Added[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- **Five-tier rating scale** (Buy / Overweight / Hold / Underweight / Sell)[m[41m[m
+[32m+[m[32m  introduced for the Portfolio Manager.[m[41m[m
+[32m+[m[32m- **Anthropic effort level** support for Claude models.[m[41m[m
+[32m+[m[32m- **OpenAI Responses API** path for native OpenAI models.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Changed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- `risk_manager` renamed to `portfolio_manager` to match the role description[m[41m[m
+[32m+[m[32m  shown in the CLI display.[m[41m[m
+[32m+[m[32m- Exchange-qualified tickers (e.g. `7203.T`, `BRK.B`) preserved across all[m[41m[m
+[32m+[m[32m  agent prompts and tool calls.[m[41m[m
+[32m+[m[32m- Process-level UTF-8 default attempted for cross-platform consistency[m[41m[m
+[32m+[m[32m  (note: this approach did not actually take effect; replaced in v0.2.4 with[m[41m[m
+[32m+[m[32m  explicit per-call `encoding="utf-8"` arguments).[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Fixed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- yfinance rate-limit errors are retried with exponential backoff. (#426)[m[41m[m
+[32m+[m[32m- HTTP client SSL customisation is supported for environments that need[m[41m[m
+[32m+[m[32m  custom certificate bundles. (#379)[m[41m[m
+[32m+[m[32m- Report-section writes handle list-of-string content gracefully.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Contributors[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- [@CadeYu](https://github.com/CadeYu) — exchange-qualified ticker preservation (#413)[m[41m[m
+[32m+[m[32m- [@yang1002378395-cmyk](https://github.com/yang1002378395-cmyk) — HTTP client SSL customisation (#379)[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## [0.2.1] — 2026-03-15[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Security[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- Patched `langchain-core` vulnerability (LangGrinch). (#335)[m[41m[m
+[32m+[m[32m- Removed `chainlit` dependency affected by CVE-2026-22218.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Added[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- `pyproject.toml` build-system configuration; the project now installs via[m[41m[m
+[32m+[m[32m  modern packaging tooling.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Removed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- `setup.py` — dependencies consolidated to `pyproject.toml`.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Fixed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- Risk manager reads the correct fundamental report source. (#341)[m[41m[m
+[32m+[m[32m- All `open()` calls receive an explicit UTF-8 encoding (initial pass).[m[41m[m
+[32m+[m[32m- `get_indicators` tool handles comma-separated indicator names from the LLM. (#368)[m[41m[m
+[32m+[m[32m- `Propagation` initialises every debate-state field so risk debaters never[m[41m[m
+[32m+[m[32m  see missing keys.[m[41m[m
+[32m+[m[32m- Stock data parsing tolerates malformed CSVs and NaN values.[m[41m[m
+[32m+[m[32m- Conditional debate logic respects the configured round count. (#361)[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Contributors[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- [@RinZ27](https://github.com/RinZ27) — `langchain-core` security patch (#335)[m[41m[m
+[32m+[m[32m- [@Ljx-007](https://github.com/Ljx-007) — risk manager fundamental-report fix (#341)[m[41m[m
+[32m+[m[32m- [@makk9](https://github.com/makk9) — debate-rounds config issue (#361)[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## [0.2.0] — 2026-02-04[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mThis is the largest release since the initial public version. The framework[m[41m[m
+[32m+[m[32mmoved from single-provider to a multi-provider architecture and grew several[m[41m[m
+[32m+[m[32mproduction-ready surfaces.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Added[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- **Multi-provider LLM support** (OpenAI, Google, Anthropic, xAI, OpenRouter,[m[41m[m
+[32m+[m[32m  Ollama) via a factory pattern, with provider-specific thinking configurations.[m[41m[m
+[32m+[m[32m- **Alpha Vantage** integration as a configurable primary data provider, with[m[41m[m
+[32m+[m[32m  yfinance as a community-stability fallback.[m[41m[m
+[32m+[m[32m- **Footer statistics** in the CLI: real-time tracking of LLM calls, tool[m[41m[m
+[32m+[m[32m  calls, and token usage via LangChain callbacks.[m[41m[m
+[32m+[m[32m- **Post-analysis report saving** — the framework writes per-section markdown[m[41m[m
+[32m+[m[32m  files (analyst reports, debate transcripts, final decision) when a run[m[41m[m
+[32m+[m[32m  completes.[m[41m[m
+[32m+[m[32m- **Announcements panel** — fetches updates from `api.axonai.ai/v1/announcements`[m[41m[m
+[32m+[m[32m  for the CLI welcome screen.[m[41m[m
+[32m+[m[32m- **Tool fallbacks** so a single vendor outage does not stop the pipeline.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Changed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- Risky / Safe risk debaters renamed to **Aggressive / Conservative** for[m[41m[m
+[32m+[m[32m  consistency with the displayed agent labels.[m[41m[m
+[32m+[m[32m- Default data vendor switched to balance reliability and quota across[m[41m[m
+[32m+[m[32m  community deployments.[m[41m[m
+[32m+[m[32m- Ollama and OpenRouter model lists updated; default endpoints clarified.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Fixed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- Analyst status tracking and message deduplication in the live display.[m[41m[m
+[32m+[m[32m- Infinite-loop guard in the agent loop; reflection and logging hardened.[m[41m[m
+[32m+[m[32m- Various data-vendor implementation bugs and tool-signature mismatches.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Contributors[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mThis release is the first with substantial outside contributions; many community[m[41m[m
+[32m+[m[32mPRs from late 2025 also landed here.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- [@luohy15](https://github.com/luohy15) — Alpha Vantage data-vendor integration (#235)[m[41m[m
+[32m+[m[32m- [@EdwardoSunny](https://github.com/EdwardoSunny) — yfinance fetching optimisations (#245)[m[41m[m
+[32m+[m[32m- [@Mirza-Samad-Ahmed-Baig](https://github.com/Mirza-Samad-Ahmed-Baig) — infinite-loop guard, reflection, and logging fixes (#89)[m[41m[m
+[32m+[m[32m- [@ZeroAct](https://github.com/ZeroAct) — saved results path support (#29)[m[41m[m
+[32m+[m[32m- [@Zhongyi-Lu](https://github.com/Zhongyi-Lu) — `.env` gitignore (#49)[m[41m[m
+[32m+[m[32m- [@csoboy](https://github.com/csoboy) — local Ollama setup (#53)[m[41m[m
+[32m+[m[32m- [@chauhang](https://github.com/chauhang) — initial Docker support attempt (#47, later reverted; the merged Docker support shipped in v0.2.4)[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## [0.1.1] — 2025-06-07[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Removed[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- Static site assets that had been bundled with v0.1.0; the public site now[m[41m[m
+[32m+[m[32m  lives separately.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m## [0.1.0] — 2025-06-05[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m### Added[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m- **Initial public release** of the AxonAI multi-agent trading[m[41m[m
+[32m+[m[32m  framework: market / sentiment / news / fundamentals analysts; bull and bear[m[41m[m
+[32m+[m[32m  researchers; trader; aggressive, conservative, and neutral risk debaters;[m[41m[m
+[32m+[m[32m  portfolio manager. LangGraph orchestration, yfinance data, per-agent[m[41m[m
+[32m+[m[32m  BM25 memory, single-provider OpenAI integration, interactive CLI.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m[0.2.4]: https://github.com/AxonAI/AxonAI/compare/v0.2.3...v0.2.4[m[41m[m
+[32m+[m[32m[0.2.3]: https://github.com/AxonAI/AxonAI/compare/v0.2.2...v0.2.3[m[41m[m
+[32m+[m[32m[0.2.2]: https://github.com/AxonAI/AxonAI/compare/v0.2.1...v0.2.2[m[41m[m
+[32m+[m[32m[0.2.1]: https://github.com/AxonAI/AxonAI/compare/v0.2.0...v0.2.1[m[41m[m
+[32m+[m[32m[0.2.0]: https://github.com/AxonAI/AxonAI/compare/v0.1.1...v0.2.0[m[41m[m
+[32m+[m[32m[0.1.1]: https://github.com/AxonAI/AxonAI/compare/v0.1.0...v0.1.1[m[41m[m
+[32m+[m[32m[0.1.0]: https://github.com/AxonAI/AxonAI/releases/tag/v0.1.0[m[41m[m
+[1mdiff --git a/Dockerfile b/Dockerfile[m
+[1mindex 024c7c7..a0aface 100644[m
+[1m--- a/Dockerfile[m
+[1m+++ b/Dockerfile[m
+[36m@@ -1,28 +1,28 @@[m
+[31m-FROM python:3.12-slim AS builder[m
+[31m-[m
+[31m-ENV PYTHONDONTWRITEBYTECODE=1 \[m
+[31m-    PIP_DISABLE_PIP_VERSION_CHECK=1[m
+[31m-[m
+[31m-RUN python -m venv /opt/venv[m
+[31m-ENV PATH="/opt/venv/bin:$PATH"[m
+[31m-[m
+[31m-WORKDIR /build[m
+[31m-COPY . .[m
+[31m-RUN pip install --no-cache-dir .[m
+[31m-[m
+[31m-FROM python:3.12-slim[m
+[31m-[m
+[31m-ENV PYTHONDONTWRITEBYTECODE=1 \[m
+[31m-    PYTHONUNBUFFERED=1[m
+[31m-[m
+[31m-COPY --from=builder /opt/venv /opt/venv[m
+[31m-ENV PATH="/opt/venv/bin:$PATH"[m
+[31m-[m
+[31m-RUN useradd --create-home appuser \[m
+[31m- && install -d -m 0755 -o appuser -g appuser /home/appuser/.tradingagents[m
+[31m-USER appuser[m
+[31m-WORKDIR /home/appuser/app[m
+[31m-[m
+[31m-COPY --from=builder --chown=appuser:appuser /build .[m
+[31m-[m
+[31m-ENTRYPOINT ["tradingagents"][m
+[32m+[m[32mFROM python:3.12-slim AS builder[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mENV PYTHONDONTWRITEBYTECODE=1 \[m[41m[m
+[32m+[m[32m    PIP_DISABLE_PIP_VERSION_CHECK=1[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mRUN python -m venv /opt/venv[m[41m[m
+[32m+[m[32mENV PATH="/opt/venv/bin:$PATH"[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mWORKDIR /build[m[41m[m
+[32m+[m[32mCOPY . .[m[41m[m
+[32m+[m[32mRUN pip install --no-cache-dir .[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mFROM python:3.12-slim[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mENV PYTHONDONTWRITEBYTECODE=1 \[m[41m[m
+[32m+[m[32m    PYTHONUNBUFFERED=1[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mCOPY --from=builder /opt/venv /opt/venv[m[41m[m
+[32m+[m[32mENV PATH="/opt/venv/bin:$PATH"[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mRUN useradd --create-home appuser \[m[41m[m
+[32m+[m[32m && install -d -m 0755 -o appuser -g appuser /home/appuser/.tradingagents[m[41m[m
+[32m+[m[32mUSER appuser[m[41m[m
+[32m+[m[32mWORKDIR /home/appuser/app[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mCOPY --from=builder --chown=appuser:appuser /build .[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32mENTRYPOINT ["tradingagents"][m[41m[m
+[1mdiff --git a/LICENSE b/LICENSE[m
+[1mindex 261eeb9..29f81d8 100644[m
+[1m--- a/LICENSE[m
+[1m+++ b/LICENSE[m
+[36m@@ -1,201 +1,201 @@[m
+[31m-                                 Apache License[m
+[31m-                           Version 2.0, January 2004[m
+[31m-                        http://www.apache.org/licenses/[m
+[31m-[m
+[31m-   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION[m
+[31m-[m
+[31m-   1. Definitions.[m
+[31m-[m
+[31m-      "License" shall mean the terms and conditions for use, reproduction,[m
+[31m-      and distribution as defined by Sections 1 through 9 of this document.[m
+[31m-[m
+[31m-      "Licensor" shall mean the copyright owner or entity authorized by[m
+[31m-      the copyright owner that is granting the License.[m
+[31m-[m
+[31m-      "Legal Entity" shall mean the union of the acting entity and all[m
+[31m-      other entities that control, are controlled by, or are under common[m
+[31m-      control with that entity. For the purposes of this definition,[m
+[31m-      "control" means (i) the power, direct or indirect, to cause the[m
+[31m-      direction or management of such entity, whether by contract or[m
+[31m-      otherwise, or (ii) ownership of fifty percent (50%) or more of the[m
+[31m-      outstanding shares, or (iii) beneficial ownership of such entity.[m
+[31m-[m
+[31m-      "You" (or "Your") shall mean an individual or Legal Entity[m
+[31m-      exercising permissions granted by this License.[m
+[31m-[m
+[31m-      "Source" form shall mean the preferred form for making modifications,[m
+[31m-      including but not limited to software source code, documentation[m
+[31m-      source, and configuration files.[m
+[31m-[m
+[31m-      "Object" form shall mean any form resulting from mechanical[m
+[31m-      transformation or translation of a Source form, including but[m
+[31m-      not limited to compiled object code, generated documentation,[m
+[31m-      and conversions to other media types.[m
+[31m-[m
+[31m-      "Work" shall mean the work of authorship, whether in Source or[m
+[31m-      Object form, made available under the License, as indicated by a[m
+[31m-      copyright notice that is included in or attached to the work[m
+[31m-      (an example is provided in the Appendix below).[m
+[31m-[m
+[31m-      "Derivative Works" shall mean any work, whether in Source or Object[m
+[31m-      form, that is based on (or derived from) the Work and for which the[m
+[31m-      editorial revisions, annotations, elaborations, or other modifications[m
+[31m-      represent, as a whole, an original work of authorship. For the purposes[m
+[31m-      of this License, Derivative Works shall not include works that remain[m
+[31m-      separable from, or merely link (or bind by name) to the interfaces of,[m
+[31m-      the Work and Derivative Works thereof.[m
+[31m-[m
+[31m-      "Contribution" shall mean any work of authorship, including[m
+[31m-      the original version of the Work and any modifications or additions[m
+[31m-      to that Work or Derivative Works thereof, that is intentionally[m
+[31m-      submitted to Licensor for inclusion in the Work by the copyright owner[m
+[31m-      or by an individual or Legal Entity authorized to submit on behalf of[m
+[31m-      the copyright owner. For the purposes of this definition, "submitted"[m
+[31m-      means any form of electronic, verbal, or written communication sent[m
+[31m-      to the Licensor or its representatives, including but not limited to[m
+[31m-      communication on electronic mailing lists, source code control systems,[m
+[31m-      and issue tracking systems that are managed by, or on behalf of, the[m
+[31m-      Licensor for the purpose of discussing and improving the Work, but[m
+[31m-      excluding communication that is conspicuously marked or otherwise[m
+[31m-      designated in writing by the copyright owner as "Not a Contribution."[m
+[31m-[m
+[31m-      "Contributor" shall mean Licensor and any individual or Legal Entity[m
+[31m-      on behalf of whom a Contribution has been received by Licensor and[m
+[31m-      subsequently incorporated within the Work.[m
+[31m-[m
+[31m-   2. Grant of Copyright License. Subject to the terms and conditions of[m
+[31m-      this License, each Contributor hereby grants to You a perpetual,[m
+[31m-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable[m
+[31m-      copyright license to reproduce, prepare Derivative Works of,[m
+[31m-      publicly display, publicly perform, sublicense, and distribute the[m
+[31m-      Work and such Derivative Works in Source or Object form.[m
+[31m-[m
+[31m-   3. Grant of Patent License. Subject to the terms and conditions of[m
+[31m-      this License, each Contributor hereby grants to You a perpetual,[m
+[31m-      worldwide, non-exclusive, no-charge, royalty-free, irrevocable[m
+[31m-      (except as stated in this section) patent license to make, have made,[m
+[31m-      use, offer to sell, sell, import, and otherwise transfer the Work,[m
+[31m-      where such license applies only to those patent claims licensable[m
+[31m-      by such Contributor that are necessarily infringed by their[m
+[31m-      Contribution(s) alone or by combination of their Contribution(s)[m
+[31m-      with the Work to which such Contribution(s) was submitted. If You[m
+[31m-      institute patent litigation against any entity (including a[m
+[31m-      cross-claim or counterclaim in a lawsuit) alleging that the Work[m
+[31m-      or a Contribution incorporated within the Work constitutes direct[m
+[31m-      or contributory patent infringement, then any patent licenses[m
+[31m-      granted to You under this License for that Work shall terminate[m
+[31m-      as of the date such litigation is filed.[m
+[31m-[m
+[31m-   4. Redistribution. You may reproduce and distribute copies of the[m
+[31m-      Work or Derivative Works thereof in any medium, with or without[m
+[31m-      modifications, and in Source or Object form, provided that You[m
+[31m-      meet the following conditions:[m
+[31m-[m
+[31m-      (a) You must give any other recipients of the Work or[m
+[31m-          Derivative Works a copy of this License; and[m
+[31m-[m
+[31m-      (b) You must cause any modified files to carry prominent notices[m
+[31m-          stating that You changed the files; and[m
+[31m-[m
+[31m-      (c) You must retain, in the Source form of any Derivative Works[m
+[31m-          that You distribute, all copyright, patent, trademark, and[m
+[31m-          attribution notices from the Source form of the Work,[m
+[31m-          excluding those notices that do not pertain to any part of[m
+[31m-          the Derivative Works; and[m
+[31m-[m
+[31m-      (d) If the Work includes a "NOTICE" text file as part of its[m
+[31m-          distribution, then any Derivative Works that You distribute must[m
+[31m-          include a readable copy of the attribution notices contained[m
+[31m-          within such NOTICE file, excluding those notices that do not[m
+[31m-          pertain to any part of the Derivative Works, in at least one[m
+[31m-          of the following places: within a NOTICE text file distributed[m
+[31m-          as part of the Derivative Works; within the Source form or[m
+[31m-          documentation, if provided along with the Derivative Works; or,[m
+[31m-          within a display generated by the Derivative Works, if and[m
+[31m-          wherever such third-party notices normally appear. The contents[m
+[31m-          of the NOTICE file are for informational purposes only and[m
+[31m-          do not modify the License. You may add Your own attribution[m
+[31m-          notices within Derivative Works that You distribute, alongside[m
+[31m-          or as an addendum to the NOTICE text from the Work, provided[m
+[31m-          that such additional attribution notices cannot be construed[m
+[31m-          as modifying the License.[m
+[31m-[m
+[31m-      You may add Your own copyright statement to Your modifications and[m
+[31m-      may provide additional or different license terms and conditions[m
+[31m-      for use, reproduction, or distribution of Your modifications, or[m
+[31m-      for any such Derivative Works as a whole, provided Your use,[m
+[31m-      reproduction, and distribution of the Work otherwise complies with[m
+[31m-      the conditions stated in this License.[m
+[31m-[m
+[31m-   5. Submission of Contributions. Unless You explicitly state otherwise,[m
+[31m-      any Contribution intentionally submitted for inclusion in the Work[m
+[31m-      by You to the Licensor shall be under the terms and conditions of[m
+[31m-      this License, without any additional terms or conditions.[m
+[31m-      Notwithstanding the above, nothing herein shall supersede or modify[m
+[31m-      the terms of any separate license agreement you may have executed[m
+[31m-      with Licensor regarding such Contributions.[m
+[31m-[m
+[31m-   6. Trademarks. This License does not grant permission to use the trade[m
+[31m-      names, trademarks, service marks, or product names of the Licensor,[m
+[31m-      except as required for reasonable and customary use in describing the[m
+[31m-      origin of the Work and reproducing the content of the NOTICE file.[m
+[31m-[m
+[31m-   7. Disclaimer of Warranty. Unless required by applicable law or[m
+[31m-      agreed to in writing, Licensor provides the Work (and each[m
+[31m-      Contributor provides its Contributions) on an "AS IS" BASIS,[m
+[31m-      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or[m
+[31m-      implied, including, without limitation, any warranties or conditions[m
+[31m-      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A[m
+[31m-      PARTICULAR PURPOSE. You are solely responsible for determining the[m
+[31m-      appropriateness of using or redistributing the Work and assume any[m
+[31m-      risks associated with Your exercise of permissions under this License.[m
+[31m-[m
+[31m-   8. Limitation of Liability. In no event and under no legal theory,[m
+[31m-      whether in tort (including negligence), contract, or otherwise,[m
+[31m-      unless required by applicable law (such as deliberate and grossly[m
+[31m-      negligent acts) or agreed to in writing, shall any Contributor be[m
+[31m-      liable to You for damages, including any direct, indirect, special,[m
+[31m-      incidental, or consequential damages of any character arising as a[m
+[31m-      result of this License or out of the use or inability to use the[m
+[31m-      Work (including but not limited to damages for loss of goodwill,[m
+[31m-      work stoppage, computer failure or malfunction, or any and all[m
+[31m-      other commercial damages or losses), even if such Contributor[m
+[31m-      has been advised of the possibility of such damages.[m
+[31m-[m
+[31m-   9. Accepting Warranty or Additional Liability. While redistributing[m
+[31m-      the Work or Derivative Works thereof, You may choose to offer,[m
+[31m-      and charge a fee for, acceptance of support, warranty, indemnity,[m
+[31m-      or other liability obligations and/or rights consistent with this[m
+[31m-      License. However, in accepting such obligations, You may act only[m
+[31m-      on Your own behalf and on Your sole responsibility, not on behalf[m
+[31m-      of any other Contributor, and only if You agree to indemnify,[m
+[31m-      defend, and hold each Contributor harmless for any liability[m
+[31m-      incurred by, or claims asserted against, such Contributor by reason[m
+[31m-      of your accepting any such warranty or additional liability.[m
+[31m-[m
+[31m-   END OF TERMS AND CONDITIONS[m
+[31m-[m
+[31m-   APPENDIX: How to apply the Apache License to your work.[m
+[31m-[m
+[31m-      To apply the Apache License to your work, attach the following[m
+[31m-      boilerplate notice, with the fields enclosed by brackets "[]"[m
+[31m-      replaced with your own identifying information. (Don't include[m
+[31m-      the brackets!)  The text should be enclosed in the appropriate[m
+[31m-      comment syntax for the file format. We also recommend that a[m
+[31m-      file or class name and description of purpose be included on the[m
+[31m-      same "printed page" as the copyright notice for easier[m
+[31m-      identification within third-party archives.[m
+[31m-[m
+[31m-   Copyright [yyyy] [name of copyright owner][m
+[31m-[m
+[31m-   Licensed under the Apache License, Version 2.0 (the "License");[m
+[31m-   you may not use this file except in compliance with the License.[m
+[31m-   You may obtain a copy of the License at[m
+[31m-[m
+[31m-       http://www.apache.org/licenses/LICENSE-2.0[m
+[31m-[m
+[31m-   Unless required by applicable law or agreed to in writing, software[m
+[31m-   distributed under the License is distributed on an "AS IS" BASIS,[m
+[31m-   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.[m
+[31m-   See the License for the specific language governing permissions and[m
+[31m-   limitations under the License.[m
+[32m+[m[32m                                 Apache License[m[41m[m
+[32m+[m[32m                           Version 2.0, January 2004[m[41m[m
+[32m+[m[32m                        http://www.apache.org/licenses/[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   TERMS AND CONDITIONS FOR USE, REPRODUCTION, AND DISTRIBUTION[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   1. Definitions.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      "License" shall mean the terms and conditions for use, reproduction,[m[41m[m
+[32m+[m[32m      and distribution as defined by Sections 1 through 9 of this document.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      "Licensor" shall mean the copyright owner or entity authorized by[m[41m[m
+[32m+[m[32m      the copyright owner that is granting the License.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      "Legal Entity" shall mean the union of the acting entity and all[m[41m[m
+[32m+[m[32m      other entities that control, are controlled by, or are under common[m[41m[m
+[32m+[m[32m      control with that entity. For the purposes of this definition,[m[41m[m
+[32m+[m[32m      "control" means (i) the power, direct or indirect, to cause the[m[41m[m
+[32m+[m[32m      direction or management of such entity, whether by contract or[m[41m[m
+[32m+[m[32m      otherwise, or (ii) ownership of fifty percent (50%) or more of the[m[41m[m
+[32m+[m[32m      outstanding shares, or (iii) beneficial ownership of such entity.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      "You" (or "Your") shall mean an individual or Legal Entity[m[41m[m
+[32m+[m[32m      exercising permissions granted by this License.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      "Source" form shall mean the preferred form for making modifications,[m[41m[m
+[32m+[m[32m      including but not limited to software source code, documentation[m[41m[m
+[32m+[m[32m      source, and configuration files.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      "Object" form shall mean any form resulting from mechanical[m[41m[m
+[32m+[m[32m      transformation or translation of a Source form, including but[m[41m[m
+[32m+[m[32m      not limited to compiled object code, generated documentation,[m[41m[m
+[32m+[m[32m      and conversions to other media types.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      "Work" shall mean the work of authorship, whether in Source or[m[41m[m
+[32m+[m[32m      Object form, made available under the License, as indicated by a[m[41m[m
+[32m+[m[32m      copyright notice that is included in or attached to the work[m[41m[m
+[32m+[m[32m      (an example is provided in the Appendix below).[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      "Derivative Works" shall mean any work, whether in Source or Object[m[41m[m
+[32m+[m[32m      form, that is based on (or derived from) the Work and for which the[m[41m[m
+[32m+[m[32m      editorial revisions, annotations, elaborations, or other modifications[m[41m[m
+[32m+[m[32m      represent, as a whole, an original work of authorship. For the purposes[m[41m[m
+[32m+[m[32m      of this License, Derivative Works shall not include works that remain[m[41m[m
+[32m+[m[32m      separable from, or merely link (or bind by name) to the interfaces of,[m[41m[m
+[32m+[m[32m      the Work and Derivative Works thereof.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      "Contribution" shall mean any work of authorship, including[m[41m[m
+[32m+[m[32m      the original version of the Work and any modifications or additions[m[41m[m
+[32m+[m[32m      to that Work or Derivative Works thereof, that is intentionally[m[41m[m
+[32m+[m[32m      submitted to Licensor for inclusion in the Work by the copyright owner[m[41m[m
+[32m+[m[32m      or by an individual or Legal Entity authorized to submit on behalf of[m[41m[m
+[32m+[m[32m      the copyright owner. For the purposes of this definition, "submitted"[m[41m[m
+[32m+[m[32m      means any form of electronic, verbal, or written communication sent[m[41m[m
+[32m+[m[32m      to the Licensor or its representatives, including but not limited to[m[41m[m
+[32m+[m[32m      communication on electronic mailing lists, source code control systems,[m[41m[m
+[32m+[m[32m      and issue tracking systems that are managed by, or on behalf of, the[m[41m[m
+[32m+[m[32m      Licensor for the purpose of discussing and improving the Work, but[m[41m[m
+[32m+[m[32m      excluding communication that is conspicuously marked or otherwise[m[41m[m
+[32m+[m[32m      designated in writing by the copyright owner as "Not a Contribution."[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      "Contributor" shall mean Licensor and any individual or Legal Entity[m[41m[m
+[32m+[m[32m      on behalf of whom a Contribution has been received by Licensor and[m[41m[m
+[32m+[m[32m      subsequently incorporated within the Work.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   2. Grant of Copyright License. Subject to the terms and conditions of[m[41m[m
+[32m+[m[32m      this License, each Contributor hereby grants to You a perpetual,[m[41m[m
+[32m+[m[32m      worldwide, non-exclusive, no-charge, royalty-free, irrevocable[m[41m[m
+[32m+[m[32m      copyright license to reproduce, prepare Derivative Works of,[m[41m[m
+[32m+[m[32m      publicly display, publicly perform, sublicense, and distribute the[m[41m[m
+[32m+[m[32m      Work and such Derivative Works in Source or Object form.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   3. Grant of Patent License. Subject to the terms and conditions of[m[41m[m
+[32m+[m[32m      this License, each Contributor hereby grants to You a perpetual,[m[41m[m
+[32m+[m[32m      worldwide, non-exclusive, no-charge, royalty-free, irrevocable[m[41m[m
+[32m+[m[32m      (except as stated in this section) patent license to make, have made,[m[41m[m
+[32m+[m[32m      use, offer to sell, sell, import, and otherwise transfer the Work,[m[41m[m
+[32m+[m[32m      where such license applies only to those patent claims licensable[m[41m[m
+[32m+[m[32m      by such Contributor that are necessarily infringed by their[m[41m[m
+[32m+[m[32m      Contribution(s) alone or by combination of their Contribution(s)[m[41m[m
+[32m+[m[32m      with the Work to which such Contribution(s) was submitted. If You[m[41m[m
+[32m+[m[32m      institute patent litigation against any entity (including a[m[41m[m
+[32m+[m[32m      cross-claim or counterclaim in a lawsuit) alleging that the Work[m[41m[m
+[32m+[m[32m      or a Contribution incorporated within the Work constitutes direct[m[41m[m
+[32m+[m[32m      or contributory patent infringement, then any patent licenses[m[41m[m
+[32m+[m[32m      granted to You under this License for that Work shall terminate[m[41m[m
+[32m+[m[32m      as of the date such litigation is filed.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   4. Redistribution. You may reproduce and distribute copies of the[m[41m[m
+[32m+[m[32m      Work or Derivative Works thereof in any medium, with or without[m[41m[m
+[32m+[m[32m      modifications, and in Source or Object form, provided that You[m[41m[m
+[32m+[m[32m      meet the following conditions:[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      (a) You must give any other recipients of the Work or[m[41m[m
+[32m+[m[32m          Derivative Works a copy of this License; and[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      (b) You must cause any modified files to carry prominent notices[m[41m[m
+[32m+[m[32m          stating that You changed the files; and[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      (c) You must retain, in the Source form of any Derivative Works[m[41m[m
+[32m+[m[32m          that You distribute, all copyright, patent, trademark, and[m[41m[m
+[32m+[m[32m          attribution notices from the Source form of the Work,[m[41m[m
+[32m+[m[32m          excluding those notices that do not pertain to any part of[m[41m[m
+[32m+[m[32m          the Derivative Works; and[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      (d) If the Work includes a "NOTICE" text file as part of its[m[41m[m
+[32m+[m[32m          distribution, then any Derivative Works that You distribute must[m[41m[m
+[32m+[m[32m          include a readable copy of the attribution notices contained[m[41m[m
+[32m+[m[32m          within such NOTICE file, excluding those notices that do not[m[41m[m
+[32m+[m[32m          pertain to any part of the Derivative Works, in at least one[m[41m[m
+[32m+[m[32m          of the following places: within a NOTICE text file distributed[m[41m[m
+[32m+[m[32m          as part of the Derivative Works; within the Source form or[m[41m[m
+[32m+[m[32m          documentation, if provided along with the Derivative Works; or,[m[41m[m
+[32m+[m[32m          within a display generated by the Derivative Works, if and[m[41m[m
+[32m+[m[32m          wherever such third-party notices normally appear. The contents[m[41m[m
+[32m+[m[32m          of the NOTICE file are for informational purposes only and[m[41m[m
+[32m+[m[32m          do not modify the License. You may add Your own attribution[m[41m[m
+[32m+[m[32m          notices within Derivative Works that You distribute, alongside[m[41m[m
+[32m+[m[32m          or as an addendum to the NOTICE text from the Work, provided[m[41m[m
+[32m+[m[32m          that such additional attribution notices cannot be construed[m[41m[m
+[32m+[m[32m          as modifying the License.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      You may add Your own copyright statement to Your modifications and[m[41m[m
+[32m+[m[32m      may provide additional or different license terms and conditions[m[41m[m
+[32m+[m[32m      for use, reproduction, or distribution of Your modifications, or[m[41m[m
+[32m+[m[32m      for any such Derivative Works as a whole, provided Your use,[m[41m[m
+[32m+[m[32m      reproduction, and distribution of the Work otherwise complies with[m[41m[m
+[32m+[m[32m      the conditions stated in this License.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   5. Submission of Contributions. Unless You explicitly state otherwise,[m[41m[m
+[32m+[m[32m      any Contribution intentionally submitted for inclusion in the Work[m[41m[m
+[32m+[m[32m      by You to the Licensor shall be under the terms and conditions of[m[41m[m
+[32m+[m[32m      this License, without any additional terms or conditions.[m[41m[m
+[32m+[m[32m      Notwithstanding the above, nothing herein shall supersede or modify[m[41m[m
+[32m+[m[32m      the terms of any separate license agreement you may have executed[m[41m[m
+[32m+[m[32m      with Licensor regarding such Contributions.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   6. Trademarks. This License does not grant permission to use the trade[m[41m[m
+[32m+[m[32m      names, trademarks, service marks, or product names of the Licensor,[m[41m[m
+[32m+[m[32m      except as required for reasonable and customary use in describing the[m[41m[m
+[32m+[m[32m      origin of the Work and reproducing the content of the NOTICE file.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   7. Disclaimer of Warranty. Unless required by applicable law or[m[41m[m
+[32m+[m[32m      agreed to in writing, Licensor provides the Work (and each[m[41m[m
+[32m+[m[32m      Contributor provides its Contributions) on an "AS IS" BASIS,[m[41m[m
+[32m+[m[32m      WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or[m[41m[m
+[32m+[m[32m      implied, including, without limitation, any warranties or conditions[m[41m[m
+[32m+[m[32m      of TITLE, NON-INFRINGEMENT, MERCHANTABILITY, or FITNESS FOR A[m[41m[m
+[32m+[m[32m      PARTICULAR PURPOSE. You are solely responsible for determining the[m[41m[m
+[32m+[m[32m      appropriateness of using or redistributing the Work and assume any[m[41m[m
+[32m+[m[32m      risks associated with Your exercise of permissions under this License.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   8. Limitation of Liability. In no event and under no legal theory,[m[41m[m
+[32m+[m[32m      whether in tort (including negligence), contract, or otherwise,[m[41m[m
+[32m+[m[32m      unless required by applicable law (such as deliberate and grossly[m[41m[m
+[32m+[m[32m      negligent acts) or agreed to in writing, shall any Contributor be[m[41m[m
+[32m+[m[32m      liable to You for damages, including any direct, indirect, special,[m[41m[m
+[32m+[m[32m      incidental, or consequential damages of any character arising as a[m[41m[m
+[32m+[m[32m      result of this License or out of the use or inability to use the[m[41m[m
+[32m+[m[32m      Work (including but not limited to damages for loss of goodwill,[m[41m[m
+[32m+[m[32m      work stoppage, computer failure or malfunction, or any and all[m[41m[m
+[32m+[m[32m      other commercial damages or losses), even if such Contributor[m[41m[m
+[32m+[m[32m      has been advised of the possibility of such damages.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   9. Accepting Warranty or Additional Liability. While redistributing[m[41m[m
+[32m+[m[32m      the Work or Derivative Works thereof, You may choose to offer,[m[41m[m
+[32m+[m[32m      and charge a fee for, acceptance of support, warranty, indemnity,[m[41m[m
+[32m+[m[32m      or other liability obligations and/or rights consistent with this[m[41m[m
+[32m+[m[32m      License. However, in accepting such obligations, You may act only[m[41m[m
+[32m+[m[32m      on Your own behalf and on Your sole responsibility, not on behalf[m[41m[m
+[32m+[m[32m      of any other Contributor, and only if You agree to indemnify,[m[41m[m
+[32m+[m[32m      defend, and hold each Contributor harmless for any liability[m[41m[m
+[32m+[m[32m      incurred by, or claims asserted against, such Contributor by reason[m[41m[m
+[32m+[m[32m      of your accepting any such warranty or additional liability.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   END OF TERMS AND CONDITIONS[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   APPENDIX: How to apply the Apache License to your work.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m      To apply the Apache License to your work, attach the following[m[41m[m
+[32m+[m[32m      boilerplate notice, with the fields enclosed by brackets "[]"[m[41m[m
+[32m+[m[32m      replaced with your own identifying information. (Don't include[m[41m[m
+[32m+[m[32m      the brackets!)  The text should be enclosed in the appropriate[m[41m[m
+[32m+[m[32m      comment syntax for the file format. We also recommend that a[m[41m[m
+[32m+[m[32m      file or class name and description of purpose be included on the[m[41m[m
+[32m+[m[32m      same "printed page" as the copyright notice for easier[m[41m[m
+[32m+[m[32m      identification within third-party archives.[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   Copyright [yyyy] [name of copyright owner][m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   Licensed under the Apache License, Version 2.0 (the "License");[m[41m[m
+[32m+[m[32m   you may not use this file except in compliance with the License.[m[41m[m
+[32m+[m[32m   You may obtain a copy of the License at[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m       http://www.apache.org/licenses/LICENSE-2.0[m[41m[m
+[32m+[m[41m[m
+[32m+[m[32m   Unless required by applicable law or agreed to in writing, software[m[41m[m
+[32m+[m[32m   distributed under the License is distributed on an "AS IS" BASIS,[m[41m[m
+[32m+[m[32m   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.[m[41m[m
+[32m+[m[32m   See the License for the specific language governing permissions and[m[41m[m
+[32m+[m[32m   limitations under the License.[m[41m[m
+[1mdiff --git a/README.md b/README.md[m
+[1mindex 2d0d24a..9979f67 100644[m
+[1m--- a/README.md[m
+[1m+++ b/README.md[m
+[36m@@ -1,243 +1,243 @@[m
+[31m-# AxonAI[m
+[31m-[m
+[31m-[![GitHub License](https://img.shields.io/github/license/skynextindia/AxonAgent?color=blue)](LICENSE)[m
+[31m-[![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12%20%7C%203.13-green.svg)](pyproject.toml)[m
+[31m-[![Architecture](https://img.shields.io/badge/architecture-3--Layer%20Daemon-orange.svg)](#architecture-overview)[m
+[31m-[m
+[31m-AxonAI is a **3-layer event-driven multi-agent trading daemon** designed for real-time forex trading. It integrates directly with **MetaTrader 5 (MT5)** to stream raw market ticks, run high-frequency mathematical event detection, and trigger deep multi-agent LLM analysis via **LangGraph** on actionable market events.[m
+[31m-[m
+[31m----[m
+[31m-[m
+[31m-## 📖 Table of Contents[m
+[31m-- [Development Status & Roadmap](#-development-status--roadmap)[m
+[31m-- [Architecture Overview](#-architecture-overview)[m
+[31m-- [Key Features](#-key-features)[m
+[31m-- [Project Directory Structure](#-project-directory-structure)[m
+[31m-- [Installation](#installation)[m
+[31m-- [Quick Start](#quick-start)[m
+[31m-- [Configuration](#configuration)[m
+[31m-- [Real-Time Dashboard](#real-time-dashboard)[m
+[31m-- [Verification & Testing](#verification--testing)[m
+[31m-[m
+[31m----[m
+[31m-[m
+[31m-## 📈 Development Status & Roadmap[m
+[31m-[m
+[31m-AxonAI has transitioned from an unoptimized research framework into a highly reliable, cost-efficient, production-grade real-time trading engine. [m
+[31m-[m
+[31m-### ✅ Completed Milestones & Breakthroughs[m
+[31m-- **Agent Identity Overhaul**: Re-wrote system prompts for all **12 agents** in the LangGraph system, assigning elite trading identities (e.g., `WYCKOFF` for Technicals, `MUNGER` for Fundamentals, `TUDOR` as the Trader, `DRUCKENMILLER` as the Portfolio Manager) with a clear color-coded tier UI system.[m
+[31m-- **Strict Sequential Graph Execution**: Replaced unstructured node workflows with a strict sequential/fan-out execution DAG (`Tudor` ➔ `Parallel Analysts` ➔ `Bull/Bear Debate` ➔ `Research Manager` ➔ `Parallel Risk Debaters` ➔ `Druckenmiller Decision`).[m
+[31m-- **Pydantic Structured Outputs**: Integrated strict `llm.with_structured_output()` verification on key orchestrators (`Trader`, `Research Manager`, `Portfolio Manager`) to guarantee 100% reliable, crash-free output parsing.[m
+[31m-- **Mathematical Evidence Compressor**: Added a zero-token state pre-processor that compresses raw market data and levels into structured evidence before sending it to reasoning nodes. **Result: Saved ~80% in API token costs** and completely resolved context window saturation.[m
+[31m-- **Real-Time Telemetry & WS Stream**: Re-wired the FastAPI web-dashboard to stream real-time ticks, ATR calculations, active levels, agent debate traces, and live MT5 execution statuses.[m
+[31m-- **Safety Testing**: Expanded unit tests to include MT5 order routing validation, event detector checks, and structured payload parsers.[m
+[31m-[m
+[31m-### 🎯 Current Progress & Active Goals[m
+[31m-- [x] Enforce structured Pydantic schemas on all reasoning nodes.[m
+[31m-- [x] Implement the mathematical `EvidenceCompressor` token reduction module.[m
+[31m-- [ ] **Live Dry-Run Verification**: Run continuous 24/5 paper trading to verify mathematical event trigger frequencies.[m
+[31m-- [ ] **Risk/Drawdown Limits Engine**: Build an autonomous circuit-breaker to halt agent-initiated executions if max daily drawdown is reached.[m
+[31m-- [ ] **Multi-Pair Coexistence**: Scale the daemon to orchestrate concurrent LangGraph executions across multiple currency pairs simultaneously.[m
+[31m-[m
+[31m----[m
+[31m-[m
+[31m-## 🏗️ Architecture Overview[m
+[31m-[m
+[31m-The system operates as a continuous real-time loop divided into three specialized layers, keeping API token costs low by using pure math for event filtering:[m
+[31m-[m
+[31m-```[m
+[31m-┌─────────────────────────────────────────────────────────────┐[m
+[31m-│  LAYER 3 — LLM GRAPH (fires only on high-priority events)  │[m
+[31m-│  AxonAIGraph → Trader → [Analysts x4] → Bull/Bear →        │[m
+[31m-│  ResearchMgr → [Risk x3] → PortfolioManager → Decision     │[m
+[31m-│  (Triggered on cooldown, e.g. 300s, when priority >= MED)   │[m
+[31m-├─────────────────────────────────────────────────────────────┤[m
+[31m-│  LAYER 2 — DETECTION ENGINE (pure math, zero tokens)       │[m
+[31m-│  EventDetector: 9 structural indicators & pattern checks   │[m
+[31m-│  LiveWorldState: spread / session / ATR / RSI / regime      │[m
+[31m-│  LiveMarketEvidence: swing H/L / key levels / patterns      │[m
+[31m-├─────────────────────────────────────────────────────────────┤[m
+[31m-│  LAYER 1 — TICK ENGINE (100ms MT5 poll loop)               │[m
+[31m-│  TickEngine → CandleBuilder (M1/M5/M15/H1) → callbacks     │[m
+[31m-│  MT5 raw ticks → OHLCV → candle close events               │[m
+[31m-└─────────────────────────────────────────────────────────────┘[m
+[31m-          ↕ WebSocket ↕[m
+[31m-┌─────────────────────────────────────────────────────────────┐[m
+[31m-│  DASHBOARD (FastAPI + HTML5 CSS Glassmorphism HUD)         │[m
+[31m-│  /ws — live streams ticks, indicators, events & agent state │[m
+[31m-└─────────────────────────────────────────────────────────────┘[m
+[31m-```[m
+[31m-[m
+[31m-### Signal Flow:[m
+[31m-`MT5 Tick` ➔ `TickEngine` ➔ `CandleBuilder` ➔ `EventDetector` ➔ `queue.Queue` ➔ `AxonDaemon` ➔ `GraphExecutor` ➔ `LangGraph` ➔ `PM Decision` ➔ `Dashboard`[m
+[31m-[m
+[31m----[m
+[31m-[m
+[31m-## ✨ Key Features[m
+[31m-[m
+[31m-### 1. Layer 1: Dedicated Tick Engine[m
+[31m-- Threaded polling loop fetching new ticks from MetaTrader 5 every 100ms.[m
+[31m-- High-performance, epoch-boundary-aware `CandleBuilder` constructing **M1, M5, M15, and H1** OHLCV candles in real-time.[m
+[31m-- Rolling 10,000-tick buffer.[m
+[31m-[m
+[31m-### 2. Layer 2: Zero-Token Mathematical Detection Engine[m
+[31m-Monitors the chart constantly and extracts structural patterns using pure mathematical logic:[m
+[31m-1. **LEVEL_BREACH**: Close crosses above/below significant historic high/low levels.[m
+[31m-2. **STRUCTURE_BREAK**: Break of Structure (BOS) indicating a shift in trend.[m
+[31m-3. **SWEEP_DETECTED**: High-probability liquidity sweep (pin bar poking past swing level before reversing).[m
+[31m-4. **VOLATILITY_SPIKE**: High-velocity expansion (candle range > 2× rolling ATR).[m
+[31m-5. **CANDLE_PATTERN**: Classic candlestick signals (Pin bars, Engulfing bars) at major levels.[m
+[31m-6. **REGIME_SHIFT**: Dominant technical regime transformations.[m
+[31m-7. **SESSION_TRANSITION**: Shift across Asian, London, and New York trading sessions.[m
+[31m-8. **SPREAD_CHANGE**: Tracking of broker spread levels (gating operations during spread spikes).[m
+[31m-9. **MOMENTUM_DIVERGENCE**: Classical RSI and price action divergences.[m
+[31m-[m
+[31m-### 3. Layer 3: LangGraph Multi-Agent Architecture[m
+[31m-Compile-once, reuse-always LangGraph Directed Acyclic Graph (DAG):[m
+[31m-- **Trader Agent**: Establishes initial hypothesis.[m
+[31m-- **Analysts (x4 Parallel)**: Market, News, Fundamentals, and Sentiment/Social analysis.[m
+[31m-- **Researchers (Bull vs Bear)**: Critical debates examining evidence, bias, and counter-arguments.[m
+[31m-- **Research Manager**: Harmonizes analyst outputs.[m
+[31m-- **Risk Team (x3 Parallel)**: Conservative, Neutral, and Aggressive risk assessments.[m
+[31m-- **Portfolio Manager**: Renders final BUY, SELL, or HOLD verdict.[m
+[31m-[m
+[31m-### 4. Enterprise-Grade LLM Integration[m
+[31m-- Provider-agnostic factory supporting **OpenAI (GPT-4/5), Anthropic (Claude 3.5/3.7), Google (Gemini 1.5/2.0), Azure OpenAI**, and local models via **Ollama**.[m
+[31m-- Auto-resolves API keys and configuration dynamically.[m
+[31m-[m
+[31m-### 5. Advanced Monitoring Dashboard[m
+[31m-- Integrated FastAPI backend with a real-time, responsive glassmorphism web HUD.[m
+[31m-- Live-streams account equity, indicators, active regimes, events, agent conversation traces, and final trade decisions via WebSockets.[m
+[31m-- Session persistence: Saves and restores events across daemon restarts.[m
+[31m-[m
+[31m----[m
+[31m-[m
+[31m-## 📂 Project Directory Structure[m
+[31m-[m
+[31m-```[m
+[31m-axonai/                         # Core codebase[m
+[31m-├── agents/                     # Multi-Agent system[m
+[31m-│   ├── analysts/               # Technical, Sentiment, News analysts[m
+[31m-│   ├── researchers/            # Bull and Bear debaters[m
+[31m-│   ├── risk_mgmt/              # Aggressive, Neutral, Conservative risk debaters[m
+[31m-│   └── utils/                  # Agent states, memory managers, indicators[m
+[31m-├── dataflows/                  # Data wrappers (MT5, AlphaVantage, yfinance)[m
+[31m-├── graph/                      # LangGraph DAG definition, SQLite checkpointer[m
+[31m-├── llm_clients/                # Unified LLM provider abstraction[m
+[31m-├── realtime/                   # Real-time daemon module[m
+[31m-│   ├── api_server.py           # FastAPI WebSockets dashboard[m
+[31m-│   ├── daemon.py               # Main orchestrator & loop[m
+[31m-│   ├── event_detector.py       # Mathematical pattern detection algorithms[m
+[31m-│   ├── event_types.py          # Real-time data schemas[m
+[31m-│   ├── graph_executor.py       # LangGraph invocation wrapper[m
+[31m-│   ├── live_state.py           # Real-time memory & structural state[m
+[31m-│   └── tick_engine.py          # MT5 tick ingestion & candle builders[m
+[31m-└── default_config.py           # Default configuration settings[m
+[31m-cli/                            # Command Line Interface[m
+[31m-└── static/                     # Web Dashboard frontend assets[m
+[31m-```[m
+[31m-[m
+[31m----[m
+[31m-[m
+[31m-## ⚙️ Installation[m
+[31m-[m
+[31m-### Prerequisites[m
+[31m-- **OS**: Windows (Required for native `MetaTrader5` integration).[m
+[31m-- **Python**: 3.10 to 3.13.[m
+[31m-- **MetaTrader 5 Client**: Installed and logged into a valid broker account.[m
+[31m-[m
+[31m-### Step-by-Step Setup[m
+[31m-[m
+[31m-1. **Clone the repository**:[m
+[31m-   ```bash[m
+[31m-   git clone https://github.com/skynextindia/AxonAgent.git[m
+[31m-   cd AxonAgent[m
+[31m-   ```[m
+[31m-[m
+[31m-2. **Create and activate a virtual environment**:[m
+[31m-   ```bash[m
+[31m-   python -m venv venv[m
+[31m-   venv\Scripts\activate[m
+[31m-   ```[m
+[31m-[m
+[31m-3. **Install the package in editable mode**:[m
+[31m-   ```bash[m
+[31m-   pip install -e .[m
+[31m-   ```[m
+[31m-[m
+[31m-4. **Setup environment variables**:[m
+[31m-   Create a `.env` file in the root folder (using `.env.example` as a template):[m
+[31m-   ```ini[m
+[31m-   # LLM Provider Keys[m
+[31m-   OPENAI_API_KEY=your_openai_key[m
+[31m-   ANTHROPIC_API_KEY=your_anthropic_key[m
+[31m-   GOOGLE_API_KEY=your_gemini_key[m
+[31m-[m
+[31m-   # MT5 Broker Settings (If symbol suffix is used, e.g. "EURUSDm")[m
+[31m-   AXONAI_MT5_SYMBOL_SUFFIX=m[m
+[31m-   ```[m
+[31m-[m
+[31m----[m
+[31m-[m
+[31m-## 🚀 Quick Start[m
+[31m-[m
+[31m-### 1. Launch MetaTrader 5 Terminal[m
+[31m-Ensure the MT5 terminal is open and connected to your broker.[m
+[31m-[m
+[31m-### 2. Run the Real-Time Daemon[m
+[31m-Spawn the daemon to monitor a pair (e.g. `EURUSD=X` which maps to `EURUSDm` in MT5):[m
+[31m-```bash[m
+[31m-axonai live EURUSD=X[m
+[31m-```[m
+[31m-[m
+[31m-### 3. Open the Dashboard[m
+[31m-Navigate to **`http://localhost:8000`** in your browser to view the real-time HUD showing incoming ticks, active levels, event logs, and agent activity.[m
+[31m-[m
+[31m----[m
+[31m-[m
+[31m-## 🔧 Configuration[m
+[31m-[m
+[31m-All configurations can be customized in `axonai/default_config.py` or overridden using env variables prefixed with `AXONAI_`.[m
+[31m-[m
+[31m-| Configuration Key | Env Override | Default | Description |[m
+[31m-|---|---|---|---|[m
+[31m-| `llm_provider` | `AXONAI_LLM_PROVIDER` | `openai` | Active model provider |[m
+[31m-| `deep_think_llm` | `AXONAI_DEEP_THINK_LLM` | `gpt-4o` | Model for heavy reasoning & decisions |[m
+[31m-| `quick_think_llm` | `AXONAI_QUICK_THINK_LLM` | `gpt-4o-mini` | Model for quick analysis |[m
+[31m-| `tick_poll_interval_ms` | `AXONAI_TICK_POLL_INTERVAL_MS` | `100` | Polling speed for MT5 ticks |[m
+[31m-| `realtime_cooldown_seconds`| `AXONAI_REALTIME_COOLDOWN_SECONDS`| `300` | Cooldown between LLM calls |[m
+[31m-| `realtime_min_event_priority` | `AXONAI_REALTIME_MIN_EVENT_PRIORITY` | `MEDIUM` | Minimum event level to trigger graph |[m
+[31m-| `realtime_suppress_asian` | `AXONAI_REALTIME_SUPPRESS_ASIAN` | `true` | Suppress LLM graph during Asian session |[m
+[31m-[m
+[31m----[m
+[31m-[m
+[31m-## 📊 Real-Time Dashboard[m
+[31m-[m
+[31m-The web interface is served locally when you launch the daemon:[m
+[31m-[m
+[31m-- **Ticks & Spread Widget**: Live spread calculation, bids, and asks.[m
+[31m-- **Regime & ATR Monitor**: Technical breakdown of volatility and current market structure.[m
+[31m-- **Mathematical Event log**: Complete audit trail of BOS, LEVEL_BREACH, or liquidity sweeps.[m
+[31m-- **Agent Trace Terminal**: Visual trace of the LangGraph multi-agent debate and reasoning chain.[m
+[31m-- **Decision Engine**: Highlights the final buy, sell, or hold command with confidence metrics.[m
+[31m-[m
+[31m----[m
+[
