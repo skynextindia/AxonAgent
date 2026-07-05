@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>AXON.AI // Cognitive Intelligence System</title>
+<title>AXON.AI // Velocity Engine Dashboard</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&display=swap" rel="stylesheet">
@@ -49,10 +49,10 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
     <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">MARGIN LVL</span><span id="broker-marginlevel-val" style="font-size:13px;font-weight:700;color:var(--cyan);">0%</span></div>
   </div>
   <div style="display:flex;gap:20px;align-items:center;border-left:1px solid var(--border);padding-left:20px;margin-left:20px;">
-    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">RULE A (MAX VEL)</span><span id="token-total-val" style="font-size:13px;font-weight:700;color:var(--purple);">0.00</span></div>
-    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">RULE B (DIV)</span><span id="token-input-val" style="font-size:11px;font-weight:600;color:var(--cyan);">0.00</span></div>
-    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">TICK EFFICIENCY</span><span id="token-output-val" style="font-size:11px;font-weight:600;color:var(--amber);">0.00</span></div>
-    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">ENGINE TRIGGER</span><span id="token-calls-val" style="font-size:11px;font-weight:600;color:var(--text-primary);">MONITOR</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">RULE A (MAX VEL)</span><span id="vel-max-val" style="font-size:13px;font-weight:700;color:var(--purple);">0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">RULE B (DIV)</span><span id="vel-div-val" style="font-size:11px;font-weight:600;color:var(--cyan);">0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">TICK EFFICIENCY</span><span id="vel-eff-val" style="font-size:11px;font-weight:600;color:var(--amber);">0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">ENGINE TRIGGER</span><span id="vel-trigger-val" style="font-size:11px;font-weight:600;color:var(--text-primary);">MONITOR</span></div>
   </div>
   <div style="flex:1;"></div>
   <div style="display:flex;align-items:center;gap:16px;">
@@ -228,8 +228,8 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
   </div>
   <!-- OVERRIDES + GATES -->
   <div style="display:grid;grid-template-columns:6fr 6fr;gap:3px;flex-shrink:0;">
-    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-top:3px solid var(--red);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">TACTICAL_OVERRIDES</span><div style="display:flex;gap:4px;margin-top:2px;"><button onclick="fetch('/api/emergency_stop',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(255,0,85,.15);color:var(--red);border-color:rgba(255,0,85,.5);">HALT</button><button onclick="fetch('/api/close_all',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(255,171,0,.15);color:var(--amber);border-color:rgba(255,171,0,.5);">CLOSE ALL</button><button id="pause-trading-btn" onclick="fetch('/api/pause_llm',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(0,240,255,.1);color:var(--cyan);border-color:rgba(0,240,255,.5);">PAUSE</button></div></div>
-    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-top:3px solid var(--cyan);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">SECURITY_GATES</span><div style="display:flex;gap:4px;font-size:7px;font-weight:700;color:var(--text-dim);letter-spacing:.02em;"><div style="display:flex;align-items:center;gap:2px;"><span id="gate-state" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>STATE</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-spread" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>SPREAD</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-convict" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>CONV</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-rate" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>RATE</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-context" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>CTX</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-paused" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>PAUSED</div></div></div>
+    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-top:3px solid var(--red);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">TACTICAL_OVERRIDES</span><div style="display:flex;gap:4px;margin-top:2px;"><button onclick="fetch('/api/emergency_stop',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(255,0,85,.15);color:var(--red);border-color:rgba(255,0,85,.5);">HALT</button><button onclick="fetch('/api/close_all',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(255,171,0,.15);color:var(--amber);border-color:rgba(255,171,0,.5);">CLOSE ALL</button><button id="pause-trading-btn" onclick="fetch('/api/pause_trading',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(0,240,255,.1);color:var(--cyan);border-color:rgba(0,240,255,.5);">PAUSE</button></div></div>
+    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-top:3px solid var(--cyan);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">SECURITY_GATES</span><div style="display:flex;gap:4px;font-size:7px;font-weight:700;color:var(--text-dim);letter-spacing:.02em;"><div style="display:flex;align-items:center;gap:2px;"><span id="gate-state" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>STATE</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-spread" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>SPREAD</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-convict" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>CONV</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-rate" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>RATE</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-context" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>CTX</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-paused" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>HALTED</div></div></div>
   </div>
   <!-- PRICE CHART -->
   <div class="cyber-panel" style="flex:1;display:flex;flex-direction:column;padding:6px;background:#040406;min-height:150px;">
@@ -287,10 +287,23 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
       <div id="active-trade-hud" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(4,4,6,0.95);backdrop-filter:blur(4px);z-index:10;flex-direction:column;padding:12px;border:1px solid var(--purple);"></div>
     </div>
   </div>
-  <!-- Col 2: News -->
+  <!-- Col 2: Session Baselines (replaces obsolete News Feed) -->
   <div class="cyber-panel" style="display:flex;flex-direction:column;padding:8px;background:#040406;min-height:0;overflow:hidden;">
-    <div style="border-bottom:1px solid #1f1f2e;padding-bottom:4px;flex-shrink:0;"><span style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">NEWS_FEED</span></div>
-    <div id="news-log-container" style="flex:1;overflow-y:auto;padding:4px;font-size:8px;display:flex;flex-direction:column;gap:4px;"><div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;font-size:7px;text-transform:uppercase;letter-spacing:.08em;">Awaiting news stream...</div></div>
+    <div style="border-bottom:1px solid #1f1f2e;padding-bottom:4px;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;"><span style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">SESSION_BASELINES</span><span id="baselines-active-session" style="font-size:6.5px;color:var(--amber);font-weight:700;letter-spacing:.06em;">--</span></div>
+    <div id="session-baselines-container" style="flex:1;overflow-y:auto;padding:4px;display:flex;flex-direction:column;gap:6px;font-size:8px;">
+      <!-- Economic Calendar section (retained from backend) -->
+      <div>
+        <div style="font-size:7px;color:var(--amber);font-weight:900;letter-spacing:.1em;text-transform:uppercase;border-bottom:1px solid #1f1f2e;padding-bottom:3px;margin-bottom:4px;">&#128197; ECONOMIC CALENDAR</div>
+        <div id="econ-calendar-container"><div style="color:var(--text-dim);text-align:center;padding:8px;font-style:italic;font-size:7px;">Awaiting calendar data...</div></div>
+      </div>
+      <!-- Per-session velocity baseline stats -->
+      <div>
+        <div style="font-size:7px;color:var(--cyan);font-weight:900;letter-spacing:.1em;text-transform:uppercase;border-bottom:1px solid #1f1f2e;padding-bottom:3px;margin-bottom:4px;">&#9656; SESSION VELOCITY BASELINES</div>
+        <div id="vel-baselines-body" style="display:flex;flex-direction:column;gap:3px;">
+          <div style="color:var(--text-dim);text-align:center;padding:8px;font-style:italic;font-size:7px;">Warm-up in progress...</div>
+        </div>
+      </div>
+    </div>
   </div>
   <!-- Col 3: Events -->
   <div class="cyber-panel" style="display:flex;flex-direction:column;padding:8px;background:#020203;min-height:0;overflow:hidden;">
@@ -367,8 +380,6 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
   <!-- Log Sub-Tabs -->
   <div style="display:flex;gap:4px;flex-shrink:0;margin-bottom:4px;border-bottom:1px solid var(--border);padding-bottom:4px;">
     <button id="jtab-trades-btn" class="pair-btn active" style="font-size:8px;padding:3px 8px;">TRADE HISTORY</button>
-    <button id="jtab-decisions-btn" class="pair-btn" style="font-size:8px;padding:3px 8px;">COGNITIVE DECISIONS</button>
-    <button id="jtab-dryrun-btn" class="pair-btn" style="font-size:8px;padding:3px 8px;">DRYRUN AUDIT</button>
     <button id="jtab-system-btn" class="pair-btn" style="font-size:8px;padding:3px 8px;">SYSTEM CONSOLE</button>
     <div style="flex:1;"></div>
     <button id="refresh-journal-btn" style="border:1px solid var(--border);background:#000;color:var(--cyan);font-size:8px;padding:2px 8px;font-family:inherit;font-weight:700;cursor:pointer;letter-spacing:.05em;">REFRESH</button>
@@ -398,16 +409,6 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
           <div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No trades in history yet.</div>
         </div>
       </div>
-    </div>
-
-    <!-- Cognitive Decisions View -->
-    <div id="jview-decisions" style="flex:1;display:none;flex-direction:column;min-height:0;overflow-y:auto;gap:12px;padding:4px;max-width:1200px;margin:0 auto;width:100%;">
-      <div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No decisions logged yet.</div>
-    </div>
-
-    <!-- Dryrun Audit View -->
-    <div id="jview-dryrun" style="flex:1;display:none;flex-direction:column;min-height:0;overflow-y:auto;gap:4px;padding:4px;font-size:7.5px;max-width:1200px;margin:0 auto;width:100%;">
-      <div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No dryrun logs yet.</div>
     </div>
 
     <!-- System Console View -->
@@ -651,7 +652,7 @@ class DashboardController {
     ["cockpit","intel","journal","system"].forEach(t=>{const btn=g("tab-"+t+"-btn");if(btn)btn.onclick=()=>this.switchTab(t);});
     
     // Journal tab listeners
-    ["trades","decisions","dryrun","system"].forEach(sub=>{
+    ["trades","system"].forEach(sub=>{
       const btn = g("jtab-"+sub+"-btn");
       if(btn) btn.onclick = () => this.switchJournalTab(sub);
     });
@@ -1008,7 +1009,11 @@ class DashboardController {
     if(this.regimeVol)this.regimeVol.textContent="VOL: "+(d.volatility||"").toUpperCase()+" | ATR: "+this.sf(d.atr,5);
     if(d.cooldown_remaining!==undefined&&this.cooldownVal){if(d.cooldown_remaining>0){this.cooldownVal.textContent=d.cooldown_remaining+"s";this.cooldownVal.style.color="var(--amber)";if(this.cooldownBar)this.cooldownBar.style.width=Math.min(100,(d.cooldown_remaining/300)*100)+"%"}else{this.cooldownVal.textContent="READY";this.cooldownVal.style.color="var(--green)";if(this.cooldownBar)this.cooldownBar.style.width="0%"}}
     if(d.events_detected!==undefined){if(this.statsDetected)this.statsDetected.textContent=d.events_detected;if(this.statsFired)this.statsFired.textContent=d.events_fired;if(this.statsSkipped)this.statsSkipped.textContent=d.events_skipped}
-    if(d.tokens_total!==undefined){["token-total-val","token-input-val","token-output-val","token-calls-val"].forEach((id,i)=>{const el=document.getElementById(id);if(el){const vals=[d.tokens_total,d.tokens_in||0,d.tokens_out||0,(d.llm_calls||0)+" / "+(d.tool_calls||0)];if(i<3)el.textContent=Number(vals[i]).toLocaleString();else el.textContent=vals[i]}})}
+    // Header velocity metrics: rule_a_max_velocity, rule_b_divergence, tick_efficiency, engine trigger state
+    {const vm=document.getElementById("vel-max-val");if(vm&&d.rule_a_max_velocity!==undefined)vm.textContent=Number(d.rule_a_max_velocity).toFixed(2);
+     const vd=document.getElementById("vel-div-val");if(vd&&d.rule_b_divergence!==undefined)vd.textContent=Number(d.rule_b_divergence).toFixed(2);
+     const ve=document.getElementById("vel-eff-val");if(ve&&d.tick_efficiency!==undefined)ve.textContent=Number(d.tick_efficiency).toFixed(2);
+     const vt=document.getElementById("vel-trigger-val");if(vt&&d.engine_state!==undefined)vt.textContent=(d.engine_state||"").toUpperCase()+" "+(d.trigger_direction||"")}
     if(this.latency&&d.processing_time!==undefined)this.latency.textContent=this.sf(d.processing_time,0)+"ms";
     this.updateMTFPanel(d);
     this.updatePipelineLeds(d);
@@ -1221,40 +1226,26 @@ class DashboardController {
     if(d.action&&d.price&&(a==="BUY"||a==="SELL")){const m={time:Math.floor(Date.now()/1000),position:a==="BUY"?"belowBar":"aboveBar",color:a==="BUY"?"#00c853":"#ff3d3d",shape:a==="BUY"?"arrowUp":"arrowDown",text:a,details:{timeframe:this.currentTimeframe}};this.chartMarkers.push(m);this.updateMarkers(this.getMarkersForTimeframe(this.currentTimeframe))}
   }
   handleNewsData(d) {
-    const c=document.getElementById("news-log-container");if(!c)return;c.innerHTML="";
-    let added=false;
-
-    // Helper to render standard list categories (e.g. ForexLive)
-    const fs=(title,items,bc,tc)=>{if(!items||!Array.isArray(items)||items.length===0)return null;const s=document.createElement("div");s.style.cssText="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;";const h=document.createElement("div");h.style.cssText="font-size:7.5px;color:"+tc+";font-weight:900;letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid #1f1f2e;padding-bottom:4px;";h.innerHTML=title;h.innerHTML+=' <span style="color:var(--text-dim);font-weight:400;text-transform:none;">('+items.length+')</span>';s.appendChild(h);items.forEach(line=>{const cl=line.replace(/^[\s\-\*\•\d\.\)]+/,"").trim();if(!cl)return;const it=document.createElement("div");it.style.cssText="background:rgba(7,7,11,.9);border:1px solid "+bc+";padding:4px 6px;font-size:7.5px;font-family:monospace;";it.textContent=cl;s.appendChild(it)});return s};
-
-    // ── 1. LIVE NEWS (ForexLive) ───────────────────────────────────────────
-    const flSection = fs("ForexLive",d.forex_social,"var(--border)","#ff66b2");
-    if(flSection){
-      c.appendChild(flSection);
-      added=true;
-    }
-
-    // ── 2. ECONOMIC CALENDAR (Forex Factory) ──────────────────────────────────
-    if(d.calendar&&Array.isArray(d.calendar)&&d.calendar.length>0){
-      const sec=document.createElement("div");sec.style.cssText="display:flex;flex-direction:column;gap:4px;margin-bottom:10px;";
-      const hdr=document.createElement("div");hdr.style.cssText="font-size:7.5px;color:#ffaa00;font-weight:900;letter-spacing:.12em;text-transform:uppercase;border-bottom:1px solid #1f1f2e;padding-bottom:4px;";
-      hdr.innerHTML='&#128197; ECONOMIC CALENDAR <span style="color:var(--text-dim);font-weight:400;text-transform:none;">(today)</span>';
-      sec.appendChild(hdr);
-      const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-      d.calendar.forEach(ev=>{
+    // Economic calendar only – no news/social feeds in the pure-math engine.
+    const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    const calContainer = document.getElementById("econ-calendar-container");
+    if(calContainer && d.calendar && Array.isArray(d.calendar) && d.calendar.length>0){
+      calContainer.innerHTML = d.calendar.map(ev=>{
         const isBlocking=ev.is_blocking;
         const impactColor=ev.impact==="High"?"#ff4444":ev.impact==="Medium"?"#ffaa00":"#888";
         const minsAway=ev.mins_away;
         const timeStr=minsAway<0?`${Math.abs(minsAway)}m ago`:(minsAway<60?`in ${minsAway}m`:`in ${Math.floor(minsAway/60)}h${Math.round(minsAway%60)}m`);
-        const row=document.createElement("div");
-        row.style.cssText=`background:rgba(7,7,11,.9);border:1px solid ${isBlocking?"#ff4444":"#1f1f2e"};padding:4px 6px;font-size:7.5px;font-family:monospace;display:flex;justify-content:space-between;align-items:center;gap:6px;${isBlocking?"box-shadow:0 0 6px rgba(255,68,68,.3);":""}`;
-        row.innerHTML=`<span style="color:${impactColor};font-weight:bold;min-width:28px;">${esc(ev.currency)}</span><span style="flex:1;color:#e0e0e0;">${esc(ev.title)}</span><span style="color:var(--text-dim);min-width:50px;text-align:right;">${esc(ev.time)}</span><span style="color:#888;min-width:40px;text-align:right;font-size:7px;">${timeStr}</span>${isBlocking?'<span style="color:#ff4444;font-weight:bold;font-size:7px;">BLOCK</span>':''}`;
-        sec.appendChild(row);
-      });
-      c.appendChild(sec);added=true;
+        return `<div style="background:rgba(7,7,11,.9);border:1px solid ${isBlocking?"#ff4444":"#1f1f2e"};padding:4px 6px;font-size:7.5px;display:flex;justify-content:space-between;align-items:center;gap:6px;${isBlocking?"box-shadow:0 0 6px rgba(255,68,68,.3);":""}">
+          <span style="color:${impactColor};font-weight:bold;min-width:28px;">${esc(ev.currency)}</span>
+          <span style="flex:1;color:#e0e0e0;">${esc(ev.title)}</span>
+          <span style="color:var(--text-dim);min-width:50px;text-align:right;">${esc(ev.time)}</span>
+          <span style="color:#888;min-width:40px;text-align:right;font-size:7px;">${timeStr}</span>
+          ${isBlocking?'<span style="color:#ff4444;font-weight:bold;font-size:7px;">BLOCK</span>':''}
+        </div>`;
+      }).join("");
+    } else if(calContainer) {
+      calContainer.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:8px;font-style:italic;font-size:7px;">No calendar events.</div>';
     }
-
-    if(!added)c.innerHTML='<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;font-size:7px;text-transform:uppercase;letter-spacing:.08em;">Awaiting news stream...</div>';
   }
   startClock() {
     setInterval(()=>{const s=Math.floor((Date.now()-this.startTime)/1000);const h=String(Math.floor(s/3600)).padStart(2,"0");const m=String(Math.floor((s%3600)/60)).padStart(2,"0");const sec=String(s%60).padStart(2,"0");const t=h+":"+m+":"+sec;if(this.uptime)this.uptime.textContent=t;if(document.getElementById("sys-uptime"))document.getElementById("sys-uptime").textContent=t;this.updateCooldownCountdown()},1000);
@@ -1296,14 +1287,15 @@ class DashboardController {
       const st=document.getElementById("sys-timeframe");if(st)st.textContent=this.currentTimeframe;
       const stc=document.getElementById("sys-tick-count");if(stc)stc.textContent=this.tickHistory.length;
       ["M15","H1","H4"].forEach(tf=>{const el=document.getElementById("sys-candles-"+tf);if(el){const arr=tf==="M15"?this.m15Candles:tf==="H1"?this.h1Candles:this.h4Candles;el.textContent=(arr||[]).length}});
-      ["token-input-val","token-output-val","token-total-val","token-calls-val"].forEach((id,i)=>{const el=document.getElementById(id);const targets=["sys-tokens-input","sys-tokens-output","sys-tokens-total","sys-token-calls"];const te=document.getElementById(targets[i]);if(te&&el)te.textContent=el.textContent});
+      // Sync velocity header metrics into system panel
+      [{src:"vel-div-val",dst:"sys-tokens-input"},{src:"vel-eff-val",dst:"sys-tokens-output"},{src:"vel-max-val",dst:"sys-tokens-total"},{src:"vel-trigger-val",dst:"sys-token-calls"}].forEach(({src,dst})=>{const s=document.getElementById(src);const d=document.getElementById(dst);if(s&&d)d.textContent=s.textContent});
     }
     if(tab==="journal"){
       this.loadJournalData();
     }
   }
   switchJournalTab(sub) {
-    ["trades","decisions","dryrun","system"].forEach(k=>{
+    ["trades","system"].forEach(k=>{
       const btn = document.getElementById("jtab-"+k+"-btn");
       const view = document.getElementById("jview-"+k);
       if(btn) btn.className = k===sub ? "pair-btn active" : "pair-btn";
@@ -1399,81 +1391,6 @@ class DashboardController {
                   </div>
                   ` : ''}
                 </div>
-              </div>`;
-            }).join("");
-          }
-        }
-      } catch (err) { console.error(err); }
-    } else if (sub === "decisions") {
-      try {
-        const r = await fetch("/api/logs/decisions");
-        const j = await r.json();
-        const body = document.getElementById("jview-decisions");
-        if (body && j.status === "success") {
-          if (j.entries.length === 0) {
-            body.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No decisions logged yet.</div>';
-          } else {
-            body.innerHTML = j.entries.slice().reverse().map(e => {
-              const outcomeColor = e.pending ? "var(--amber)" : parseFloat(e.raw) >= 0 ? "var(--green)" : "var(--red)";
-              const outcomeText = e.pending ? "PENDING" : `Raw: ${e.raw} | Alpha: ${e.alpha} | Hold: ${e.holding}`;
-              
-              const formatMarkdown = (txt) => {
-                if (!txt) return '<span style="color:var(--text-dim);font-style:italic;">None</span>';
-                return txt
-                  .replace(/### (.*)/g, '<h4 style="color:var(--cyan);font-weight:900;margin:6px 0 3px 0;font-size:8.5px;">$1</h4>')
-                  .replace(/## (.*)/g, '<h3 style="color:var(--cyan);font-weight:900;margin:8px 0 4px 0;font-size:9.5px;">$1</h3>')
-                  .replace(/\*\*(.*?)\*\*/g, '<strong style="color:#fff;">$1</strong>')
-                  .replace(/\*(.*?)\*/g, '<em style="color:var(--text-secondary);">$1</em>')
-                  .replace(/`([^`]+)`/g, '<code style="background:#000;color:var(--cyan);padding:0 2px;">$1</code>')
-                  .replace(/\n/g, '<br/>');
-              };
-
-              return `<div class="cyber-panel" style="padding:10px;background:#060608;border-left:3px solid ${e.pending ? 'var(--amber)' : 'var(--cyan)'};display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
-                <div style="display:flex;justify-content:space-between;border-bottom:1px solid var(--border-dim);padding-bottom:4px;align-items:center;">
-                  <span style="color:#fff;font-weight:700;font-size:9px;">${e.ticker} [${e.date}]</span>
-                  <span style="font-weight:900;color:var(--purple);background:rgba(156,39,176,0.1);padding:1px 6px;border-radius:2px;">RATING: ${e.rating}</span>
-                  <span style="color:${outcomeColor};font-weight:900;font-size:8px;">${outcomeText}</span>
-                </div>
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:8px;line-height:1.4;">
-                  <div>
-                    <span style="color:var(--cyan);font-weight:900;display:block;margin-bottom:4px;border-bottom:1px solid rgba(0,240,255,0.1);">DECISION</span>
-                    <div style="color:var(--text-primary);max-height:150px;overflow-y:auto;padding-right:4px;">${formatMarkdown(e.decision)}</div>
-                  </div>
-                  <div>
-                    <span style="color:var(--amber);font-weight:900;display:block;margin-bottom:4px;border-bottom:1px solid rgba(255,171,0,0.1);">REFLECTION</span>
-                    <div style="color:var(--text-secondary);max-height:150px;overflow-y:auto;padding-right:4px;">${formatMarkdown(e.reflection)}</div>
-                  </div>
-                </div>
-              </div>`;
-            }).join("");
-          }
-        }
-      } catch (err) { console.error(err); }
-    } else if (sub === "dryrun") {
-      try {
-        const r = await fetch("/api/logs/dryrun");
-        const j = await r.json();
-        const body = document.getElementById("jview-dryrun");
-        if (body && j.status === "success") {
-          if (j.entries.length === 0) {
-            body.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No dryrun logs yet.</div>';
-          } else {
-            body.innerHTML = j.entries.slice().reverse().map(e => {
-              let detailsText = "";
-              try {
-                detailsText = typeof e.details === "object" ? JSON.stringify(e.details) : e.details;
-              } catch(_) { detailsText = e.details; }
-              
-              let typeColor = "var(--text-secondary)";
-              if (e.event_type === "error") typeColor = "var(--red)";
-              else if (e.event_type === "decision") typeColor = "var(--green)";
-              else if (e.event_type === "graph_fire") typeColor = "var(--purple)";
-              else if (e.event_type === "event_detected") typeColor = "var(--cyan)";
-
-              return `<div style="display:flex;padding:3px 6px;border-bottom:1px solid var(--border-dim);font-family:'JetBrains Mono',monospace;gap:8px;line-height:1.3;align-items:flex-start;">
-                <span style="color:var(--text-dim);flex-shrink:0;">${e.timestamp.replace("T", " ").split(".")[0]}</span>
-                <span style="color:${typeColor};font-weight:900;min-width:100px;flex-shrink:0;">${e.event_type.toUpperCase()}</span>
-                <span style="color:var(--text-primary);word-break:break-all;">${detailsText}</span>
               </div>`;
             }).join("");
           }

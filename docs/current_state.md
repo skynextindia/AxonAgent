@@ -133,3 +133,5 @@ python run.py --direct --paper --symbol EURUSD, then check:
 Want me to save a session checkpoint, or add the vol_pips debug log so you can capture the calibration number in the same paper run?
 Resume this session with:
 claude --resume 0d4e5331-a40c-471f-85e8-20257edf3261
+
+Pushed to origin/veloxity — commit 9a9f6a7. You're good to restart the daemon now.

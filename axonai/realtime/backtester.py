@@ -339,27 +339,25 @@ class BacktestEngine:
         computed_atr = float(np.mean(h1_ranges[-14:])) if h1_ranges else 0.0012
         logger.info("BacktestEngine: Computed H1 ATR: %.5f (%.1f pips)", computed_atr, computed_atr / self.pip_mult)
         
-        from axonai.world_state import WorldState
-        initial_state = WorldState(
-            regime_scores={"trending": 0.3, "ranging": 0.7, "breakout": 0.0, "compression": 0.0, "panic": 0.0},
-            dominant_regime="ranging",
-            regime_confidence=0.7,
-            volatility_regime="medium",
-            atr_14_h1=computed_atr,
-            session="london",
-            session_quality=0.8,
-            session_penalty=1.0,
-            hours_since_london_open=2.0,
-            spread_pips=1.0,
-            spread_safe=True,
-            eur_strength=0.0,
-            usd_strength=0.0,
-            belief_score=0.8,
-            should_run_graph=True,
-            abort_reason=""
-        )
-        self.live_state._state = initial_state
-        from axonai.dataflows.evidence_extractor import MarketEvidence
+        # Seed initial live_state fields directly (WorldState removed — pure-math engine)
+        self.live_state._state = {
+            "regime_scores": {"trending": 0.3, "ranging": 0.7, "breakout": 0.0, "compression": 0.0, "panic": 0.0},
+            "dominant_regime": "ranging",
+            "regime_confidence": 0.7,
+            "volatility_regime": "medium",
+            "atr_14_h1": computed_atr,
+            "session": "london",
+            "session_quality": 0.8,
+            "session_penalty": 1.0,
+            "hours_since_london_open": 2.0,
+            "spread_pips": 1.0,
+            "spread_safe": True,
+            "eur_strength": 0.0,
+            "usd_strength": 0.0,
+            "belief_score": 0.8,
+            "should_run_graph": True,
+            "abort_reason": "",
+        }
         
         # Auto-derive key levels from candle data
         all_highs = [c.high for c in candles]
@@ -392,19 +390,10 @@ class BacktestEngine:
         trend_h1 = "up" if second_half_avg > first_half_avg + 5 * self.pip_mult else (
                    "down" if second_half_avg < first_half_avg - 5 * self.pip_mult else "sideways")
         
-        self.live_evidence._evidence = MarketEvidence(
-            swing_highs=[{"price": sh_price, "time": candles[0].open_time.strftime("%Y-%m-%d %H:%M")}],
-            swing_lows=[{"price": sl_price, "time": candles[0].open_time.strftime("%Y-%m-%d %H:%M")}],
-            key_levels=list(key_lvls),
-            trend_direction_h1=trend_h1,
-            trend_direction_h4=trend_h1,
-            rsi_h1=50.0,
-            macd_signal_h1="neutral",
-            recent_patterns=[],
-            asian_range_high=sh_price,
-            asian_range_low=sl_price,
-            london_open_bias="neutral"
-        )
+        # Seed initial evidence fields directly on LiveMarketEvidence
+        self.live_evidence.swing_highs = [{"price": sh_price, "time": candles[0].open_time.strftime("%Y-%m-%d %H:%M")}]
+        self.live_evidence.swing_lows  = [{"price": sl_price, "time": candles[0].open_time.strftime("%Y-%m-%d %H:%M")}]
+        self.live_evidence.key_levels  = list(key_lvls)
         
         # Warm up candle history & aggregate deques
         warmup_limit = self._prewarm_candle_history(candles)

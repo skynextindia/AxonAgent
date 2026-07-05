@@ -8,16 +8,6 @@ _AXONAI_HOME = os.path.join(os.path.expanduser("~"), ".axonai")
 # of the existing default, so users can keep writing plain strings in
 # their .env file.
 _ENV_OVERRIDES = {
-    "AXONAI_LLM_PROVIDER":         "llm_provider",
-    "AXONAI_DEEP_THINK_LLM":       "deep_think_llm",
-    "AXONAI_QUICK_THINK_LLM":      "quick_think_llm",
-    "AXONAI_LLM_BACKEND_URL":      "backend_url",
-    "AXONAI_OUTPUT_LANGUAGE":      "output_language",
-    "AXONAI_MAX_DEBATE_ROUNDS":    "max_debate_rounds",
-    "AXONAI_MAX_RISK_ROUNDS":      "max_risk_discuss_rounds",
-    "AXONAI_CHECKPOINT_ENABLED":   "checkpoint_enabled",
-    "AXONAI_BENCHMARK_TICKER":     "benchmark_ticker",
-    "AXONAI_INTRADAY_INTERVAL":    "intraday_interval",
     "AXONAI_MT5_TERMINAL_PATH":    "mt5_terminal_path",
     "AXONAI_MT5_SYMBOL_SUFFIX":    "mt5_symbol_suffix",
     "AXONAI_REALTIME_MAGIC_NUMBER": "realtime_magic_number",
@@ -58,72 +48,6 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Optional cap on the number of resolved memory log entries. When set,
     # the oldest resolved entries are pruned once this limit is exceeded.
     # Pending entries are never pruned. None disables rotation entirely.
-    "memory_log_max_entries": None,
-    # LLM settings
-    "llm_provider": "deepseek",
-    "deep_think_llm": "deepseek-reasoner",
-    "quick_think_llm": "deepseek-chat",
-    # When None, each provider's client falls back to its own default endpoint.
-    "backend_url": None,
-    # Checkpoint/resume: when True, LangGraph saves state after each node
-    # so a crashed run can resume from the last successful step.
-    "checkpoint_enabled": False,
-    # Output language for analyst reports and final decision
-    # Internal agent debate stays in English for reasoning quality
-    "output_language": "English",
-    # Intraday interval timeframe (e.g. 1d, 1h, 15m, 5m)
-    "intraday_interval": "1d",
-
-    # Debate and discussion settings
-    "max_debate_rounds": 1,
-    "max_risk_discuss_rounds": 1,
-    "max_recur_limit": 100,
-    "analyst_concurrency_limit": 1,
-    # News / data fetching parameters
-    # Increase for longer lookback strategies or to broaden macro coverage;
-    # decrease to reduce token usage in agent prompts.
-    "news_article_limit": 20,             # max articles per ticker (ticker-news)
-    "global_news_article_limit": 10,      # max articles for global/macro news
-    "global_news_lookback_days": 7,       # macro news lookback window
-    # Search queries used by get_global_news for macro headlines. Extend or
-    # replace to broaden geographic / sector coverage.
-    "global_news_queries": [
-        "US Dollar Federal Reserve interest rates inflation CPI NFP",
-        "Euro ECB interest rate inflation GDP Eurozone",
-        "Pound Bank of England BOE interest rate GDP CPI",
-        "Japanese Yen Bank of Japan BOJ policy rate intervention",
-        "global central banks monetary policy rates divergence",
-    ],
-    # Data vendor configuration
-    # Category-level configuration (default for all tools in category)
-    "data_vendors": {
-        "core_stock_apis": "yfinance",       # Options: alpha_vantage, yfinance
-        "technical_indicators": "yfinance",  # Options: alpha_vantage, yfinance
-        "fundamental_data": "yfinance",      # Options: alpha_vantage, yfinance
-        "news_data": "yfinance",             # Options: alpha_vantage, yfinance
-    },
-    # Tool-level configuration (takes precedence over category-level)
-    "tool_vendors": {
-        # Example: "get_stock_data": "alpha_vantage",  # Override category default
-    },
-    # Benchmark for alpha calculation in the reflection layer.
-    # ``benchmark_ticker`` (when set) overrides the suffix map for all
-    # tickers; leave it None to use ``benchmark_map`` for auto-detection
-    # based on the ticker's exchange suffix. SPY remains the US default
-    # so the reflection label keeps reading "Alpha vs SPY" for US tickers
-    # while non-US tickers get their regional index automatically.
-    "benchmark_ticker": None,
-    "benchmark_map": {
-        ".NS":  "^NSEI",    # NSE India (Nifty 50)
-        ".BO":  "^BSESN",   # BSE India (Sensex)
-        ".T":   "^N225",    # Tokyo (Nikkei 225)
-        ".HK":  "^HSI",     # Hong Kong (Hang Seng)
-        ".L":   "^FTSE",    # London (FTSE 100)
-        ".TO":  "^GSPTSE",  # Toronto (TSX Composite)
-        ".AX":  "^AXJO",    # Australia (ASX 200)
-        "=X":   "DX-Y.NYB", # Forex (US Dollar Index)
-        "":     "SPY",      # default for US-listed tickers (no suffix)
-    },
     # MetaTrader 5 integration
     "mt5_terminal_path": "C:\\Program Files\\MetaTrader 5 EXNESS\\terminal64.exe",  # Data feed (TickEngine)
     "mt5_trade_terminal_path": "C:\\Program Files\\MetaTrader 5\\terminal64.exe",   # Order execution (TradeExecutor)

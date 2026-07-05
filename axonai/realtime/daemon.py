@@ -473,12 +473,12 @@ class AxonDaemon:
             "exit_action": exit_action,
             "exit_reason": exit_reason,
             "exit_should_exit": exit_should_exit,
-            # Map legacy token tracking keys to pure-math parameters for UI dashboard compat
-            "tokens_in": round(ws.displacement.displacement_ratio, 2) if (ws and getattr(ws, "displacement", None)) else 0.0,
-            "tokens_out": round(ws.velocity.tick_efficiency, 2) if (ws and getattr(ws, "velocity", None)) else 0.0,
-            "tokens_total": round(ws.velocity.raw_velocity, 2) if (ws and getattr(ws, "velocity", None)) else 0.0,
-            "llm_calls": entry_state,
-            "tool_calls": entry_direction or "WAIT"
+            # Velocity engine header metrics (read by dashboard JS as d.rule_a_max_velocity etc.)
+            "rule_a_max_velocity": round(ws.velocity.raw_velocity, 4) if (ws and getattr(ws, "velocity", None)) else 0.0,
+            "rule_b_divergence": round(ws.velocity.decay_ratio, 4) if (ws and getattr(ws, "velocity", None) and hasattr(ws.velocity, "decay_ratio")) else 0.0,
+            "tick_efficiency": round(ws.velocity.tick_efficiency, 4) if (ws and getattr(ws, "velocity", None)) else 0.0,
+            "engine_state": entry_state or "MONITOR",
+            "trigger_direction": entry_direction or ""
         }
 
         return regime_msg

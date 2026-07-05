@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import importlib
-
 import pytest
 
 import axonai.default_config as default_config_module
@@ -20,40 +19,32 @@ def _reload_with_env(monkeypatch, **overrides):
 
 def test_no_env_uses_built_in_defaults(monkeypatch):
     dc = _reload_with_env(monkeypatch)
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "deepseek"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "deepseek-reasoner"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "deepseek-chat"
-    assert dc.DEFAULT_CONFIG["backend_url"] is None
-    assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
-    assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is False
+    assert dc.DEFAULT_CONFIG["mt5_terminal_path"] == "C:\\Program Files\\MetaTrader 5 EXNESS\\terminal64.exe"
+    assert dc.DEFAULT_CONFIG["mt5_symbol_suffix"] == ""
+    assert dc.DEFAULT_CONFIG["realtime_magic_number"] == 123456
+    assert dc.DEFAULT_CONFIG["realtime_dry_run"] is False
 
 
 def test_string_overrides(monkeypatch):
     dc = _reload_with_env(
         monkeypatch,
-        AXONAI_LLM_PROVIDER="google",
-        AXONAI_DEEP_THINK_LLM="gemini-3-pro-preview",
-        AXONAI_QUICK_THINK_LLM="gemini-3-flash-preview",
-        AXONAI_LLM_BACKEND_URL="https://example.invalid/v1",
-        AXONAI_OUTPUT_LANGUAGE="Chinese",
+        AXONAI_MT5_TERMINAL_PATH="C:\\custom\\terminal.exe",
+        AXONAI_MT5_SYMBOL_SUFFIX="pro",
     )
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "google"
-    assert dc.DEFAULT_CONFIG["deep_think_llm"] == "gemini-3-pro-preview"
-    assert dc.DEFAULT_CONFIG["quick_think_llm"] == "gemini-3-flash-preview"
-    assert dc.DEFAULT_CONFIG["backend_url"] == "https://example.invalid/v1"
-    assert dc.DEFAULT_CONFIG["output_language"] == "Chinese"
+    assert dc.DEFAULT_CONFIG["mt5_terminal_path"] == "C:\\custom\\terminal.exe"
+    assert dc.DEFAULT_CONFIG["mt5_symbol_suffix"] == "pro"
 
 
 def test_int_coercion(monkeypatch):
     dc = _reload_with_env(
         monkeypatch,
-        AXONAI_MAX_DEBATE_ROUNDS="3",
-        AXONAI_MAX_RISK_ROUNDS="2",
+        AXONAI_REALTIME_MAGIC_NUMBER="999888",
+        AXONAI_REALTIME_DEVIATION="15",
     )
-    assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 3
-    assert isinstance(dc.DEFAULT_CONFIG["max_debate_rounds"], int)
-    assert dc.DEFAULT_CONFIG["max_risk_discuss_rounds"] == 2
-    assert isinstance(dc.DEFAULT_CONFIG["max_risk_discuss_rounds"], int)
+    assert dc.DEFAULT_CONFIG["realtime_magic_number"] == 999888
+    assert isinstance(dc.DEFAULT_CONFIG["realtime_magic_number"], int)
+    assert dc.DEFAULT_CONFIG["realtime_deviation"] == 15
+    assert isinstance(dc.DEFAULT_CONFIG["realtime_deviation"], int)
 
 
 @pytest.mark.parametrize(
@@ -64,28 +55,28 @@ def test_int_coercion(monkeypatch):
     ],
 )
 def test_bool_coercion(monkeypatch, raw, expected):
-    dc = _reload_with_env(monkeypatch, AXONAI_CHECKPOINT_ENABLED=raw)
-    assert dc.DEFAULT_CONFIG["checkpoint_enabled"] is expected
+    dc = _reload_with_env(monkeypatch, AXONAI_REALTIME_DRY_RUN=raw)
+    assert dc.DEFAULT_CONFIG["realtime_dry_run"] is expected
 
 
 def test_empty_env_value_is_passthrough(monkeypatch):
     """Empty AXONAI_* values must not clobber the built-in default."""
     dc = _reload_with_env(
         monkeypatch,
-        AXONAI_LLM_PROVIDER="",
-        AXONAI_MAX_DEBATE_ROUNDS="",
+        AXONAI_MT5_SYMBOL_SUFFIX="",
+        AXONAI_REALTIME_MAGIC_NUMBER="",
     )
-    assert dc.DEFAULT_CONFIG["llm_provider"] == "deepseek"
-    assert dc.DEFAULT_CONFIG["max_debate_rounds"] == 1
+    assert dc.DEFAULT_CONFIG["mt5_symbol_suffix"] == ""
+    assert dc.DEFAULT_CONFIG["realtime_magic_number"] == 123456
 
 
 def test_invalid_int_raises(monkeypatch):
     """Garbage int values should surface a ValueError at import, not silently misconfigure."""
-    monkeypatch.setenv("AXONAI_MAX_DEBATE_ROUNDS", "not-a-number")
+    monkeypatch.setenv("AXONAI_REALTIME_MAGIC_NUMBER", "not-a-number")
     with pytest.raises(ValueError):
         importlib.reload(default_config_module)
     # Restore module state for subsequent tests in this process
-    monkeypatch.delenv("AXONAI_MAX_DEBATE_ROUNDS", raising=False)
+    monkeypatch.delenv("AXONAI_REALTIME_MAGIC_NUMBER", raising=False)
     importlib.reload(default_config_module)
 
 
@@ -96,3 +87,4 @@ def test_unknown_env_var_is_ignored(monkeypatch):
         AXONAI_NONEXISTENT_KEY="oops",
     )
     assert "nonexistent_key" not in dc.DEFAULT_CONFIG
+
