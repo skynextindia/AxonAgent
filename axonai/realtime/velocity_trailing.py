@@ -51,10 +51,10 @@ class VelocityTrailingManager:
         self.retest_bounce_pips = 1.0   # Minimum bounce off support to count as retest
 
         # Trailing parameters (these now have dynamic alternatives)
-        self.min_price_distance_to_trail = 2.0  # Minimum 2 pips away from SL to trail
-        self.max_trail_distance = 15.0  # Never trail more than 15 pips from price
-        self.base_trail_buffer = 5.0   # Base pips behind price, scaled by momentum
-        self.min_trail_floor_pips = 2.0  # Never trail tighter than this (anti-spiral)
+        self.min_price_distance_to_trail = float(self.config.get("realtime_min_price_distance_to_trail", 2.0))
+        self.max_trail_distance = float(self.config.get("realtime_max_trail_distance", 15.0))
+        self.base_trail_buffer = float(self.config.get("realtime_base_trail_buffer", 7.5))
+        self.min_trail_floor_pips = float(self.config.get("realtime_min_trail_floor_pips", 4.0))
 
     def _vol_scale(self, velocity: Optional[NormalizedVelocity]) -> float:
         """Reference-ratio scale for pip-distance constants.
@@ -127,6 +127,7 @@ class VelocityTrailingManager:
                 "retest_count": 0,
                 "support_level": None,
                 "dynamic_buffer": None,
+                "smoothed_width_mult": None,
             }
 
         state = self._trail_state[ticket]
@@ -195,7 +196,17 @@ class VelocityTrailingManager:
 
         # Momentum-aware trail distance: wide while the move is intact and in our
         # favor, tight as momentum exhausts. Replaces the proximity-driven collapse.
-        width_mult = self._momentum_width_mult(velocity, position_type)
+        raw_width_mult = self._momentum_width_mult(velocity, position_type)
+        
+        # Smooth the multiplier to prevent instant collapse on a single low-velocity tick
+        if state.get("smoothed_width_mult") is None:
+            state["smoothed_width_mult"] = raw_width_mult
+        else:
+            # Using an EMA with alpha = 0.1 (approx 10-tick smoothing window)
+            alpha = 0.1
+            state["smoothed_width_mult"] = (alpha * raw_width_mult) + ((1.0 - alpha) * state["smoothed_width_mult"])
+            
+        width_mult = state["smoothed_width_mult"]
         trail_distance = self._calculate_trail_distance(current_profit, width_mult, vol_scale)
 
         # Include dynamic buffer info in log
@@ -205,13 +216,24 @@ class VelocityTrailingManager:
             new_sl = bid - (trail_distance * pip)
             if new_sl > current_sl:  # Only move SL up
                 state["last_trail_price"] = bid
+                reason_str = f"Velocity trail (agg={agg:.2f}, accel={velocity_acceleration:.2f}, retest={retest_detected}, regime={dyn_buffer.regime_name if dyn_buffer else 'static'})"
+                if "trail_history" not in state:
+                    state["trail_history"] = []
+                from datetime import datetime
+                state["trail_history"].append({
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "price": bid,
+                    "new_sl": new_sl,
+                    "distance": round(trail_distance, 1),
+                    "reason": reason_str
+                })
                 logger.info(
                     "VelocityTrail BUY #%d: SL %.5f -> %.5f (agg=%.2f, vel_accel=%.2f, retest=%s)%s",
                     ticket, current_sl, new_sl, agg, velocity_acceleration, retest_detected, buffer_info
                 )
                 return {
                     "new_sl": new_sl,
-                    "reason": f"Velocity trail (agg={agg:.2f}, accel={velocity_acceleration:.2f}, retest={retest_detected}, regime={dyn_buffer.regime_name if dyn_buffer else 'static'})",
+                    "reason": reason_str,
                     "aggressiveness": agg,
                     "profit_locked": (new_sl - entry_price) / pip,
                     "dynamic_buffer": dyn_buffer.threshold if dyn_buffer else None,
@@ -220,13 +242,24 @@ class VelocityTrailingManager:
             new_sl = ask + (trail_distance * pip)
             if new_sl < current_sl or current_sl == 0.0:  # Only move SL down
                 state["last_trail_price"] = ask
+                reason_str = f"Velocity trail (agg={agg:.2f}, accel={velocity_acceleration:.2f}, retest={retest_detected}, regime={dyn_buffer.regime_name if dyn_buffer else 'static'})"
+                if "trail_history" not in state:
+                    state["trail_history"] = []
+                from datetime import datetime
+                state["trail_history"].append({
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "price": ask,
+                    "new_sl": new_sl,
+                    "distance": round(trail_distance, 1),
+                    "reason": reason_str
+                })
                 logger.info(
                     "VelocityTrail SELL #%d: SL %.5f -> %.5f (agg=%.2f, vel_accel=%.2f, retest=%s)%s",
                     ticket, current_sl, new_sl, agg, velocity_acceleration, retest_detected, buffer_info
                 )
                 return {
                     "new_sl": new_sl,
-                    "reason": f"Velocity trail (agg={agg:.2f}, accel={velocity_acceleration:.2f}, retest={retest_detected}, regime={dyn_buffer.regime_name if dyn_buffer else 'static'})",
+                    "reason": reason_str,
                     "aggressiveness": agg,
                     "profit_locked": (entry_price - new_sl) / pip,
                     "dynamic_buffer": dyn_buffer.threshold if dyn_buffer else None,

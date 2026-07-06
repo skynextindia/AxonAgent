@@ -572,6 +572,46 @@ class AxonDaemon:
             return None
         return send_order_via_bridge(self._trade_terminal_path, request)
 
+    def _enrich_positions(self, positions: list) -> list:
+        enriched = []
+        for p in positions:
+            if not isinstance(p, dict):
+                enriched.append(p)
+                continue
+            ticket = int(p.get("ticket", 0))
+            
+            # Check if there is an active TradeState for this ticket
+            trade_state = None
+            if hasattr(self, "reversal_model") and hasattr(self.reversal_model, "trade_state_engine"):
+                t_state = self.reversal_model.trade_state_engine._state
+                if t_state and t_state.ticket == ticket:
+                    trade_state = t_state
+                    
+            # Fetch trail state
+            trail_history = []
+            if hasattr(self, "velocity_trailing"):
+                t_state = self.velocity_trailing._trail_state.get(ticket)
+                if t_state:
+                    trail_history = t_state.get("trail_history", [])
+
+            # Copy position dict and append enriched metrics
+            p_copy = p.copy()
+            p_copy.update({
+                "trail_history": trail_history,
+                "mae": round(trade_state.mae, 1) if (trade_state and trade_state.mae is not None) else 0.0,
+                "mfe": round(trade_state.mfe, 1) if (trade_state and trade_state.mfe is not None) else 0.0,
+                "health_score": round(trade_state.health_score, 1) if (trade_state and trade_state.health_score is not None) else 100.0,
+                "current_phase": trade_state.current_phase if trade_state else "ENTRY",
+                "thesis_status": trade_state.thesis_status if trade_state else "CONFIRMED",
+                "entry_reason": trade_state.entry_reason if trade_state else "Rule A+B Reversal",
+                "entry_regime": trade_state.entry_regime if trade_state else "UNKNOWN",
+                "entry_velocity_percentile": round(trade_state.entry_velocity_percentile, 1) if (trade_state and trade_state.entry_velocity_percentile is not None) else 50.0,
+                "entry_displacement_class": trade_state.entry_displacement_class if trade_state else "NEUTRAL",
+                "ticks_in_trade": trade_state.ticks_in_trade if trade_state else 0
+            })
+            enriched.append(p_copy)
+        return enriched
+
     def _get_account_payload(self) -> Optional[dict]:
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
         if is_bridge:
@@ -600,7 +640,7 @@ class AxonDaemon:
                 if not pos_res:
                     logger.debug("Bridge positions_get returned None")
                     return self._bridge_account_cache
-                pos_list = pos_res.get("positions", [])
+                pos_list = self._enrich_positions(pos_res.get("positions", []))
                 payload = {
                     "type": "account",
                     "balance": acc_res.get("balance", 0.0),
@@ -635,6 +675,7 @@ class AxonDaemon:
                             "tp": float(p.get("tp", 0)),
                             "profit": float(p.get("profit", 0))
                         })
+            pos_list = self._enrich_positions(pos_list)
 
             payload = {
                 "type": "account",

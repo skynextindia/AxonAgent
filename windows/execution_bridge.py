@@ -68,6 +68,27 @@ def mt5_init():
     return True
 
 
+def safe_order_send(request):
+    """Send order with auto-reinitialize retry on IPC send failed errors."""
+    res = mt5.order_send(request)
+    if res is None:
+        err = mt5.last_error()
+        is_ipc_error = False
+        if isinstance(err, tuple) and len(err) > 0:
+            if err[0] == -10001 or "IPC" in str(err):
+                is_ipc_error = True
+        elif err == -10001:
+            is_ipc_error = True
+            
+        if is_ipc_error:
+            print("IPC send failed. Attempting to re-initialize MT5 connection...")
+            mt5.shutdown()
+            if mt5_init():
+                print("Re-initialization successful. Retrying order_send...")
+                res = mt5.order_send(request)
+    return res
+
+
 def serialize_position(p):
     """Convert MT5 position object to dict."""
     return {
@@ -135,7 +156,7 @@ async def handle_client(websocket):
                     }
                     
                     print(f"Sending order to MetaTrader 5: {request}")
-                    res = mt5.order_send(request)
+                    res = safe_order_send(request)
                     
                     if res is None:
                         err = mt5.last_error()
@@ -184,7 +205,7 @@ async def handle_client(websocket):
                     }
                     
                     print(f"Sending close order to MetaTrader 5: {request}")
-                    res = mt5.order_send(request)
+                    res = safe_order_send(request)
                     
                     if res is None:
                         err = mt5.last_error()
@@ -217,7 +238,7 @@ async def handle_client(websocket):
                     }
                     
                     print(f"Modifying SL/TP: {request}")
-                    res = mt5.order_send(request)
+                    res = safe_order_send(request)
                     
                     if res is None:
                         err = mt5.last_error()

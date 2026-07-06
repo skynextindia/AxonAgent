@@ -15,6 +15,10 @@ _ENV_OVERRIDES = {
     "AXONAI_REALTIME_DEVIATION": "realtime_deviation",
     "AXONAI_REALTIME_MIN_CONFLUENCE_CONDITIONS": "realtime_min_confluence_conditions",
     "AXONAI_REALTIME_DRY_RUN": "realtime_dry_run",
+    "AXONAI_REALTIME_MIN_PRICE_DISTANCE_TO_TRAIL": "realtime_min_price_distance_to_trail",
+    "AXONAI_REALTIME_MAX_TRAIL_DISTANCE": "realtime_max_trail_distance",
+    "AXONAI_REALTIME_BASE_TRAIL_BUFFER": "realtime_base_trail_buffer",
+    "AXONAI_REALTIME_MIN_TRAIL_FLOOR_PIPS": "realtime_min_trail_floor_pips",
 }
 
 
@@ -88,6 +92,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_velocity_decay_profit_factor": 0.75,
     "realtime_velocity_decay_threshold_aligned": 0.20,
     "realtime_velocity_decay_threshold_unaligned": 0.40,
+    # ── Trailing Stop settings ──────────────────────────────────────────
+    "realtime_min_price_distance_to_trail": 2.0,
+    "realtime_max_trail_distance": 15.0,
+    "realtime_base_trail_buffer": 7.5,
+    "realtime_min_trail_floor_pips": 4.0,
 
     # ── EOD (End-of-Day) position close ─────────────────────────────────────
     # Force-close all open positions when the trading day winds down, matching

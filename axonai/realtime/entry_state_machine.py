@@ -288,10 +288,13 @@ class EntryStateMachine:
         if is_sweep:
             # Sweeping support -> expect BUY; sweeping resistance -> expect SELL
             sweep_lvl = liq.active_sweeps[0]
-            if price > sweep_lvl.price:
+            if sweep_lvl.direction == "support":
                 direction = "BUY"
-            else:
+            elif sweep_lvl.direction == "resistance":
                 direction = "SELL"
+            else:
+                # Fallback if direction is not synced
+                direction = "BUY" if price > sweep_lvl.price else "SELL"
         elif is_climax:
             # Bullish climax (net displacement positive) -> expect SELL reversal
             if disp.net_displacement_pips > 0:
@@ -364,20 +367,8 @@ class EntryStateMachine:
         )
             
         if is_trigger:
-            # Final safety check against MTF
-            is_trend_blocked = False
-            if self._anomaly_direction == "BUY" and mtf.h1_bias < 0.0 and mtf.h4_bias < 0.0:
-                is_trend_blocked = True
-            elif self._anomaly_direction == "SELL" and mtf.h1_bias > 0.0 and mtf.h4_bias > 0.0:
-                is_trend_blocked = True
-
-            if is_trend_blocked:
-                self._transition(STATE_INVALIDATED, f"Blocked: Trend filter (H1={mtf.h1_bias:.2f}, H4={mtf.h4_bias:.2f})")
-            elif (self._anomaly_direction == "BUY" and (mtf.h1_bias < -0.4 or mtf.h4_bias < -0.4)) or \
-                 (self._anomaly_direction == "SELL" and (mtf.h1_bias > 0.4 or mtf.h4_bias > 0.4)):
-                self._transition(STATE_INVALIDATED, f"Blocked: Trading against strong trend (H1={mtf.h1_bias:.2f}, H4={mtf.h4_bias:.2f})")
-            else:
-                self._transition(STATE_TRIGGERED, "Displacement away from trap confirmed.")
+            # Final safety check against MTF — DISABLED: let machine define purely with velocity
+            self._transition(STATE_TRIGGERED, "Displacement away from trap confirmed.")
 
     def _calculate_quality(self, regime: "RegimeState", mtf: MTFState) -> float:
         """Calculate a 0.0 to 1.0 confidence score for the entry."""
