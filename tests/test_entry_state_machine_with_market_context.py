@@ -14,6 +14,7 @@ from axonai.realtime.entry_state_machine import (
     STATE_IDLE,
     STATE_ANOMALY,
     STATE_ARMING,
+    STATE_RETEST_WAIT,
     STATE_TRIGGERED,
 )
 from axonai.realtime.market_context import MarketContext
@@ -79,23 +80,59 @@ class TestEntryStateMachineWithMarketContext:
         machine._current_state = STATE_ARMING
         machine._anomaly_direction = "BUY"
         machine._anomaly_time = datetime.now().timestamp()
+        machine._anomaly_price = 1.0800
 
-        # CONFIRMED displacement should upgrade signal quality
+        # 1. Breakaway to RETEST_WAIT
         market_context = self._make_market_context(
             displacement_phase="CONFIRMED",
             reversal_confidence=85.0,
             signal_agreement_score=90.0,
             stop_hunt_detected=False,
         )
-
+        # Price must be higher than anomaly price to breakaway for BUY (reversal expects price to rise)
         decision = machine.evaluate_with_context(
             price=1.0810,
             timestamp=datetime.now(),
             market_context=market_context,
         )
+        assert machine._current_state == STATE_RETEST_WAIT
 
-        # Quality should be upgraded when CONFIRMED phase
-        # (Will be at least 0.6 from the 1.2x multiplier, then weighted by 90% agreement)
+        # 2. Retest at zone to trigger
+        # We need decay_ratio < 0.4 and tick_rate_10s < tick_rate_300s * 0.6
+        vel_mock = MagicMock(spec=NormalizedVelocity, decay_ratio=0.3, tick_rate_10s=5.0, tick_rate_300s=10.0, vol_pips=3.0, percentile=70.0)
+        retest_context = self._make_market_context(
+            displacement_phase="CONFIRMED",
+            reversal_confidence=85.0,
+            signal_agreement_score=90.0,
+        )
+        retest_context = MagicMock(
+            spec=MarketContext,
+            timestamp=datetime.now(),
+            price=1.0802, # Back in the 3.0 pip zone from 1.0800
+            bid=1.0801,
+            ask=1.0803,
+            velocity=vel_mock,
+            displacement=retest_context.displacement,
+            liquidity=retest_context.liquidity,
+            location=retest_context.location,
+            mtf=retest_context.mtf,
+            regime=retest_context.regime,
+            reversal_lag_ticks=0,
+            stop_hunt_detected=False,
+            reversal_confidence=85.0,
+            displacement_phase="CONFIRMED",
+            signal_agreement_score=90.0,
+            entry_window_closing=False,
+            ticks_until_confirmation_expires=999,
+        )
+        decision = machine.evaluate_with_context(
+            price=1.0802,
+            timestamp=datetime.now(),
+            market_context=retest_context,
+        )
+
+        assert machine._current_state == STATE_TRIGGERED
+        assert decision.is_valid_entry is True
         assert decision.signal_quality > 0.3, f"Expected good quality for CONFIRMED phase, got {decision.signal_quality}"
 
     def test_skip_entry_when_reversal_ambiguous(self):

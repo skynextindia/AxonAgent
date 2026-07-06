@@ -88,16 +88,29 @@ class TestDaemonE2E(unittest.TestCase):
         tick.time = int(datetime.now().timestamp())
         mock_tick_info.return_value = tick
 
-        # Initialize Daemon
-        daemon = AxonDaemon("EURUSD", self.config)
-        daemon._start_time = datetime.now()
-        daemon._running = True
-
         # Mock account info
         acc = MagicMock()
         acc.equity = 10000.0
         acc.balance = 10000.0
         mock_acc_info.return_value = acc
+
+        # Initialize Daemon
+        daemon = AxonDaemon("EURUSD", self.config)
+        daemon._start_time = datetime.now()
+        daemon._running = True
+
+        from datetime import date
+        today_str = str(date.today())
+        daemon.trade_executor_opt.circuit_breaker.daily_pnl = {
+            "date": today_str,
+            "start_equity": 10000.0,
+            "realized_pnl": 0.0
+        }
+        daemon.trade_executor_base.circuit_breaker.daily_pnl = {
+            "date": today_str,
+            "start_equity": 10000.0,
+            "realized_pnl": 0.0
+        }
 
         # Mock order result
         order_res = MagicMock()
@@ -111,7 +124,14 @@ class TestDaemonE2E(unittest.TestCase):
         # Mock reversal model
         reversal_inst = mock_reversal.return_value
         
-        # When order_send is called, stop the loop to prevent hanging
+        # When execute_signal is called, stop the loop to prevent hanging
+        orig_execute = daemon.trade_executor_opt.execute_signal
+        def stop_loop_execute_signal(*args, **kwargs):
+            daemon._running = False
+            return orig_execute(*args, **kwargs)
+        daemon.trade_executor_opt.execute_signal = stop_loop_execute_signal
+
+        # When order_send is called, stop the loop to prevent hanging (secondary safety)
         def stop_loop_and_order_send(*args, **kwargs):
             daemon._running = False
             return order_res

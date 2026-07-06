@@ -21,6 +21,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Optional, TYPE_CHECKING
 
+from collections import deque
 logger = logging.getLogger(__name__)
 
 from axonai.realtime.velocity_normalizer import NormalizedVelocity
@@ -37,6 +38,7 @@ if TYPE_CHECKING:
 STATE_IDLE = "IDLE"
 STATE_ANOMALY = "ANOMALY"
 STATE_ARMING = "ARMING"
+STATE_RETEST_WAIT = "RETEST_WAIT"
 STATE_TRIGGERED = "TRIGGERED"
 STATE_INVALIDATED = "INVALIDATED"
 
@@ -84,6 +86,11 @@ class EntryStateMachine:
         # Diagnostic
         self._last_reason = "Initialized"
 
+        # Spread history for smoothing
+        self._spread_history: deque[float] = deque(maxlen=5)
+        self._smoothed_spread_pips: float = 1.0
+        self._retest_start_time: float = 0.0
+
     def reset(self) -> None:
         """Force the machine back to IDLE."""
         self._current_state = STATE_IDLE
@@ -93,6 +100,7 @@ class EntryStateMachine:
         self._anomaly_type = ""
         self._max_adverse_excursion = 0.0
         self._last_tick_time = 0.0
+        self._retest_start_time = 0.0
         self._last_reason = "Reset"
 
     def evaluate(
@@ -104,8 +112,15 @@ class EntryStateMachine:
         liquidity: LiquidityState,
         regime: "RegimeState",
         mtf: MTFState,
+        spread: float = 0.0,
     ) -> EntryDecision:
         """Evaluate conditions and transition states."""
+        # Smooth spread over 3-5 ticks
+        pip = self._pip
+        tick_spread = spread / pip if spread > 0.0 else 1.0
+        self._spread_history.append(tick_spread)
+        self._smoothed_spread_pips = sum(self._spread_history) / len(self._spread_history)
+
         ts = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
         
         # Adjust anomaly time if there was a large gap between ticks (e.g. candle gap in backtest)
@@ -118,7 +133,7 @@ class EntryStateMachine:
         self._last_tick_time = ts
         
         # 1. Timeout Check
-        if self._current_state not in (STATE_IDLE, STATE_INVALIDATED):
+        if self._current_state in (STATE_ANOMALY, STATE_ARMING):
             elapsed = ts - self._anomaly_time
             if elapsed > self._timeout_sec:
                 self._transition(STATE_INVALIDATED, f"Timeout after {elapsed:.1f}s")
@@ -132,6 +147,9 @@ class EntryStateMachine:
             
         elif self._current_state == STATE_ARMING:
             self._evaluate_arming(price, ts, displacement, mtf)
+            
+        elif self._current_state == STATE_RETEST_WAIT:
+            self._evaluate_retest_wait(price, ts, velocity)
             
         elif self._current_state == STATE_TRIGGERED:
             # Linger in triggered state until explicitly reset by TradeExecutor
@@ -346,6 +364,14 @@ class EntryStateMachine:
         """Wait for the price to break away from the trap in our direction."""
         dist = (price - self._anomaly_price) / self._pip
 
+        # Beyond-extreme fast-kill: new extreme in anomaly direction -> invalidate breakout
+        if self._anomaly_direction == "SELL" and dist > 0.0:
+            self._transition(STATE_INVALIDATED, f"New high extreme detected ({dist:+.2f} pips). Breakout.")
+            return
+        elif self._anomaly_direction == "BUY" and dist < 0.0:
+            self._transition(STATE_INVALIDATED, f"New low extreme detected ({dist:+.2f} pips). Breakout.")
+            return
+
         # Trigger criteria: Impulse, or high displacement ratio, or exhaustion (velocity decay = momentum shift)
         is_impulse = (
             (disp.classification == DISPLACEMENT_IMPULSE) or
@@ -354,10 +380,11 @@ class EntryStateMachine:
         )
 
         is_trigger = False
-        # Relaxed thresholds for live market microstructure (was 1.5 pips, now 0.3 for Exness)
-        if self._anomaly_direction == "SELL" and dist < -0.3 and is_impulse:
+        # Dynamic spread-aware trigger: max(0.5, 1.5 * smoothed_spread)
+        trigger_pips = max(0.5, 1.5 * self._smoothed_spread_pips)
+        if self._anomaly_direction == "SELL" and dist < -trigger_pips and is_impulse:
             is_trigger = True
-        elif self._anomaly_direction == "BUY" and dist > 0.3 and is_impulse:
+        elif self._anomaly_direction == "BUY" and dist > trigger_pips and is_impulse:
             is_trigger = True
 
         # Debug logging for trigger condition
@@ -367,18 +394,63 @@ class EntryStateMachine:
         )
             
         if is_trigger:
-            # Final safety check against MTF — DISABLED: let machine define purely with velocity
-            self._transition(STATE_TRIGGERED, "Displacement away from trap confirmed.")
+            self._retest_start_time = ts
+            self._transition(STATE_RETEST_WAIT, "Break away confirmed. Awaiting retest at zone.")
+
+    def _evaluate_retest_wait(
+        self, price: float, ts: float, velocity: NormalizedVelocity
+    ) -> None:
+        """Wait for price to test the anomaly level and verify if opposing flow is exhausted."""
+        dist = (price - self._anomaly_price) / self._pip
+
+        # 1. Beyond-extreme fast-kill
+        if self._anomaly_direction == "SELL" and dist > 0.0:
+            self._transition(STATE_INVALIDATED, f"New high extreme detected ({dist:+.2f} pips) during retest. Breakout.")
+            return
+        elif self._anomaly_direction == "BUY" and dist < 0.0:
+            self._transition(STATE_INVALIDATED, f"New low extreme detected ({dist:+.2f} pips) during retest. Breakout.")
+            return
+
+        # 2. Timeout check (5 minutes for retest)
+        elapsed = ts - self._retest_start_time
+        if elapsed > 300.0:
+            self._transition(STATE_INVALIDATED, f"Retest timed out after {elapsed:.1f}s")
+            return
+
+        # 3. Check if price is within the retest zone (dynamic zone size via vol_pips)
+        vol_pips = getattr(velocity, "vol_pips", 3.0)
+        zone_width = max(2.0, vol_pips)
+        in_zone = abs(dist) <= zone_width
+
+        if in_zone:
+            decay = getattr(velocity, "decay_ratio", 1.0) or 1.0
+            tr_10 = getattr(velocity, "tick_rate_10s", 0.0) or 0.0
+            tr_300 = getattr(velocity, "tick_rate_300s", 0.0) or 0.0
+
+            # Trigger invalidate: high momentum on retest (breaking through)
+            if decay > 0.8:
+                self._transition(STATE_INVALIDATED, f"High momentum on retest (decay={decay:.2f}). Breakout threat.")
+                return
+
+            # Trigger confirm: low momentum (opposing flow dead)
+            if decay < 0.4 and tr_10 < tr_300 * 0.6:
+                self._transition(STATE_TRIGGERED, f"Retest confirmed (decay={decay:.2f}, ticks={tr_10:.1f}/{tr_300:.1f}). Reversal trigger.")
 
     def _calculate_quality(self, regime: "RegimeState", mtf: MTFState) -> float:
         """Calculate a 0.0 to 1.0 confidence score for the entry."""
         score = 0.5 # Base
         
+        # Determine dominant regime label
+        dom_regime = getattr(regime, "dominant_regime", getattr(regime, "regime", "ranging"))
+        
         # Regime alignment
-        if regime.regime in (self.REGIME_REVERSAL, self.REGIME_EXHAUSTION):
+        if dom_regime in ("reversal", "exhaustion") or dom_regime in (self.REGIME_REVERSAL, self.REGIME_EXHAUSTION):
             score += 0.2
-        elif regime.regime == self.REGIME_RANGE_CHOP:
+        elif dom_regime in ("ranging", "ranging_chop", "ranging_flat") or dom_regime == self.REGIME_RANGE_CHOP:
             score += 0.1
+        elif dom_regime in ("breakout", "panic"):
+            # Penalize quality in expansion states (requiring higher consensus for entry)
+            score -= 0.15
             
         # MTF Context
         if self._anomaly_direction == "BUY" and mtf.alignment_score > 0.3:
@@ -397,6 +469,7 @@ __all__ = [
     "STATE_IDLE",
     "STATE_ANOMALY",
     "STATE_ARMING",
+    "STATE_RETEST_WAIT",
     "STATE_TRIGGERED",
     "STATE_INVALIDATED",
 ]

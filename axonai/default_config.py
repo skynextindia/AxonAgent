@@ -92,6 +92,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_velocity_decay_profit_factor": 0.75,
     "realtime_velocity_decay_threshold_aligned": 0.20,
     "realtime_velocity_decay_threshold_unaligned": 0.40,
+    "decay_ticks_threshold": 10,
     # ── Trailing Stop settings ──────────────────────────────────────────
     "realtime_min_price_distance_to_trail": 2.0,
     "realtime_max_trail_distance": 15.0,

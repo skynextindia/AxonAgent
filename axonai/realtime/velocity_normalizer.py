@@ -334,7 +334,7 @@ class VelocityNormalizer:
 
         # ── Composite flags ─────────────────────────────────────
         is_unusual = pct > self._pct_threshold or z > self._z_threshold
-        decay_ticks_threshold = 3 if self._backtest_mode else 10
+        decay_ticks_threshold = self._config.get("decay_ticks_threshold", 3 if self._backtest_mode else 10)
         is_decaying = decay_ratio < 0.5 and self._peak_decay_ticks > decay_ticks_threshold
         is_accelerating = self._accel_direction_count >= 3
 

@@ -126,8 +126,12 @@ class TestMT5TradeExecutor(unittest.TestCase):
         sent_request = mock_order_send.call_args[0][0]
         self.assertEqual(sent_request["type"], mt5.ORDER_TYPE_SELL)
 
-    def test_execute_signal_hold(self):
+    @patch("MetaTrader5.terminal_info")
+    @patch("MetaTrader5.account_info")
+    def test_execute_signal_hold(self, mock_acc_info, mock_term_info):
         """Test that HOLD signals return None and make no calls."""
+        mock_term_info.return_value = True
+        mock_acc_info.return_value = None
         res = self.executor.execute_signal("EURUSDm", "Hold")
         self.assertIsNone(res)
 

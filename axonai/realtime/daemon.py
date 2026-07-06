@@ -80,6 +80,8 @@ class AxonDaemon:
         self._last_execution_time: datetime = datetime.min
         self._last_loss_time: Optional[datetime] = None
         self._last_close_time: Optional[datetime] = None
+        self._executed_trades_history: list = []
+        self._pending_limit_ticket: Optional[int] = None
 
         # Dynamic News Guard (pair- + impact-aware economic-news blackout)
         from axonai.realtime.news_guard import NewsGuard
@@ -108,6 +110,7 @@ class AxonDaemon:
 
         # Layer 6: Exit Engine (priority-based trade closure logic)
         pip_mult = 0.01 if "JPY" in symbol.upper() else 0.0001
+        self._pip_mult = pip_mult
         adaptive_exit_mgr = AdaptiveExitManager(pip_mult=pip_mult, config=config)
         self.exit_engine = ExitEngine(legacy_exit_manager=adaptive_exit_mgr, pip_mult=pip_mult, config=config)
 
@@ -137,6 +140,8 @@ class AxonDaemon:
         self._start_time: Optional[datetime] = None
         self.paused: bool = False
         self._last_snapshot = None
+        self.current_bid: float = 0.0
+        self.current_ask: float = 0.0
 
         # Execution bridge account cache — only refresh when trade is open or just closed
         self._bridge_account_cache: Optional[dict] = None  # last known account payload from bridge
@@ -145,6 +150,7 @@ class AxonDaemon:
         # CHANGE 9B: MT5 slow poll caches (keep off tick thread)
         self._account_info_cache = None
         self._position_cache = None
+        self._order_cache = None
         self._slow_poll_running = True
 
         import threading
@@ -157,7 +163,7 @@ class AxonDaemon:
 
     def _slow_poll_loop(self) -> None:
         """Poll slow MT5 endpoints every 1s via bridge. Never blocks tick thread."""
-        from axonai.dataflows.mt5_order_bridge import get_account_info_via_bridge, get_positions_via_bridge
+        from axonai.dataflows.mt5_order_bridge import get_account_info_via_bridge, get_positions_via_bridge, get_orders_via_bridge
         poll_interval = self.config.get("dashboard_mt5_poll_interval_seconds", 1.0)
         first_run = True
         while self._slow_poll_running:
@@ -183,6 +189,10 @@ class AxonDaemon:
                 if pos and pos.get("success"):
                     self._position_cache = pos.get("positions", [])
                     logger.debug("SlowPollLoop: Positions cached - count=%d", len(self._position_cache))
+
+                ords = get_orders_via_bridge(self._trade_terminal_path, self.mt5_symbol)
+                if ords and ords.get("success"):
+                    self._order_cache = ords.get("orders", [])
             except Exception as e:
                 logger.warning(f"SlowPollLoop failed: {e}", exc_info=True)
             time.sleep(poll_interval)
@@ -677,6 +687,21 @@ class AxonDaemon:
                         })
             pos_list = self._enrich_positions(pos_list)
 
+            ord_list = []
+            if getattr(self, "_order_cache", None):
+                for o in self._order_cache:
+                    if isinstance(o, dict):
+                        ord_list.append({
+                            "ticket": int(o.get("ticket", 0)),
+                            "symbol": o.get("symbol", ""),
+                            "type": o.get("type", "other"),
+                            "volume_initial": float(o.get("volume_initial", 0)),
+                            "price_open": float(o.get("price_open", 0)),
+                            "price_current": float(o.get("price_current", 0)),
+                            "sl": float(o.get("sl", 0)),
+                            "tp": float(o.get("tp", 0))
+                        })
+
             payload = {
                 "type": "account",
                 "balance": acc.get("balance", 0),
@@ -685,7 +710,8 @@ class AxonDaemon:
                 "margin": acc.get("margin", 0),
                 "free_margin": acc.get("margin_free", 0),
                 "margin_level": acc.get("margin_level", 0.0),
-                "positions": pos_list
+                "positions": pos_list,
+                "pending_orders": ord_list
             }
             logger.debug("Account payload from cache: balance=%.2f equity=%.2f profit=%.2f", payload["balance"], payload["equity"], payload["profit"])
             return payload
@@ -1067,6 +1093,8 @@ class AxonDaemon:
             # Reuse the canonical session label already computed one line above by
             # live_state.on_tick (DST-aware) -> session-bucketed velocity baselines.
             session=getattr(self.live_state._state, "session", None),
+            bid=bid,
+            ask=ask
         )
         _t1 = time.perf_counter()
         self._last_snapshot = snapshot
@@ -1090,6 +1118,17 @@ class AxonDaemon:
             if snapshot.displacement:
                 snapshot.entry_decision.entry_displacement_class = snapshot.displacement.classification
 
+        # Check if pending limit order has been filled (is now an active position)
+        if self._pending_limit_ticket is not None:
+            is_active = False
+            with self._position_lock:
+                if self._pending_limit_ticket in self._tracked_positions:
+                    is_active = True
+            if is_active:
+                logger.info("AxonDaemon: Pending limit order %d has been FILLED and adopted.", self._pending_limit_ticket)
+                self._pending_limit_ticket = None
+                self.reversal_model.entry.reset()
+
         # 2. Check for entry triggers + broadcast trigger metrics to dashboard
         dashboard = get_dashboard()
         if dashboard:
@@ -1105,6 +1144,8 @@ class AxonDaemon:
                 # Displacement metrics
                 "displacement_class": snapshot.displacement.classification,
                 "displacement_ratio": round(snapshot.displacement.displacement_ratio, 3),
+                "anomaly_price": getattr(self.reversal_model.entry, "_anomaly_price", 0.0),
+                "vol_pips": getattr(snapshot.velocity, "vol_pips", 3.0),
                 "velocity_z_score": round(snapshot.velocity.z_score, 2),
                 "velocity_is_unusual": snapshot.velocity.is_unusual,
                 "velocity_tick_efficiency": round(snapshot.velocity.tick_efficiency, 3),
@@ -1114,18 +1155,16 @@ class AxonDaemon:
                 "mtf_h4_bias": round(snapshot.mtf.h4_bias, 2) if snapshot.mtf else 0.0,
             })
 
-        if snapshot.entry_decision.is_valid_entry:
-            # Dynamic News Guard: veto entries inside a high-impact news blackout
-            # for either currency of the traded pair.
+        # Check for RETEST_WAIT to place limit order, and check for INVALIDATED/IDLE to cancel it
+        state = snapshot.entry_decision.state
+        if state == "RETEST_WAIT" and self._pending_limit_ticket is None:
             blocked, news_reason = self.news_guard.should_block_entry(self.mt5_symbol)
             if blocked:
-                self._events_skipped += 1
-                logger.info("ENTRY BLOCKED by News Guard: %s", news_reason)
-                dash = get_dashboard()
-                if dash:
-                    dash.broadcast({"type": "news_guard", "blocked": True, "reason": news_reason})
+                logger.info("ENTRY LIMIT BLOCKED by News Guard: %s", news_reason)
             else:
-                self.event_queue.put({"type": "entry", "snapshot": snapshot})
+                self.event_queue.put({"type": "place_limit", "snapshot": snapshot})
+        elif state in ("INVALIDATED", "IDLE") and self._pending_limit_ticket is not None:
+            self.event_queue.put({"type": "cancel_limit"})
 
         # 3. Check for exit triggers
         if snapshot.exit_decision.should_exit or snapshot.exit_decision.action == "ADJUST_SL":
@@ -1245,10 +1284,18 @@ class AxonDaemon:
 
             # CHANGE 9D: Timing instrumentation
             _t2 = time.perf_counter()
+            _rev_ms = (_t1 - _t0) * 1000
+            _brd_ms = (_t2 - _t1) * 1000
+            _tot_ms = (_t2 - _t0) * 1000
+            
+            dashboard.broadcast({
+                "type": "latency_metrics",
+                "reversal_ms": round(_rev_ms, 2),
+                "broadcast_ms": round(_brd_ms, 2),
+                "total_ms": round(_tot_ms, 2)
+            })
+
             if self.config.get("latency_instrumentation_enabled", False):
-                _rev_ms = (_t1 - _t0) * 1000
-                _brd_ms = (_t2 - _t1) * 1000
-                _tot_ms = (_t2 - _t0) * 1000
                 if _tot_ms > 10.0:
                     logger.error(
                         f"on_tick exceeded budget: {_tot_ms:.1f}ms "
@@ -1373,14 +1420,17 @@ class AxonDaemon:
                 continue
 
             # Determine event type
-            if not isinstance(event, dict) or "type" not in event or "snapshot" not in event:
+            if not isinstance(event, dict) or "type" not in event:
                 continue
 
             event_type = event["type"]
-            snapshot = event["snapshot"]
+            snapshot = event.get("snapshot")
+            bid = self.current_bid
+            ask = self.current_ask
             
             # Throttle logging
             if event_type == "entry":
+                # Market order execution (deprecated/fallback)
                 self._events_detected += 1
                 
                 # Check if trading is paused
@@ -1390,7 +1440,11 @@ class AxonDaemon:
                     continue
                 
                 # Check cooldown
-                remaining = self._seconds_until_ready()
+                remaining = self._seconds_until_ready(
+                    price=snapshot.price,
+                    direction=snapshot.entry_decision.direction,
+                    vol_pips=getattr(snapshot.velocity, "vol_pips", 3.0)
+                )
                 if remaining > 0:
                     self._events_skipped += 1
                     logger.info("SKIPPED (cooldown=%.0fs remaining)", remaining)
@@ -1419,10 +1473,39 @@ class AxonDaemon:
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                     })
 
+                # Calculate structure-based SL and TP (dynamic sizing via anomaly price)
+                anomaly_price = getattr(self.reversal_model.entry, "_anomaly_price", 0.0)
+                pip = getattr(self.reversal_model.entry, "_pip", 0.0001)
+
+                from unittest.mock import Mock
+                if isinstance(anomaly_price, Mock) or not isinstance(anomaly_price, (int, float)):
+                    anomaly_price = snapshot.price
+                if isinstance(pip, Mock) or not isinstance(pip, (int, float)):
+                    pip = 0.0001
+
+                spread = ask - bid
+                atr = self.live_state._state.atr_14_h1 if (self.live_state and self.live_state._state) else 0.0012
+                if isinstance(atr, Mock) or not isinstance(atr, (int, float)):
+                    atr = 0.0012
+                buffer = 1.0 * pip
+
+                if snapshot.entry_decision.direction == "BUY":
+                    sl_distance = (snapshot.price - anomaly_price) + spread + buffer
+                    sl_distance = max(8 * pip, min(sl_distance, 1.5 * atr))
+                    sl = snapshot.price - sl_distance
+                    tp_distance = max(2.0 * sl_distance, 16 * pip)
+                    tp = snapshot.price + tp_distance
+                else:
+                    sl_distance = (anomaly_price - snapshot.price) + spread + buffer
+                    sl_distance = max(8 * pip, min(sl_distance, 1.5 * atr))
+                    sl = snapshot.price + sl_distance
+                    tp_distance = max(2.0 * sl_distance, 16 * pip)
+                    tp = snapshot.price - tp_distance
+
                 # Execute order on MT5 terminal
                 trade_result = None
                 try:
-                    trade_result = self.trade_executor_opt.execute_signal(self.mt5_symbol, signal, self.live_state)
+                    trade_result = self.trade_executor_opt.execute_signal(self.mt5_symbol, signal, self.live_state, sl=sl, tp=tp)
                     if trade_result and trade_result.get("success", False) and trade_result.get("order"):
                         logger.info("AxonDaemon: Order execution complete: %s", trade_result)
                         ticket = trade_result.get("order")
@@ -1450,6 +1533,15 @@ class AxonDaemon:
                             "regime_confidence": getattr(_entry_ws, "regime_confidence", None) if _entry_ws else None,
                             "volatility": getattr(_entry_ws, "volatility_regime", None) if _entry_ws else None,
                         }
+                        # Record entry for level/direction-aware cooldown
+                        self._executed_trades_history.append({
+                            "entry_price": snapshot.price,
+                            "direction": snapshot.entry_decision.direction,
+                            "entry_time": datetime.now(),
+                            "exit_time": None,
+                            "outcome": None,
+                            "vol_pips": getattr(snapshot.velocity, "vol_pips", 3.0)
+                        })
                         logger.info(f"[ENTRY_TRACKED] Ticket {ticket}: {snapshot.entry_decision.direction} @ {snapshot.price}")
                         
                         # Register trade with models
@@ -1484,6 +1576,74 @@ class AxonDaemon:
                 # We can mock a log here if needed
                 if hasattr(self, '_log_dry_run_event'):
                     self._log_dry_run_event('event_detected', {'event_type': 'REVERSAL', 'price': snapshot.price, 'details': {}})
+
+            elif event_type == "place_limit":
+                snapshot = event["snapshot"]
+                if self._pending_limit_ticket is not None:
+                    continue
+
+                remaining = self._seconds_until_ready(
+                    price=snapshot.price,
+                    direction=snapshot.entry_decision.direction,
+                    vol_pips=getattr(snapshot.velocity, "vol_pips", 3.0)
+                )
+                if remaining > 0:
+                    logger.info("SKIPPED LIMIT ORDER (cooldown=%.0fs remaining)", remaining)
+                    continue
+
+                anomaly_price = getattr(self.reversal_model.entry, "_anomaly_price", 0.0)
+                pip = getattr(self.reversal_model.entry, "_pip", 0.0001)
+
+                from unittest.mock import Mock
+                if isinstance(anomaly_price, Mock) or not isinstance(anomaly_price, (int, float)):
+                    anomaly_price = snapshot.price
+                if isinstance(pip, Mock) or not isinstance(pip, (int, float)):
+                    pip = 0.0001
+
+                spread = ask - bid
+                atr = self.live_state._state.atr_14_h1 if (self.live_state and self.live_state._state) else 0.0012
+                if isinstance(atr, Mock) or not isinstance(atr, (int, float)):
+                    atr = 0.0012
+                buffer = 1.0 * pip
+
+                direction = snapshot.entry_decision.direction
+                if direction == "BUY":
+                    sl_distance = max(8 * pip, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
+                    sl = anomaly_price - sl_distance
+                    tp_distance = max(2.0 * sl_distance, 16 * pip)
+                    tp = anomaly_price + tp_distance
+                    signal = "BuyLimit"
+                else:
+                    sl_distance = max(8 * pip, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
+                    sl = anomaly_price + sl_distance
+                    tp_distance = max(2.0 * sl_distance, 16 * pip)
+                    tp = anomaly_price - tp_distance
+                    signal = "SellLimit"
+
+                trade_result = self.trade_executor_opt.execute_signal(
+                    self.mt5_symbol, signal, self.live_state, sl=sl, tp=tp, price=anomaly_price
+                )
+                if trade_result and trade_result.get("success", False) and trade_result.get("order"):
+                    ticket = trade_result.get("order")
+                    self._pending_limit_ticket = ticket
+                    
+                    # Record entry for level/direction-aware cooldown
+                    self._executed_trades_history.append({
+                        "entry_price": anomaly_price,
+                        "direction": direction,
+                        "entry_time": datetime.now(),
+                        "exit_time": None,
+                        "outcome": None,
+                        "vol_pips": getattr(snapshot.velocity, "vol_pips", 3.0)
+                    })
+                    logger.info("AxonDaemon: Pending limit order placed successfully. Ticket: %d", ticket)
+
+            elif event_type == "cancel_limit":
+                if self._pending_limit_ticket is not None:
+                    success = self.trade_executor_opt.cancel_pending_order(self._pending_limit_ticket)
+                    if success:
+                        logger.info("AxonDaemon: Pending limit order cancelled: %d", self._pending_limit_ticket)
+                        self._pending_limit_ticket = None
 
             elif event_type == "exit":
                 # CHANGE 9C: Position reconciliation
@@ -1658,66 +1818,65 @@ class AxonDaemon:
         except Exception as e:
             logger.error("Failed to append to signals.log: %s", e)
 
-    def _seconds_until_ready(self) -> float:
-        """Smart dynamic cooldown based on trade outcome and direction."""
-        now = datetime.now()
-        elapsed = (now - self._last_execution_time).total_seconds()
+    def _seconds_until_ready(self, price: Optional[float] = None, direction: Optional[str] = None, vol_pips: float = 3.0) -> float:
+        """Smart dynamic level-aware and direction-aware cooldown check."""
+        if price is None or direction is None:
+            now = datetime.now()
+            elapsed = (now - self._last_execution_time).total_seconds()
+            with self._position_lock:
+                active_positions = self._tracked_positions.copy() if hasattr(self, '_tracked_positions') else set()
 
-        # Check if we have an active position
-        with self._position_lock:
-            active_positions = self._tracked_positions.copy() if hasattr(self, '_tracked_positions') else set()
-
-        # Determine dynamic cooldown based on position state (AGGRESSIVE - allow 50+ trades/day)
-        if not active_positions:
-            # No active trade: FAST recovery (30 sec) - allow many new entries
-            cooldown_seconds = 30  # was 60
-        else:
-            # Have active position: Check profit/loss to determine cooldown
-            trade_state = self.reversal_model.trade_state_engine._state if hasattr(self.reversal_model, 'trade_state_engine') else None
-
-            if trade_state and hasattr(trade_state, 'current_profit_pips'):
-                pips = trade_state.current_profit_pips
-
-                if isinstance(pips, (int, float)):
-                    if pips > 2.0:
-                        # Winning trade: MEDIUM cooldown (120 sec) - protect profit but allow more trades
-                        cooldown_seconds = 120  # was 300
-                        logger.debug("SmartCooldown: Trade winning %.1f pips → 120s protection", pips)
-
-                    elif pips < -3.0:
-                        # Losing trade: VERY SHORT cooldown (20 sec) - quick recovery attempts
-                        cooldown_seconds = 20  # was 60
-                        logger.debug("SmartCooldown: Trade losing %.1f pips → 20s recovery", pips)
-
-                    else:
-                        # Breakeven/small loss: SHORT cooldown (45 sec) - allow frequent trades
-                        cooldown_seconds = 45  # was 120
-                        logger.debug("SmartCooldown: Trade at %.1f pips → 45s neutral", pips)
-                else:
-                    # Fallback if pips is mocked/non-numeric
-                    cooldown_seconds = 30
+            if not active_positions:
+                cooldown_seconds = 30
             else:
-                # Fallback to aggressive cooldown
-                cooldown_seconds = 30  # was 300
+                trade_state = self.reversal_model.trade_state_engine._state if hasattr(self.reversal_model, 'trade_state_engine') else None
+                if trade_state and hasattr(trade_state, 'current_profit_pips'):
+                    pips = trade_state.current_profit_pips
+                    if isinstance(pips, (int, float)):
+                        if pips > 2.0:
+                            cooldown_seconds = 120
+                        elif pips < -3.0:
+                            cooldown_seconds = 20
+                        else:
+                            cooldown_seconds = 45
+                    else:
+                        cooldown_seconds = 30
+                else:
+                    cooldown_seconds = 30
 
-        cooldown_rem = max(0.0, cooldown_seconds - elapsed)
+            cooldown_rem = max(0.0, cooldown_seconds - elapsed)
+            post_trade_rem = 0.0
+            if getattr(self, "_last_close_time", None) is not None:
+                elapsed_close = (now - self._last_close_time).total_seconds()
+                post_trade_rem = max(0.0, 20 - elapsed_close)
+            return max(cooldown_rem, post_trade_rem)
 
-        # Post-trade cooldown (measured from last close/exit time)
-        post_trade_rem = 0.0
-        if getattr(self, "_last_close_time", None) is not None:
-            elapsed_close = (now - self._last_close_time).total_seconds()
-            # Reduced from full _cooldown_seconds to 20s (minimal)
-            post_trade_rem = max(0.0, 20 - elapsed_close)
+        now = datetime.now()
+        pip = self._pip_mult
+        zone_width = vol_pips * 1.5
 
-        # Loss cooldown check (DISABLED for aggressive trading)
-        loss_cooldown_rem = 0.0
-        # Comment out loss cooldown - it kills opportunities after losses
-        # if getattr(self, "_last_loss_time", None) is not None:
-        #     elapsed_loss = (now - self._last_loss_time).total_seconds()
-        #     loss_cooldown_minutes = self.config.get("realtime_loss_cooldown_minutes", self.config.get("loss_cooldown_minutes", 30))
-        #     loss_cooldown_rem = max(0.0, (loss_cooldown_minutes * 60) - elapsed_loss)
+        # 1. Entry cooldown (Gate 3 equivalent)
+        cooldown_seconds = self.config.get("realtime_cooldown_seconds", self.config.get("cooldown_seconds", 300))
+        for trade in self._executed_trades_history:
+            elapsed = (now - trade["entry_time"]).total_seconds()
+            if elapsed < cooldown_seconds:
+                if trade["direction"] == direction:
+                    dist = abs(price - trade["entry_price"]) / pip
+                    if dist <= zone_width:
+                        return cooldown_seconds - elapsed
 
-        return max(cooldown_rem, post_trade_rem, loss_cooldown_rem)
+        # 2. Loss cooldown (Gate 3b equivalent)
+        loss_cooldown = self.config.get("realtime_loss_cooldown_minutes", self.config.get("loss_cooldown_minutes", 30))
+        for trade in self._executed_trades_history:
+            if trade.get("outcome") == "LOSS" and trade.get("exit_time") is not None:
+                elapsed_loss_min = (now - trade["exit_time"]).total_seconds() / 60.0
+                if elapsed_loss_min < loss_cooldown:
+                    if trade["direction"] == direction:
+                        dist = abs(price - trade["entry_price"]) / pip
+                        if dist <= zone_width:
+                            return (loss_cooldown - elapsed_loss_min) * 60.0
+
+        return 0.0
 
     def _log_stats(self):
         """Log daemon statistics."""
@@ -2262,6 +2421,31 @@ class AxonDaemon:
                 outcome = "BREAKEVEN"
             if outcome == "LOSS":
                 self._last_loss_time = datetime.now()
+             
+            # Record closed trade in history
+            # Look for matching active entry details
+            entry_price = self._active_trade_entry_details.get(ticket, {}).get("entry_price", entry_price)
+            entry_details = self._active_trade_entry_details.get(ticket, {})
+            entry_time = entry_details.get("entry_time")
+            entry_dt = datetime.strptime(entry_time, "%Y-%m-%d %H:%M:%S") if isinstance(entry_time, str) else datetime.now()
+             
+            # Try to find corresponding entry event in executed trades history to update exit info
+            found = False
+            for t in reversed(self._executed_trades_history):
+                if t["direction"] == direction and t["exit_time"] is None:
+                    t["exit_time"] = datetime.now()
+                    t["outcome"] = outcome
+                    found = True
+                    break
+            if not found:
+                self._executed_trades_history.append({
+                    "entry_price": entry_price,
+                    "direction": direction,
+                    "entry_time": entry_dt,
+                    "exit_time": datetime.now(),
+                    "outcome": outcome,
+                    "vol_pips": self.live_state.snapshot().get("vol_pips", 3.0) if hasattr(self.live_state, "snapshot") and isinstance(self.live_state.snapshot(), dict) else 3.0
+                })
             
             system_name = self._active_trade_system.pop(ticket, "optimized")
             

@@ -130,6 +130,21 @@ def get_account_data(sym):
             "tp": round(p.tp, 5) if p.tp else 0,
             "profit": round(p.profit, 2),
         })
+    orders = mt5.orders_get(symbol=sym) or []
+    ord_list = []
+    for o in orders:
+        ord_type = "buy_limit" if o.type == 2 else "sell_limit" if o.type == 3 else "buy_stop" if o.type == 4 else "sell_stop" if o.type == 5 else "other"
+        ord_list.append({
+            "ticket": o.ticket,
+            "symbol": o.symbol,
+            "type": ord_type,
+            "volume_initial": o.volume_initial,
+            "price_open": round(o.price_open, 5),
+            "price_current": round(o.price_current, 5),
+            "sl": round(o.sl, 5) if o.sl else 0,
+            "tp": round(o.tp, 5) if o.tp else 0
+        })
+
     bal = float(getattr(acct, 'balance', 0) or 0)
     eq = float(getattr(acct, 'equity', 0) or 0)
     prof = float(getattr(acct, 'profit', 0) or 0)
@@ -145,6 +160,7 @@ def get_account_data(sym):
         "free_margin": round(free_marg, 2),
         "margin_level": round(marg_lvl, 2) if marg_lvl else 0,
         "positions": pos_list,
+        "pending_orders": ord_list,
     }
 
 

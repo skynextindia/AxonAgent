@@ -234,6 +234,8 @@ class ReversalModel:
         location_context: Optional[LocationContext] = None,  # NEW: FIX 2 - optional param
         displacement_normalizer=None,  # Optional: DisplacementNormalizer instance
         session: Optional[str] = None,  # Canonical session label for velocity baselines
+        bid: Optional[float] = None,
+        ask: Optional[float] = None,
     ) -> EngineSnapshot:
         """
         Process a new tick through the entire pipeline.
@@ -243,9 +245,9 @@ class ReversalModel:
             timestamp: Tick time
             volume: Tick volume
             location_context: Optional LocationContext (if None, computed internally as fallback)
-            session: Optional canonical session label (asian/london/newyork/
-                overlap/rollover); forwarded to VelocityNormalizer for
-                session-bucketed baselines. None disables bucketing (fallback).
+            session: Optional canonical session label (from daemon)
+            bid: Optional tick bid price
+            ask: Optional tick ask price
         """
         ts_float = timestamp.timestamp() if isinstance(timestamp, datetime) else float(timestamp)
 
@@ -275,8 +277,10 @@ class ReversalModel:
         # --- TIER 3: EXECUTION PIPELINE ---
 
         # 1. Evaluate Entry
+        spread = (ask - bid) if (bid is not None and ask is not None) else 0.0001
         entry_decision = self.entry.evaluate(
-            price, timestamp, vel_state, disp_state, self._last_liquidity_state, self._last_regime_state, self._last_mtf_state
+            price, timestamp, vel_state, disp_state, self._last_liquidity_state, self._last_regime_state, self._last_mtf_state,
+            spread=spread
         )
 
         # 1b. FAIL-CLOSED reversal-confluence gate — DISABLED (was blocking all entries).

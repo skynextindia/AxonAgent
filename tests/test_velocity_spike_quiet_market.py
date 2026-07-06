@@ -20,6 +20,7 @@ from axonai.realtime.entry_state_machine import (
     STATE_IDLE,
     STATE_ANOMALY,
     STATE_ARMING,
+    STATE_RETEST_WAIT,
     STATE_TRIGGERED,
     STATE_INVALIDATED,
 )
@@ -39,13 +40,19 @@ from axonai.realtime.regime_engine import RegimeState, REGIME_RANGE_CHOP
 class TestVelocitySpikeQuietMarket:
     """Velocity spike detection in RANGE_CHOP (quiet) market."""
 
-    def _make_velocity(self, percentile: float, tick_efficiency: float = 0.5, is_unusual: bool = True):
+    def _make_velocity(self, percentile: float = 0.0, tick_efficiency: float = 0.5, is_unusual: bool = True,
+                       decay_ratio: float = 1.0, tick_rate_10s: float = 0.0, tick_rate_300s: float = 0.0,
+                       vol_pips: float = 3.0):
         """Create a mock NormalizedVelocity."""
         vel = MagicMock(spec=NormalizedVelocity)
         vel.percentile = percentile
         vel.tick_efficiency = tick_efficiency
         vel.is_unusual = is_unusual
         vel.is_decaying = False
+        vel.decay_ratio = decay_ratio
+        vel.tick_rate_10s = tick_rate_10s
+        vel.tick_rate_300s = tick_rate_300s
+        vel.vol_pips = vol_pips
         return vel
 
     def _make_displacement(self, classification: str, net_displacement_pips: float = 5.0):
@@ -160,30 +167,38 @@ class TestVelocitySpikeQuietMarket:
         mtf = self._make_mtf()
 
         # 1. Trigger ANOMALY (bullish climax, expect SELL)
-        fsm.evaluate(price, now, velocity, displacement, liquidity, regime, mtf)
+        fsm.evaluate(price, now, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
         assert fsm._current_state == STATE_ANOMALY
 
         # 2. Enter ARMING (absorption detected)
         velocity = self._make_velocity(percentile=50.0, tick_efficiency=0.5)
         displacement = self._make_displacement(DISPLACEMENT_ABSORPTION, net_displacement_pips=5.0)
-        fsm.evaluate(price, now, velocity, displacement, liquidity, regime, mtf)
+        fsm.evaluate(price, now, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
         assert fsm._current_state == STATE_ARMING
 
         # 3. Break away: price drops 0.5 pips with IMPULSE → SELL reversal
-        price = 1.09995  # Down 0.5 pips from anomaly
+        price = 1.09994  # Down 0.6 pips from anomaly to exceed 0.5 pips trigger
         velocity = self._make_velocity(percentile=60.0, tick_efficiency=0.5)
         displacement = self._make_displacement(DISPLACEMENT_IMPULSE, net_displacement_pips=-8.0)
 
-        decision = fsm.evaluate(price, now, velocity, displacement, liquidity, regime, mtf)
+        decision = fsm.evaluate(price, now, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
 
-        # Should transition to TRIGGERED
+        # Should transition to RETEST_WAIT
+        assert fsm._current_state == STATE_RETEST_WAIT
+        assert decision.is_valid_entry is False
+
+        # 4. Retest at zone -> TRIGGERED
+        price = 1.09998  # Below the 1.10000 anomaly price (reversal SELL retest from below)
+        velocity = self._make_velocity(decay_ratio=0.3, tick_rate_10s=5.0, tick_rate_300s=10.0, vol_pips=3.0)
+        decision = fsm.evaluate(price, now, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
+
         assert fsm._current_state == STATE_TRIGGERED
         assert decision.is_valid_entry is True
         assert decision.direction == "SELL"
         assert decision.state == STATE_TRIGGERED
 
     def test_full_cycle_idle_to_triggered_in_quiet_market(self):
-        """Full state machine cycle in quiet market: IDLE → ANOMALY → ARMING → TRIGGERED."""
+        """Full state machine cycle in quiet market: IDLE → ANOMALY → ARMING → RETEST_WAIT → TRIGGERED."""
         fsm = EntryStateMachine()
         regime = self._make_regime(regime=REGIME_RANGE_CHOP, confidence=0.95)
 
@@ -196,7 +211,7 @@ class TestVelocitySpikeQuietMarket:
         liquidity = self._make_liquidity()
         mtf = self._make_mtf()
 
-        decision = fsm.evaluate(price, base_time, velocity, displacement, liquidity, regime, mtf)
+        decision = fsm.evaluate(price, base_time, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
         assert fsm._current_state == STATE_IDLE
         assert not decision.is_valid_entry
 
@@ -205,7 +220,7 @@ class TestVelocitySpikeQuietMarket:
         velocity = self._make_velocity(percentile=45.0, tick_efficiency=0.18, is_unusual=True)
         displacement = self._make_displacement(DISPLACEMENT_NEUTRAL, net_displacement_pips=8.0)
 
-        decision = fsm.evaluate(price, base_time, velocity, displacement, liquidity, regime, mtf)
+        decision = fsm.evaluate(price, base_time, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
         assert fsm._current_state == STATE_ANOMALY
         assert decision.state == STATE_ANOMALY
         assert decision.direction == "SELL"  # Reversal expected from bullish climax
@@ -215,16 +230,23 @@ class TestVelocitySpikeQuietMarket:
         velocity = self._make_velocity(percentile=40.0, tick_efficiency=0.5, is_unusual=False)
         displacement = self._make_displacement(DISPLACEMENT_ABSORPTION, net_displacement_pips=4.0)
 
-        decision = fsm.evaluate(price, base_time, velocity, displacement, liquidity, regime, mtf)
+        decision = fsm.evaluate(price, base_time, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
         assert fsm._current_state == STATE_ARMING
         assert decision.state == STATE_ARMING
 
-        # === TICK 4: Price breaks away with impulse (confirm reversal) ===
+        # === TICK 4: Price breaks away with impulse (confirm breakaway) ===
         price = 1.09994  # Down 0.6 pips from anomaly price
         velocity = self._make_velocity(percentile=55.0, tick_efficiency=0.5)
         displacement = self._make_displacement(DISPLACEMENT_IMPULSE, net_displacement_pips=-10.0)
 
-        decision = fsm.evaluate(price, base_time, velocity, displacement, liquidity, regime, mtf)
+        decision = fsm.evaluate(price, base_time, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
+        assert fsm._current_state == STATE_RETEST_WAIT
+        assert decision.is_valid_entry is False
+
+        # === TICK 5: Retest at zone (confirm reversal) ===
+        price = 1.10004
+        velocity = self._make_velocity(decay_ratio=0.3, tick_rate_10s=4.0, tick_rate_300s=10.0, vol_pips=3.0)
+        decision = fsm.evaluate(price, base_time, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
         assert fsm._current_state == STATE_TRIGGERED
         assert decision.is_valid_entry is True
         assert decision.direction == "SELL"

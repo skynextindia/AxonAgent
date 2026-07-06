@@ -31,6 +31,10 @@ ORDER_FILLING_IOC = 1 if mt5 is None else mt5.ORDER_FILLING_IOC
 TRADE_RETCODE_DONE = 10009 if mt5 is None else mt5.TRADE_RETCODE_DONE
 TRADE_RETCODE_INVALID_FILL = 10014 if mt5 is None else mt5.TRADE_RETCODE_INVALID_FILL
 TRADE_RETCODE_LIMIT_VOLUME = 10018 if mt5 is None else mt5.TRADE_RETCODE_LIMIT_VOLUME
+ORDER_TYPE_BUY_LIMIT = 2 if mt5 is None else mt5.ORDER_TYPE_BUY_LIMIT
+ORDER_TYPE_SELL_LIMIT = 3 if mt5 is None else mt5.ORDER_TYPE_SELL_LIMIT
+TRADE_ACTION_PENDING = 2 if mt5 is None else mt5.TRADE_ACTION_PENDING
+ORDER_FILLING_RETURN = 2 if mt5 is None else mt5.ORDER_FILLING_RETURN
 
 
 class MT5TradeExecutor:
@@ -58,7 +62,7 @@ class MT5TradeExecutor:
             return mt5_trade
         return mt5
 
-    def execute_signal(self, symbol: str, signal: str, live_state: Optional[Any] = None) -> Optional[dict]:
+    def execute_signal(self, symbol: str, signal: str, live_state: Optional[Any] = None, sl: Optional[float] = None, tp: Optional[float] = None, price: Optional[float] = None) -> Optional[dict]:
         """Convert a 5-tier signal into an MT5 order action.
 
         Signals: Buy, Overweight, Hold, Underweight, Sell
@@ -79,14 +83,18 @@ class MT5TradeExecutor:
             return {"success": False, "reason": "circuit_breaker_tripped"}
 
         if signal in ["Buy", "Overweight"]:
-            return self.send_order(symbol, ORDER_TYPE_BUY, live_state)
+            return self.send_order(symbol, ORDER_TYPE_BUY, live_state, sl, tp)
         elif signal in ["Sell", "Underweight"]:
-            return self.send_order(symbol, ORDER_TYPE_SELL, live_state)
+            return self.send_order(symbol, ORDER_TYPE_SELL, live_state, sl, tp)
+        elif signal == "BuyLimit":
+            return self.send_order(symbol, ORDER_TYPE_BUY_LIMIT, live_state, sl, tp, price=price)
+        elif signal == "SellLimit":
+            return self.send_order(symbol, ORDER_TYPE_SELL_LIMIT, live_state, sl, tp, price=price)
         else:
             logger.info("TradeExecutor: Signal is %s. No order action taken (HOLD).", signal)
             return None
 
-    def send_order(self, symbol: str, order_type: int, live_state: Optional[Any] = None) -> Optional[dict]:
+    def send_order(self, symbol: str, order_type: int, live_state: Optional[Any] = None, sl: Optional[float] = None, tp: Optional[float] = None, price: Optional[float] = None) -> Optional[dict]:
         """Send a market order with dynamic SL/TP and position sizing to MT5."""
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
 
@@ -129,7 +137,8 @@ class MT5TradeExecutor:
             bid = tick.bid
             ask = tick.ask
 
-        price = ask if order_type == ORDER_TYPE_BUY else bid
+        if price is None:
+            price = ask if order_type in [ORDER_TYPE_BUY, ORDER_TYPE_BUY_LIMIT] else bid
 
         # Position conflict guard: enforce cap of maximum 1 open position per strategy (by magic number)
         if is_bridge:
@@ -195,13 +204,18 @@ class MT5TradeExecutor:
                 except (TypeError, ValueError):
                     pass
 
-        sl_atr_mult = self.config.get("realtime_sl_atr_multiple", self.config.get("sl_atr_multiple", 1.2))
-        # SL is kept as sl_atr_mult*ATR to act as a hard backstop
-        sl_distance = max(atr * sl_atr_mult, 8 * pip)
+        # Use explicit SL/TP if provided
+        if sl is not None and tp is not None:
+            sl_distance = abs(entry - sl)
+            tp_distance = abs(entry - tp)
+        else:
+            sl_atr_mult = self.config.get("realtime_sl_atr_multiple", self.config.get("sl_atr_multiple", 1.2))
+            # SL is kept as sl_atr_mult*ATR to act as a hard backstop
+            sl_distance = max(atr * sl_atr_mult, 8 * pip)
 
-        # TP is now a placeholder (unreachable) — ExitEngine will close trades, not TP price
-        placeholder_tp_mult = self.config.get("placeholder_tp_sl_multiple", 3.0)
-        tp_distance = max(atr * sl_atr_mult * placeholder_tp_mult, 16 * pip)
+            # TP is now a placeholder (unreachable) — ExitEngine will close trades, not TP price
+            placeholder_tp_mult = self.config.get("placeholder_tp_sl_multiple", 3.0)
+            tp_distance = max(atr * sl_atr_mult * placeholder_tp_mult, 16 * pip)
 
         # Spread guard: refuse entry when the live spread would eat too much of the stop
         spread = ask - bid
@@ -214,8 +228,9 @@ class MT5TradeExecutor:
             return {"success": False, "reason": "spread_too_wide",
                     "spread": round(spread, 5), "sl_distance": round(sl_distance, 5)}
 
-        sl = entry - sl_distance if direction == "BUY" else entry + sl_distance
-        tp = entry + tp_distance if direction == "BUY" else entry - tp_distance  # Placeholder — ExitEngine drives exits
+        if sl is None or tp is None:
+            sl = entry - sl_distance if direction == "BUY" else entry + sl_distance
+            tp = entry + tp_distance if direction == "BUY" else entry - tp_distance
 
         # Format price to correct number of digits
         sl = round(sl, digits)
@@ -373,8 +388,11 @@ class MT5TradeExecutor:
                 return None
         else:
             # Prepare request for direct MT5
+            is_limit = order_type in [ORDER_TYPE_BUY_LIMIT, ORDER_TYPE_SELL_LIMIT]
+            req_action = TRADE_ACTION_PENDING if is_limit else TRADE_ACTION_DEAL
+            req_filling = ORDER_FILLING_RETURN if is_limit else ORDER_FILLING_FOK
             request = {
-                "action": mt5.TRADE_ACTION_DEAL,
+                "action": req_action,
                 "symbol": symbol,
                 "volume": lot,
                 "type": order_type,
@@ -384,8 +402,8 @@ class MT5TradeExecutor:
                 "deviation": self.deviation,
                 "magic": self.magic,
                 "comment": f"AxonAI {order_type} execution",
-                "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_FOK,
+                "type_time": ORDER_TIME_GTC,
+                "type_filling": req_filling,
             }
 
             logger.info("TradeExecutor: Sending order request with SL/TP: %s", request)
@@ -473,3 +491,34 @@ class MT5TradeExecutor:
             "request_id": result.request_id,
             "sl": sl,
         }
+
+    def cancel_pending_order(self, ticket: int) -> bool:
+        """Cancel an MT5 pending limit/stop order."""
+        logger.info("TradeExecutor: Cancelling pending order ticket: %d", ticket)
+        if ticket >= 900_000_000:
+            logger.info("TradeExecutor[PAPER]: Cancelled simulated pending order: %d", ticket)
+            return True
+
+        is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
+        if is_bridge:
+            from .mt5_bridge_client import send_execution_command
+            res = send_execution_command(self.config, {"action": "order_cancel", "order": ticket})
+            return res.get("success", False)
+        else:
+            mt5_inst = self._get_mt5()
+            if not mt5_inst:
+                return False
+            # TRADE_ACTION_REMOVE = 8
+            request = {
+                "action": 8,
+                "order": ticket
+            }
+            result = mt5_inst.order_send(request)
+            if result is None:
+                logger.error("TradeExecutor: cancel_pending_order order_send returned None")
+                return False
+            if result.retcode != mt5.TRADE_RETCODE_DONE:
+                logger.error("TradeExecutor: Cancel failed. Retcode: %d, Comment: %s", result.retcode, result.comment)
+                return False
+            logger.info("TradeExecutor: Cancelled pending order successfully: %d", ticket)
+            return True

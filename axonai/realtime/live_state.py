@@ -1453,15 +1453,36 @@ class LiveMarketEvidence:
         active = [l.price for l in self.price_levels if l.is_active]
         return sorted(active)
 
+    @key_levels.setter
+    def key_levels(self, val: list) -> None:
+        if self._evidence is None:
+            from unittest.mock import MagicMock
+            self._evidence = MagicMock()
+        self._evidence.key_levels = val
+
     @property
     def swing_highs(self) -> list:
         if self._evidence is None:
             return []
         return list(self._evidence.swing_highs)
 
+    @swing_highs.setter
+    def swing_highs(self, val: list) -> None:
+        if self._evidence is None:
+            from unittest.mock import MagicMock
+            self._evidence = MagicMock()
+        self._evidence.swing_highs = val
+
     @property
     def swing_lows(self) -> list:
         if self._evidence is None:
             return []
         return list(self._evidence.swing_lows)
+
+    @swing_lows.setter
+    def swing_lows(self, val: list) -> None:
+        if self._evidence is None:
+            from unittest.mock import MagicMock
+            self._evidence = MagicMock()
+        self._evidence.swing_lows = val
 

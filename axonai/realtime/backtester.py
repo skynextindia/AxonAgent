@@ -325,6 +325,7 @@ class BacktestEngine:
         self.simulated_trades.clear()
         self.active_trades.clear()
         self._last_loss_time = None  # track last loss for cooldown
+        self._pending_limit_order = None
         
         # Load Candles and Ticks
         candles, ticks = self.load_historical_data()
@@ -340,7 +341,19 @@ class BacktestEngine:
         logger.info("BacktestEngine: Computed H1 ATR: %.5f (%.1f pips)", computed_atr, computed_atr / self.pip_mult)
         
         # Seed initial live_state fields directly (WorldState removed — pure-math engine)
-        self.live_state._state = {
+        class DictLikeObject:
+            def __init__(self, data: dict):
+                self.__dict__.update(data)
+            def get(self, key, default=None):
+                return self.__dict__.get(key, default)
+            def __getitem__(self, key):
+                return self.__dict__[key]
+            def __setitem__(self, key, val):
+                self.__dict__[key] = val
+            def __contains__(self, key):
+                return key in self.__dict__
+
+        self.live_state._state = DictLikeObject({
             "regime_scores": {"trending": 0.3, "ranging": 0.7, "breakout": 0.0, "compression": 0.0, "panic": 0.0},
             "dominant_regime": "ranging",
             "regime_confidence": 0.7,
@@ -357,7 +370,7 @@ class BacktestEngine:
             "belief_score": 0.8,
             "should_run_graph": True,
             "abort_reason": "",
-        }
+        })
         
         # Auto-derive key levels from candle data
         all_highs = [c.high for c in candles]
@@ -441,11 +454,106 @@ class BacktestEngine:
                 self.reversal_model.sync_levels(self.live_evidence.price_levels)
 
                 # 1. Process Tick through Pure-Math Reversal Engine
-                snapshot = self.reversal_model.on_tick((bid+ask)/2.0, tick_time, 1)
+                snapshot = self.reversal_model.on_tick((bid+ask)/2.0, tick_time, 1, bid=bid, ask=ask)
                 
-                # Check for entry triggers
-                if snapshot.entry_decision.is_valid_entry:
-                    self._check_trade_triggers(snapshot)
+                # Check for pending limit order placement, execution and cancellation
+                state = snapshot.entry_decision.state
+                
+                # 1. Place Limit Order on entering RETEST_WAIT
+                if state == "RETEST_WAIT" and self._pending_limit_order is None:
+                    anomaly_price = self.reversal_model.entry._anomaly_price
+                    direction = snapshot.entry_decision.direction
+                    
+                    state_obj = self.live_state._state
+                    atr = state_obj.atr_14_h1 if state_obj else 0.0012
+                    buffer = 1.0 * self.pip_mult
+                    spread = ask - bid
+                    
+                    if direction == "BUY":
+                        sl_distance = max(8 * self.pip_mult, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
+                        sl = anomaly_price - sl_distance
+                        tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
+                        tp = anomaly_price + tp_distance
+                    else:
+                        sl_distance = max(8 * self.pip_mult, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
+                        sl = anomaly_price + sl_distance
+                        tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
+                        tp = anomaly_price - tp_distance
+                        
+                    # Check Gates (cooldowns & concurrency)
+                    is_blocked = False
+                    vol_pips = getattr(snapshot.velocity, "vol_pips", 3.0)
+                    zone_width = vol_pips * 1.5
+                    cooldown_seconds = self.config.get("realtime_cooldown_seconds", self.config.get("cooldown_seconds", 900))
+                    for trade in self.simulated_trades:
+                        elapsed = (tick_time - trade["entry_time"]).total_seconds()
+                        if elapsed < cooldown_seconds:
+                            if trade["direction"] == direction:
+                                dist = abs(anomaly_price - trade["entry_price"]) / self.pip_mult
+                                if dist <= zone_width:
+                                    is_blocked = True
+                                    logger.info("BacktestEngine: Limit order blocked by Gate 3 (Cooldown)")
+                                    break
+                    if not is_blocked:
+                        loss_cooldown = self.config.get("realtime_loss_cooldown_minutes", self.config.get("loss_cooldown_minutes", 45))
+                        for trade in self.simulated_trades:
+                            if trade.get("status") == "LOSS" and "exit_time" in trade:
+                                minutes_since_loss = (tick_time - trade["exit_time"]).total_seconds() / 60.0
+                                if minutes_since_loss < loss_cooldown:
+                                    if trade["direction"] == direction:
+                                        dist = abs(anomaly_price - trade["entry_price"]) / self.pip_mult
+                                        if dist <= zone_width:
+                                            is_blocked = True
+                                            logger.info("BacktestEngine: Limit order blocked by Gate 3b (Loss Cooldown)")
+                                            break
+                    if not is_blocked:
+                        for trade in self.active_trades:
+                            if trade["direction"] == direction:
+                                is_blocked = True
+                                break
+                                
+                    if not is_blocked:
+                        self._pending_limit_order = {
+                            "limit_price": anomaly_price,
+                            "direction": direction,
+                            "sl": sl,
+                            "tp": tp,
+                            "reason": f"Limit Order: {snapshot.entry_decision.reason}",
+                            "quality": snapshot.entry_decision.signal_quality
+                        }
+                        logger.info("BacktestEngine: Placed pending limit order at %.5f (SL=%.5f TP=%.5f)", anomaly_price, sl, tp)
+
+                # 2. Check Fill for active pending limit order
+                if self._pending_limit_order is not None:
+                    limit_price = self._pending_limit_order["limit_price"]
+                    direction = self._pending_limit_order["direction"]
+                    is_filled = False
+                    if direction == "BUY" and ask <= limit_price:
+                        is_filled = True
+                    elif direction == "SELL" and bid >= limit_price:
+                        is_filled = True
+                        
+                    if is_filled:
+                        logger.info("BacktestEngine: Pending limit order FILLED at %.5f", limit_price)
+                        self._open_position(
+                            direction, limit_price, tick_time, 
+                            self._pending_limit_order["reason"], 
+                            self._pending_limit_order["quality"],
+                            sl=self._pending_limit_order["sl"],
+                            tp=self._pending_limit_order["tp"]
+                        )
+                        self.reversal_model.register_trade(
+                            len(self.simulated_trades), direction, limit_price, 
+                            self._pending_limit_order["sl"], self._pending_limit_order["tp"],
+                            reason=self._pending_limit_order["reason"]
+                        )
+                        self._pending_limit_order = None
+                        self.reversal_model.entry.reset()
+
+                # 3. Cancel Limit Order if state machine becomes INVALIDATED or IDLE
+                if state in ("INVALIDATED", "IDLE") and self._pending_limit_order is not None:
+                    logger.info("BacktestEngine: Cancelled pending limit order at %.5f", self._pending_limit_order["limit_price"])
+                    self._pending_limit_order = None
                     
                 # Check for adaptive exit triggers
                 if snapshot.exit_decision.should_exit:
@@ -544,22 +652,37 @@ class BacktestEngine:
             logger.info("BacktestEngine: Entry blocked by Gate 2 (Session: %s)", state.session if state else "None")
             return
 
-        # ── Gate 3: cooldown between entries ──
+        # ── Gate 3: level-aware and direction-aware entry cooldown ──
         evt_time = datetime.fromtimestamp(snapshot.timestamp, tz=timezone.utc).replace(tzinfo=None) if isinstance(snapshot.timestamp, (int, float)) else snapshot.timestamp
-        if self.simulated_trades:
-            last_entry_time = self.simulated_trades[-1]["entry_time"]
-            cooldown_seconds = self.config.get("realtime_cooldown_seconds", self.config.get("cooldown_seconds", 900))
-            if (evt_time - last_entry_time).total_seconds() < cooldown_seconds:
-                logger.info("BacktestEngine: Entry blocked by Gate 3 (Cooldown)")
-                return
+        evt_price = snapshot.price
+        vol_pips = getattr(snapshot.velocity, "vol_pips", 3.0)
+        zone_width = vol_pips * 1.5
+        direction = snapshot.entry_decision.direction
 
-        # ── Gate 3b: Loss-streak cooldown ──
-        if self._last_loss_time is not None:
-            minutes_since_loss = (evt_time - self._last_loss_time).total_seconds() / 60
-            loss_cooldown = self.config.get("realtime_loss_cooldown_minutes", self.config.get("loss_cooldown_minutes", 30))
-            if minutes_since_loss < loss_cooldown:
-                logger.info("BacktestEngine: Entry blocked by Gate 3b (Loss cooldown: %.1f mins left)", loss_cooldown - minutes_since_loss)
-                return
+        if not direction:
+            return
+
+        cooldown_seconds = self.config.get("realtime_cooldown_seconds", self.config.get("cooldown_seconds", 900))
+        for trade in self.simulated_trades:
+            elapsed = (evt_time - trade["entry_time"]).total_seconds()
+            if elapsed < cooldown_seconds:
+                if trade["direction"] == direction:
+                    dist = abs(evt_price - trade["entry_price"]) / self.pip_mult
+                    if dist <= zone_width:
+                        logger.info("BacktestEngine: Entry blocked by Gate 3 (Level+Direction Cooldown: %.1f pips from entry)", dist)
+                        return
+
+        # ── Gate 3b: level-aware and direction-aware loss cooldown ──
+        loss_cooldown = self.config.get("realtime_loss_cooldown_minutes", self.config.get("loss_cooldown_minutes", 45))
+        for trade in self.simulated_trades:
+            if trade.get("status") == "LOSS" and "exit_time" in trade:
+                minutes_since_loss = (evt_time - trade["exit_time"]).total_seconds() / 60.0
+                if minutes_since_loss < loss_cooldown:
+                    if trade["direction"] == direction:
+                        dist = abs(evt_price - trade["entry_price"]) / self.pip_mult
+                        if dist <= zone_width:
+                            logger.info("BacktestEngine: Entry blocked by Gate 3b (Level+Direction Loss Cooldown: %.1f mins left, %.1f pips from entry)", loss_cooldown - minutes_since_loss, dist)
+                            return
 
         direction = snapshot.entry_decision.direction
         trigger_reason = f"Reversal Engine: {snapshot.entry_decision.reason}"
@@ -579,21 +702,25 @@ class BacktestEngine:
             if trade["direction"] == direction:
                 return
                     
-        # ── Dynamic SL/TP based on ATR ──
+        # ── Structure-based SL/TP based on Anomaly Price ──
         entry_price = snapshot.price
         state = self.live_state._state
         atr = state.atr_14_h1 if state else 0.0012
-        
-        sl_atr_mult = self.config.get("realtime_sl_atr_multiple", self.config.get("sl_atr_multiple", 1.2))
-        tp_atr_mult = self.config.get("realtime_tp_atr_multiple", self.config.get("tp_atr_multiple", 1.5))
-        sl_distance = max(atr * sl_atr_mult, 8 * self.pip_mult)   # floor of 8 pips
-        tp_distance = max(atr * tp_atr_mult, 16 * self.pip_mult)   # floor of 16 pips
+        anomaly_price = self.reversal_model.entry._anomaly_price
+        spread = ask - bid
+        buffer = 1.0 * self.pip_mult
 
         if direction == "BUY":
+            sl_distance = (entry_price - anomaly_price) + spread + buffer
+            sl_distance = max(8 * self.pip_mult, min(sl_distance, 1.5 * atr))
             sl = entry_price - sl_distance
+            tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
             tp = entry_price + tp_distance
         else:
+            sl_distance = (anomaly_price - entry_price) + spread + buffer
+            sl_distance = max(8 * self.pip_mult, min(sl_distance, 1.5 * atr))
             sl = entry_price + sl_distance
+            tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
             tp = entry_price - tp_distance
                 
         self._open_position(direction, entry_price, evt_time, trigger_reason, signal_quality, sl=sl, tp=tp)
