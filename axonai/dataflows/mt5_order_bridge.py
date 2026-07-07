@@ -11,6 +11,7 @@ import logging
 import subprocess
 import json
 import sys
+import threading
 from typing import Optional, Dict, Any
 from pathlib import Path
 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _bridge_process = None
 _bridge_script = None
+_bridge_lock = threading.Lock()
 
 
 def _get_bridge_script() -> str:
@@ -214,24 +216,26 @@ def _send_bridge_command(
     """Send a command through the bridge subprocess."""
     global _bridge_process
 
-    if _bridge_process is None:
-        if not start_bridge(mt5_trade_terminal_path):
+    with _bridge_lock:
+        if _bridge_process is None:
+            if not start_bridge(mt5_trade_terminal_path):
+                return None
+
+        try:
+            command["mt5_path"] = mt5_trade_terminal_path
+            _bridge_process.stdin.write(json.dumps(command) + "\n")
+            _bridge_process.stdin.flush()
+
+            result_line = _bridge_process.stdout.readline()
+            if result_line:
+                return json.loads(result_line)
+            else:
+                _bridge_process = None
+                return {"success": False, "error": "Bridge process died"}
+        except Exception as e:
+            logger.error(f"Bridge command failed: {e}")
+            _bridge_process = None
             return None
-
-    try:
-        command["mt5_path"] = mt5_trade_terminal_path
-        _bridge_process.stdin.write(json.dumps(command) + "\n")
-        _bridge_process.stdin.flush()
-
-        result_line = _bridge_process.stdout.readline()
-        if result_line:
-            return json.loads(result_line)
-        else:
-            return {"success": False, "error": "Bridge process died"}
-    except Exception as e:
-        logger.error(f"Bridge command failed: {e}")
-        _bridge_process = None
-        return None
 
 
 def send_order_via_bridge(

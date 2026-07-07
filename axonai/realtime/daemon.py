@@ -748,7 +748,7 @@ class AxonDaemon:
                 "equity": acc.get("equity", 0),
                 "profit": acc.get("profit", 0),
                 "margin": acc.get("margin", 0),
-                "free_margin": acc.get("margin_free", 0),
+                "free_margin": acc.get("free_margin", acc.get("margin_free", 0)),
                 "margin_level": acc.get("margin_level", 0.0),
                 "positions": pos_list,
                 "pending_orders": ord_list
