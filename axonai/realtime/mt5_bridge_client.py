@@ -32,7 +32,7 @@ class BridgeClient:
 
     def __init__(self, host="127.0.0.1", port=8765, dashboard_server=None,
                  auto_reconnect=True, reconnect_delay=3.0,
-                 on_connected=None, on_tick=None):
+                 on_connected=None, on_tick=None, url=None):
         self.host = host
         self.port = port
         self.dashboard = dashboard_server
@@ -47,9 +47,12 @@ class BridgeClient:
         self._thread = None
         self._loop = None
         self._ws = None
+        self._custom_url = url
 
     @property
     def url(self):
+        if self._custom_url:
+            return self._custom_url
         return f"ws://{self.host}:{self.port}"
 
     def start(self):

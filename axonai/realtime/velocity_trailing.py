@@ -91,6 +91,7 @@ class VelocityTrailingManager:
         regime: Optional[RegimeState] = None,
         ticks_in_trade: int = 0,
         is_htf_aligned: bool = False,
+        pip: float = 0.0001,
     ) -> Optional[dict]:
         """
         Real-time velocity trailing with retest detection and dynamic market buffer.
@@ -112,12 +113,11 @@ class VelocityTrailingManager:
             regime: Optional RegimeState object (for dynamic buffer)
             ticks_in_trade: How many ticks in this trade
             is_htf_aligned: True if higher timeframe aligned with trade
+            pip: The pip size multiplier of the symbol (e.g. 0.0001 or 0.01)
 
         Returns:
             dict with new_sl if trail triggered, else None
         """
-
-        pip = 0.0001 if "JPY" not in str(position_type).upper() else 0.01
 
         # Initialize state
         if ticket not in self._trail_state:
@@ -170,6 +170,14 @@ class VelocityTrailingManager:
             retest_window_pips=self.retest_window_pips * vol_scale,
         )
 
+        # Scale pip thresholds dynamically for JPY and Gold to prevent stop-choking
+        scale = 1.0
+        if pip == 0.01:
+            if entry_price > 1000.0:
+                scale = 15.0  # Gold (e.g. 15x scaling on EURUSD values)
+            else:
+                scale = 3.0   # JPY
+
         # Trail conditions:
         # 1. Velocity is accelerating (price moving faster = momentum building)
         # 2. Retest detected (price tested support, confirmed it holds)
@@ -178,7 +186,7 @@ class VelocityTrailingManager:
 
         should_trail = (
             (velocity_accelerating or retest_detected) and
-            distance_from_sl >= self.min_price_distance_to_trail * vol_scale and
+            distance_from_sl >= self.min_price_distance_to_trail * scale * vol_scale and
             health_score >= 50.0
         )
 
@@ -207,7 +215,7 @@ class VelocityTrailingManager:
             state["smoothed_width_mult"] = (alpha * raw_width_mult) + ((1.0 - alpha) * state["smoothed_width_mult"])
             
         width_mult = state["smoothed_width_mult"]
-        trail_distance = self._calculate_trail_distance(current_profit, width_mult, vol_scale)
+        trail_distance = self._calculate_trail_distance(current_profit, width_mult, vol_scale, scale)
 
         # Include dynamic buffer info in log
         buffer_info = f" [buffer={dyn_buffer.threshold:.3f} regime={dyn_buffer.regime_name}]" if dyn_buffer else ""
@@ -346,7 +354,7 @@ class VelocityTrailingManager:
         return max(0.4, min(mult, 2.5))
 
     def _calculate_trail_distance(
-        self, current_profit: float, width_mult: float, vol_scale: float = 1.0
+        self, current_profit: float, width_mult: float, vol_scale: float = 1.0, scale: float = 1.0
     ) -> float:
         """Pips to keep behind price, driven by momentum state.
 
@@ -354,10 +362,10 @@ class VelocityTrailingManager:
         extra tighten. Floored at min_trail_floor_pips so proximity to SL can
         never collapse the stop (the old retest death-spiral).
         """
-        profit_factor = min(current_profit / 20.0, 1.0)  # 20 pips = full profit lock
-        trail_distance = self.base_trail_buffer * vol_scale * width_mult * (1.0 - profit_factor * 0.2)
-        trail_distance = max(trail_distance, self.min_trail_floor_pips * vol_scale)
-        trail_distance = min(trail_distance, self.max_trail_distance * vol_scale)
+        profit_factor = min(current_profit / (20.0 * scale), 1.0)  # scale profit lock targets too
+        trail_distance = self.base_trail_buffer * scale * vol_scale * width_mult * (1.0 - profit_factor * 0.2)
+        trail_distance = max(trail_distance, self.min_trail_floor_pips * scale)
+        trail_distance = min(trail_distance, self.max_trail_distance * scale * vol_scale)
         return trail_distance
 
     def reset(self, ticket: Optional[int] = None):

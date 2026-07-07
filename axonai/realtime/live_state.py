@@ -113,7 +113,7 @@ class LiveWorldState:
             self._base_currency = "EUR"
             self._quote_currency = "USD"
         
-        self._is_jpy = self._quote_currency == "JPY"
+        self._is_jpy = (self._quote_currency == "JPY" or "XAU" in sym_clean)
         self._pip_mult = 0.01 if self._is_jpy else 0.0001
         
         self._broker_symbol = _to_mt5_symbol(self.symbol, self.config)
@@ -588,7 +588,7 @@ class LiveMarketEvidence:
         
         # Parse quote dynamically for JPY pairs
         sym_clean = symbol.strip().upper().replace("/", "").replace("=X", "")
-        is_jpy = sym_clean.endswith("JPY") or (len(sym_clean) >= 6 and sym_clean[3:6] == "JPY")
+        is_jpy = sym_clean.endswith("JPY") or (len(sym_clean) >= 6 and sym_clean[3:6] == "JPY") or "XAU" in sym_clean
         self._pip_mult = 0.01 if is_jpy else 0.0001
         
         self._broker_symbol = _to_mt5_symbol(self.symbol, self.config)
@@ -1376,7 +1376,7 @@ class LiveMarketEvidence:
         else:
             self._evidence.london_open_bias = "neutral"
 
-        # New York range calculation (UTC 13-20)
+        # New York range calculation (using dynamic NY open/close hours from get_dst_session_hours)
         ny_highs = []
         ny_lows = []
         for c in m15_candles:
@@ -1385,9 +1385,11 @@ class LiveMarketEvidence:
                 c_time = c_time.replace(tzinfo=timezone.utc)
             else:
                 c_time = c.open_time.astimezone(timezone.utc)
-            if c_time >= start_search and 13 <= c_time.hour < 21:
-                ny_highs.append(c.high)
-                ny_lows.append(c.low)
+            if c_time >= start_search:
+                _, _, ny_open, ny_close = get_dst_session_hours(c_time)
+                if ny_open <= c_time.hour < ny_close:
+                    ny_highs.append(c.high)
+                    ny_lows.append(c.low)
 
         if ny_highs and ny_lows:
             self._evidence.ny_range_high = float(max(ny_highs))

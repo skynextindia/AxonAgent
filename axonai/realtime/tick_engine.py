@@ -242,7 +242,7 @@ class TickEngine(threading.Thread):
                 mt5.symbol_select(self.symbol, True)
 
             # Get broker spread from symbol info
-            pip_unit = 0.01 if "JPY" in self.symbol.upper() else 0.0001
+            pip_unit = 0.01 if ("JPY" in self.symbol.upper() or "XAU" in self.symbol.upper()) else 0.0001
             if hasattr(info, 'spread') and info.spread > 0:
                 self._broker_spread_pips = float(info.spread) / pip_unit
                 logger.info("TickEngine: Broker spread for %s: %.1f pips", self.symbol, self._broker_spread_pips)
@@ -272,7 +272,7 @@ class TickEngine(threading.Thread):
                 rates = mt5.copy_rates_from_pos(self.symbol, mt5.TIMEFRAME_M1, 0, 1)
                 if rates is not None and len(rates) > 0:
                     mid = float(rates[0]['close'])
-                    pip_mult = 0.01 if "JPY" in self.symbol.upper() else 0.0001
+                    pip_mult = 0.01 if ("JPY" in self.symbol.upper() or "XAU" in self.symbol.upper()) else 0.0001
                     # Priority: last_valid_spread > broker_spread > 0
                     if self._last_valid_spread > 0:
                         spread_pips = self._last_valid_spread
@@ -388,7 +388,7 @@ class TickEngine(threading.Thread):
 
         # If tick has valid bid/ask spread, track it as the last known good spread
         if bid > 0 and ask > 0 and ask > bid:
-            pip_mult = 0.01 if "JPY" in self.symbol.upper() else 0.0001
+            pip_mult = 0.01 if ("JPY" in self.symbol.upper() or "XAU" in self.symbol.upper()) else 0.0001
             self._last_valid_spread = (ask - bid) / pip_mult  # Store in pips
 
         # If tick has invalid bid/ask (equal or zero), use best available spread
@@ -401,7 +401,7 @@ class TickEngine(threading.Thread):
             else:
                 mid_price = self.latest_bid if self.latest_bid > 0 else 1.13500
 
-            pip_mult = 0.01 if "JPY" in self.symbol.upper() else 0.0001
+            pip_mult = 0.01 if ("JPY" in self.symbol.upper() or "XAU" in self.symbol.upper()) else 0.0001
             # Priority: use last known REAL spread if available, else broker spread, else 0
             if self._last_valid_spread > 0:
                 spread_pips = self._last_valid_spread
@@ -429,7 +429,7 @@ class TickEngine(threading.Thread):
         timestamp = datetime.fromtimestamp(time_msc / 1000.0, tz=timezone.utc).replace(tzinfo=None)
         mid_price = (bid + ask) / 2.0
         spread_raw = ask - bid
-        spread_pips = spread_raw / (0.0001 if "JPY" not in self.symbol.upper() else 0.01)
+        spread_pips = spread_raw / (0.01 if ("JPY" in self.symbol.upper() or "XAU" in self.symbol.upper()) else 0.0001)
 
         self.latest_bid = bid
         self.latest_ask = ask
@@ -505,19 +505,33 @@ class TickEngine(threading.Thread):
             if is_stale and broker_now.weekday() not in (5, 6):
                 stale_counter += 1
                 if stale_counter == 1:
-                    logger.warning("[STALE_FEED] Data is stale (last tick %.1f seconds ago). Attempting reconnect...",
+                    logger.warning("[STALE_FEED] Data is stale (last tick %.1f seconds ago). Checking connection...",
                                    (broker_now - self.latest_timestamp).total_seconds() if self.latest_timestamp else 999)
 
-                # After 5 consecutive stale checks (~500ms on default 100ms polling), force reconnect
+                # After 5 consecutive stale checks (~500ms on default 100ms polling), force reconnect if disconnected
                 if stale_counter >= 5:
-                    logger.warning("[RECONNECT] Force-reconnecting to MT5 due to stale feed (5+ stale checks)...")
-                    self._mt5 = None  # Clear cached MT5 handle
-                    if self._init_mt5():
-                        logger.info("[RECONNECT] Successfully reconnected to MT5")
-                        stale_counter = 0
+                    is_connected = False
+                    if self._mt5 is not None:
+                        try:
+                            t_info = self._mt5.terminal_info()
+                            is_connected = t_info is not None and t_info.connected
+                        except Exception:
+                            is_connected = False
+                            
+                    if not is_connected:
+                        logger.warning("[RECONNECT] Terminal disconnected! Force-reconnecting to MT5...")
+                        self._mt5 = None  # Clear cached MT5 handle
+                        if self._init_mt5():
+                            logger.info("[RECONNECT] Successfully reconnected to MT5")
+                            self.latest_timestamp = broker_now  # Prevent instant re-trigger
+                            stale_counter = 0
+                        else:
+                            logger.error("[RECONNECT] Failed to reconnect to MT5")
+                            stale_counter = 0  # Reset and try again next cycle
                     else:
-                        logger.error("[RECONNECT] Failed to reconnect to MT5")
-                        stale_counter = 0  # Reset and try again next cycle
+                        logger.debug("[STALE_FEED] Terminal connected but feed is slow. Simulating mock ticks to keep UI alive.")
+                        self.latest_timestamp = broker_now  # Reset to avoid spamming the reconnect check
+                        stale_counter = 0
             else:
                 stale_counter = 0  # Reset counter when feed is not stale
 
@@ -525,7 +539,7 @@ class TickEngine(threading.Thread):
             if broker_now.weekday() in (5, 6) or (is_stale and self._mt5 is None):
                 last_price = self.mid_price if self.latest_bid > 0.0 else 1.16110
                 import random
-                pip_unit = 0.01 if "JPY" in self.symbol.upper() else 0.0001
+                pip_unit = 0.01 if ("JPY" in self.symbol.upper() or "XAU" in self.symbol.upper()) else 0.0001
                 change = random.uniform(-0.15, 0.15) * pip_unit
                 new_mid = last_price + change
                 # Priority: last_valid_spread > broker_spread > 0

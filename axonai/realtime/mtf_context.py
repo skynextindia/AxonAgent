@@ -42,8 +42,9 @@ class MTFState:
 class MTFContext:
     """Computes multi-timeframe alignment scores using EMAs and structure."""
 
-    def __init__(self, pip_mult: float = 0.0001):
+    def __init__(self, pip_mult: float = 0.0001, config: Optional[dict] = None):
         self._pip = pip_mult
+        self.config = config or {}
         
         # Latest candles per timeframe
         self._latest_candles: Dict[str, LiveCandle] = {}
@@ -154,7 +155,11 @@ class MTFContext:
         # Normalize the difference to a [-1.0, 1.0] scale using a soft cap
         # 15 pips diff = ~1.0 score for H1/H4. 
         # (This should technically scale by timeframe ATR, but static is fine for V1)
-        scale = 20.0 if tf == "H4" else 15.0 if tf == "H1" else 10.0
+        is_gold = self.config is not None and "XAU" in str(self.config.get("symbol", "")).upper()
+        if is_gold:
+            scale = 200.0 if tf == "H4" else 150.0 if tf == "H1" else 100.0
+        else:
+            scale = 20.0 if tf == "H4" else 15.0 if tf == "H1" else 10.0
         
         bias = max(min(diff / scale, 1.0), -1.0)
         

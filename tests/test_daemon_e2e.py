@@ -22,6 +22,7 @@ class TestDaemonE2E(unittest.TestCase):
             "realtime_log_events": False,
             "realtime_dry_run": True,  # skip dynamic sizing in tests
             "test_mode": True,
+            "paper_trade": False,
         }
 
     @patch("MetaTrader5.terminal_info")
@@ -141,6 +142,7 @@ class TestDaemonE2E(unittest.TestCase):
         mock_snapshot = MagicMock()
         mock_snapshot.entry_decision.direction = "BUY"
         mock_snapshot.entry_decision.signal_quality = 0.8
+        mock_snapshot.entry_decision.is_valid_entry = True
         mock_snapshot.price = 1.15005
 
         # Ingest event directly into queue matching the new event format

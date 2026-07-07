@@ -33,7 +33,32 @@ from axonai.realtime.api_server import get_dashboard
 from axonai.realtime.exit_engine import ExitEngine
 from axonai.realtime.adaptive_exit import AdaptiveExitManager
 
-logger = logging.getLogger(__name__)
+class SymbolColorLogger:
+    def __init__(self):
+        self.default_logger = logging.getLogger("axonai.realtime.daemon")
+        
+    def _get_logger(self):
+        import threading
+        t_name = threading.current_thread().name
+        if t_name.startswith("daemon-"):
+            symbol = t_name.replace("daemon-", "")
+            return logging.getLogger(f"axonai.realtime.daemon.{symbol}")
+        return self.default_logger
+        
+    def info(self, msg, *args, **kwargs):
+        self._get_logger().info(msg, *args, **kwargs)
+    def warning(self, msg, *args, **kwargs):
+        self._get_logger().warning(msg, *args, **kwargs)
+    def error(self, msg, *args, **kwargs):
+        self._get_logger().error(msg, *args, **kwargs)
+    def debug(self, msg, *args, **kwargs):
+        self._get_logger().debug(msg, *args, **kwargs)
+    def critical(self, msg, *args, **kwargs):
+        self._get_logger().critical(msg, *args, **kwargs)
+    def exception(self, msg, *args, **kwargs):
+        self._get_logger().exception(msg, *args, **kwargs)
+
+logger = SymbolColorLogger()
 
 
 class AxonDaemon:
@@ -70,7 +95,7 @@ class AxonDaemon:
         self.live_state = LiveWorldState(symbol, config)
         self.live_evidence = LiveMarketEvidence(symbol, config)
         self.reversal_model = ReversalModel(
-            pip_mult=0.0001 if "JPY" not in symbol.upper() else 0.01, 
+            pip_mult=0.01 if ("JPY" in symbol.upper() or "XAU" in symbol.upper()) else 0.0001, 
             config=config
         )
         self.trade_analytics = TradeAnalytics()
@@ -109,7 +134,7 @@ class AxonDaemon:
         self._last_velocity_percentile = 0.0
 
         # Layer 6: Exit Engine (priority-based trade closure logic)
-        pip_mult = 0.01 if "JPY" in symbol.upper() else 0.0001
+        pip_mult = 0.01 if ("JPY" in symbol.upper() or "XAU" in symbol.upper()) else 0.0001
         self._pip_mult = pip_mult
         adaptive_exit_mgr = AdaptiveExitManager(pip_mult=pip_mult, config=config)
         self.exit_engine = ExitEngine(legacy_exit_manager=adaptive_exit_mgr, pip_mult=pip_mult, config=config)
@@ -295,6 +320,7 @@ class AxonDaemon:
         else:
             label, color = "LIVE", "red"             # real orders, real account
         return {
+            "symbol": self.mt5_symbol,
             "type": "mode",
             "label": label,
             "color": color,
@@ -420,6 +446,11 @@ class AxonDaemon:
                         resume_dt += timedelta(days=1)
                     market_resume_timestamp = int(resume_dt.timestamp())
 
+        # Calculate dynamic S/R and Stop Loss / Take Profit metrics for visualizer
+        atr_h1 = getattr(ws, "atr_14_h1", 0.0) if ws else 0.0
+        sl_pips = max(8.0, (1.0 * atr_h1) / self._pip_mult) if atr_h1 > 0 else 0.0
+        tp_pips = max(16.0, (2.0 * atr_h1) / self._pip_mult) if atr_h1 > 0 else 0.0
+
         regime_msg = {
             "type": "regime",
             "symbol": self.mt5_symbol,
@@ -427,6 +458,10 @@ class AxonDaemon:
             "confidence": ws.regime_confidence,
             "volatility": ws.volatility_regime,
             "atr": self.reversal_model._h1_atr,
+            "atr_h1": round(atr_h1, 5 if ("JPY" not in self.mt5_symbol.upper() and "XAU" not in self.mt5_symbol.upper()) else 2),
+            "sl_pips": round(sl_pips, 1),
+            "tp_pips": round(tp_pips, 1),
+            "pip_mult": self._pip_mult,
             "spread_pips": ws.spread_pips,
             "spread_safe": ws.spread_safe,
             "belief": ws.belief_score,
@@ -523,6 +558,8 @@ class AxonDaemon:
                     })
                 levels.append(entry)
         return {
+            "symbol": self.mt5_symbol,
+            "symbol": self.mt5_symbol,
             "type": "levels",
             "price_levels": levels
         }
@@ -569,6 +606,7 @@ class AxonDaemon:
                     })
                     
         return {
+            "symbol": self.mt5_symbol,
             "type": "candles",
             "timeframe": timeframe,
             "candles": candles_list
@@ -653,6 +691,7 @@ class AxonDaemon:
                 pos_list = self._enrich_positions(pos_res.get("positions", []))
                 payload = {
                     "type": "account",
+                    "symbol": self.mt5_symbol,
                     "balance": acc_res.get("balance", 0.0),
                     "equity": acc_res.get("equity", 0.0),
                     "profit": acc_res.get("profit", 0.0),
@@ -704,6 +743,7 @@ class AxonDaemon:
 
             payload = {
                 "type": "account",
+                "symbol": self.mt5_symbol,
                 "balance": acc.get("balance", 0),
                 "equity": acc.get("equity", 0),
                 "profit": acc.get("profit", 0),
@@ -913,7 +953,7 @@ class AxonDaemon:
             if tick:
                 bid = tick.bid
                 ask = tick.ask
-                spread = (ask - bid) / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001)
+                spread = (ask - bid) / (0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001)
                 timestamp = datetime.utcfromtimestamp(tick.time)
                 dashboard.broadcast({
                     "type": "tick",
@@ -986,7 +1026,7 @@ class AxonDaemon:
         use the same tested execution mechanism.
         """
         snapshot = self._last_snapshot
-        pip = 0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001
+        pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
         closed = 0
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
         try:
@@ -1136,6 +1176,7 @@ class AxonDaemon:
             logger.debug(f"Broadcasting trigger_metrics: state={snapshot.entry_decision.state} disp_class={snapshot.displacement.classification}")
             dashboard.broadcast({
                 "type": "trigger_metrics",
+                  "symbol": self.mt5_symbol,
                 "state": snapshot.entry_decision.state,
                 "direction": snapshot.entry_decision.direction,
                 "signal_quality": snapshot.entry_decision.signal_quality,
@@ -1155,14 +1196,31 @@ class AxonDaemon:
                 "mtf_h4_bias": round(snapshot.mtf.h4_bias, 2) if snapshot.mtf else 0.0,
             })
 
-        # Check for RETEST_WAIT to place limit order, and check for INVALIDATED/IDLE to cancel it
+        # Check for RETEST_WAIT/TRIGGERED to place limit order, and check for INVALIDATED/IDLE to cancel it
         state = snapshot.entry_decision.state
-        if state == "RETEST_WAIT" and self._pending_limit_ticket is None:
-            blocked, news_reason = self.news_guard.should_block_entry(self.mt5_symbol)
-            if blocked:
-                logger.info("ENTRY LIMIT BLOCKED by News Guard: %s", news_reason)
+        entry_style = self.config.get("realtime_entry_style", "instant")
+        should_enter = (state == "TRIGGERED")
+
+        if should_enter:
+            has_position = False
+            if entry_style in ("instant", "confirmed"):
+                with self._position_lock:
+                    if len(self._tracked_positions) > 0:
+                        has_position = True
             else:
-                self.event_queue.put({"type": "place_limit", "snapshot": snapshot})
+                if self._pending_limit_ticket is not None:
+                    has_position = True
+            
+            if not has_position:
+                blocked, news_reason = self.news_guard.should_block_entry(self.mt5_symbol)
+                if blocked:
+                    logger.info("ENTRY BLOCKED by News Guard: %s", news_reason)
+                else:
+                    self.event_queue.put({"type": "place_limit", "snapshot": snapshot})
+            
+            # Reset FSM immediately for market orders to prevent lingering or late entries!
+            if entry_style in ("instant", "confirmed"):
+                self.reversal_model.entry.reset()
         elif state in ("INVALIDATED", "IDLE") and self._pending_limit_ticket is not None:
             self.event_queue.put({"type": "cancel_limit"})
 
@@ -1200,7 +1258,7 @@ class AxonDaemon:
                     price_changes = sum(abs(t_10s[i]['mid'] - t_10s[i-1]['mid']) for i in range(1, len(t_10s)))
                     time_span = (t_10s[-1]['time'] - t_10s[0]['time']).total_seconds()
                     raw_velocity = price_changes / time_span if time_span > 0 else 0.0
-                    pip_unit = 0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001
+                    pip_unit = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
                     velocity = raw_velocity / pip_unit
                 
                 # Calculate spread delta
@@ -1216,7 +1274,7 @@ class AxonDaemon:
 
                 # 3. Check for absorption (High volume, high velocity, but zero displacement)
                 t_30s = [t for t in ticks if (ticks[-1]['time'] - t['time']).total_seconds() <= 30.0]
-                pip_unit = 0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001
+                pip_unit = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
                 absorption = len(t_30s) >= 20 and velocity > 1.5 and abs(t_30s[-1]['mid'] - t_30s[0]['mid']) < (2.0 * pip_unit)
 
             dashboard.broadcast({
@@ -1224,7 +1282,7 @@ class AxonDaemon:
                 "symbol": self.mt5_symbol,
                 "bid": bid,
                 "ask": ask,
-                "spread": self.tick_engine.spread / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001),
+                "spread": self.tick_engine.spread / (0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001),
                 "time": int(timestamp.replace(tzinfo=timezone.utc).timestamp()),
                 "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3],
                 "tick_velocity": velocity,
@@ -1261,6 +1319,7 @@ class AxonDaemon:
             if trade_state:
                 dashboard.broadcast({
                     "type": "trade_state",
+                  "symbol": self.mt5_symbol,
                     "ticket": trade_state.ticket,
                     "current_phase": trade_state.current_phase,
                     "health_score": trade_state.health_score,
@@ -1274,6 +1333,7 @@ class AxonDaemon:
                 if trade_state.location_context:
                     dashboard.broadcast({
                         "type": "location_context",
+                  "symbol": self.mt5_symbol,
                         "distance_to_sr": trade_state.location_context.get("distance_to_sr", 0.0),
                         "distance_to_liquidity": trade_state.location_context.get("distance_to_liquidity", 0.0),
                         "room_available": trade_state.location_context.get("room_available", 0.0),
@@ -1290,6 +1350,7 @@ class AxonDaemon:
             
             dashboard.broadcast({
                 "type": "latency_metrics",
+                  "symbol": self.mt5_symbol,
                 "reversal_ms": round(_rev_ms, 2),
                 "broadcast_ms": round(_brd_ms, 2),
                 "total_ms": round(_tot_ms, 2)
@@ -1390,6 +1451,7 @@ class AxonDaemon:
         if dashboard:
             dashboard.broadcast({
                 "type": "candle",
+                  "symbol": self.mt5_symbol,
                 "timeframe": candle.timeframe,
                 "open": candle.open,
                 "high": candle.high,
@@ -1465,6 +1527,7 @@ class AxonDaemon:
                 if dashboard:
                     dashboard.broadcast({
                         "type": "decision",
+                  "symbol": self.mt5_symbol,
                         "signal": signal,
                         "system": system_name,
                         "paper": bool(self.config.get("paper_trade", False)),
@@ -1579,8 +1642,16 @@ class AxonDaemon:
 
             elif event_type == "place_limit":
                 snapshot = event["snapshot"]
-                if self._pending_limit_ticket is not None:
-                    continue
+                entry_style = self.config.get("realtime_entry_style", "instant")
+                use_market = entry_style in ("instant", "confirmed")
+
+                if use_market:
+                    with self._position_lock:
+                        if len(self._tracked_positions) > 0:
+                            continue
+                else:
+                    if self._pending_limit_ticket is not None:
+                        continue
 
                 remaining = self._seconds_until_ready(
                     price=snapshot.price,
@@ -1588,7 +1659,7 @@ class AxonDaemon:
                     vol_pips=getattr(snapshot.velocity, "vol_pips", 3.0)
                 )
                 if remaining > 0:
-                    logger.info("SKIPPED LIMIT ORDER (cooldown=%.0fs remaining)", remaining)
+                    logger.info("SKIPPED ENTRY (cooldown=%.0fs remaining)", remaining)
                     continue
 
                 anomaly_price = getattr(self.reversal_model.entry, "_anomaly_price", 0.0)
@@ -1606,37 +1677,127 @@ class AxonDaemon:
                     atr = 0.0012
                 buffer = 1.0 * pip
 
-                direction = snapshot.entry_decision.direction
-                if direction == "BUY":
-                    sl_distance = max(8 * pip, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
-                    sl = anomaly_price - sl_distance
-                    tp_distance = max(2.0 * sl_distance, 16 * pip)
-                    tp = anomaly_price + tp_distance
-                    signal = "BuyLimit"
-                else:
-                    sl_distance = max(8 * pip, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
-                    sl = anomaly_price + sl_distance
-                    tp_distance = max(2.0 * sl_distance, 16 * pip)
-                    tp = anomaly_price - tp_distance
-                    signal = "SellLimit"
+                direction = getattr(self.reversal_model.entry, "_anomaly_direction", None) or snapshot.entry_decision.direction
+                if not direction:
+                    continue
 
-                trade_result = self.trade_executor_opt.execute_signal(
-                    self.mt5_symbol, signal, self.live_state, sl=sl, tp=tp, price=anomaly_price
-                )
-                if trade_result and trade_result.get("success", False) and trade_result.get("order"):
-                    ticket = trade_result.get("order")
-                    self._pending_limit_ticket = ticket
-                    
-                    # Record entry for level/direction-aware cooldown
-                    self._executed_trades_history.append({
-                        "entry_price": anomaly_price,
-                        "direction": direction,
-                        "entry_time": datetime.now(),
-                        "exit_time": None,
-                        "outcome": None,
-                        "vol_pips": getattr(snapshot.velocity, "vol_pips", 3.0)
-                    })
-                    logger.info("AxonDaemon: Pending limit order placed successfully. Ticket: %d", ticket)
+                if use_market:
+                    if direction == "BUY":
+                        sl_distance = max(8 * pip, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
+                        sl = snapshot.price - sl_distance
+                        tp_distance = max(2.0 * sl_distance, 16 * pip)
+                        tp = snapshot.price + tp_distance
+                        signal = "Buy"
+                    else:
+                        sl_distance = max(8 * pip, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
+                        sl = snapshot.price + sl_distance
+                        tp_distance = max(2.0 * sl_distance, 16 * pip)
+                        tp = snapshot.price - tp_distance
+                        signal = "Sell"
+
+                    logger.info("EXECUTING MARKET ENTRY ON SWEEP (style: %s) → signal: %s", entry_style, signal)
+                    trade_result = None
+                    try:
+                        trade_result = self.trade_executor_opt.execute_signal(
+                            self.mt5_symbol, signal, self.live_state, sl=sl, tp=tp
+                        )
+                        if trade_result and trade_result.get("success", False) and trade_result.get("order"):
+                            logger.info("AxonDaemon: Market execution complete: %s", trade_result)
+                            ticket = trade_result.get("order")
+                            with self._position_lock:
+                                self._tracked_positions.add(ticket)
+                            self._active_trade_initial_sl[ticket] = trade_result.get("sl")
+                            self._active_trade_system[ticket] = "reversal_model"
+                            try:
+                                _entry_ws = self.live_state.snapshot()
+                            except Exception:
+                                _entry_ws = None
+                            self._active_trade_entry_details[ticket] = {
+                                "entry_price": snapshot.price,
+                                "direction": direction,
+                                "entry_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                                "volume": trade_result.get("volume", 0.01),
+                                "entry_reason": snapshot.entry_decision.reason,
+                                "velocity_divergence": getattr(getattr(snapshot, "displacement", None), "displacement_ratio", None),
+                                "price_per_tick_efficiency": getattr(getattr(snapshot, "velocity", None), "tick_efficiency", None),
+                                "peak_confidence": getattr(getattr(snapshot, "entry_decision", None), "signal_quality", None),
+                                "spread_pips": getattr(_entry_ws, "spread_pips", None) if _entry_ws else None,
+                                "dominant_regime": getattr(_entry_ws, "dominant_regime", None) if _entry_ws else None,
+                                "regime_confidence": getattr(_entry_ws, "regime_confidence", None) if _entry_ws else None,
+                                "volatility": getattr(_entry_ws, "volatility_regime", None) if _entry_ws else None,
+                            }
+                            # Record entry for level/direction-aware cooldown
+                            self._executed_trades_history.append({
+                                "entry_price": snapshot.price,
+                                "direction": direction,
+                                "entry_time": datetime.now(),
+                                "exit_time": None,
+                                "outcome": None,
+                                "vol_pips": getattr(snapshot.velocity, "vol_pips", 3.0)
+                            })
+                            logger.info(f"[ENTRY_TRACKED] Ticket {ticket}: {direction} @ {snapshot.price}")
+                            
+                            # Register trade with models
+                            self.reversal_model.trade_state_engine.register_trade(
+                                ticket=ticket,
+                                direction=direction,
+                                entry_price=snapshot.price,
+                                entry_time=datetime.now(timezone.utc),
+                                entry_sl=trade_result.get("sl"),
+                                entry_tp=trade_result.get("tp"),
+                                entry_reason=snapshot.entry_decision.reason,
+                                position_size=trade_result.get("volume", 0.01),
+                            )
+                            self.reversal_model.register_trade(
+                                ticket, direction, snapshot.price,
+                                trade_result.get("sl"), trade_result.get("tp"),
+                                reason=snapshot.entry_decision.reason
+                            )
+                            self.trade_analytics.record_entry(
+                                ticket, self.mt5_symbol, direction,
+                                snapshot.price, trade_result.get("sl"), trade_result.get("tp"), snapshot
+                            )
+                    except Exception as ex_err:
+                        logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
+
+                    self._last_execution_time = datetime.now()
+                    self._events_fired += 1
+
+                else:
+                    if direction == "BUY":
+                        sl_distance = max(8 * pip, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
+                        sl = anomaly_price - sl_distance
+                        tp_distance = max(2.0 * sl_distance, 16 * pip)
+                        tp = anomaly_price + tp_distance
+                        signal = "BuyLimit"
+                    else:
+                        sl_distance = max(8 * pip, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
+                        sl = anomaly_price + sl_distance
+                        tp_distance = max(2.0 * sl_distance, 16 * pip)
+                        tp = anomaly_price - tp_distance
+                        signal = "SellLimit"
+
+                    logger.info("PLACING PENDING LIMIT ORDER (ReversalModel RetestWait confirmation) → signal: %s at %.5f", signal, anomaly_price)
+                    trade_result = self.trade_executor_opt.execute_signal(
+                        self.mt5_symbol, signal, self.live_state, sl=sl, tp=tp, price=anomaly_price
+                    )
+                    if trade_result and trade_result.get("success", False) and trade_result.get("order"):
+                        ticket = trade_result.get("order")
+                        self._pending_limit_ticket = ticket
+                        
+                        # Record entry for level/direction-aware cooldown
+                        self._executed_trades_history.append({
+                            "entry_price": anomaly_price,
+                            "direction": direction,
+                            "entry_time": datetime.now(),
+                            "exit_time": None,
+                            "outcome": None,
+                            "vol_pips": getattr(snapshot.velocity, "vol_pips", 3.0)
+                        })
+                        logger.info("AxonDaemon: Pending limit order placed successfully. Ticket: %d", ticket)
+
+                    self._last_execution_time = datetime.now()
+                    self._events_fired += 1
 
             elif event_type == "cancel_limit":
                 if self._pending_limit_ticket is not None:
@@ -1718,7 +1879,7 @@ class AxonDaemon:
                                 "deviation": 20
                             })
                             if close_res.get("success"):
-                                profit_pips = (price - p["price_open"]) / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001)
+                                profit_pips = (price - p["price_open"]) / (0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001)
                                 if p["type"] == "SELL": profit_pips = -profit_pips
                                 
                                 self.trade_analytics.record_exit(
@@ -1758,18 +1919,18 @@ class AxonDaemon:
                                 }
                                 res = self._send_order(request)
                                 if res and res.get("retcode") == mt5.TRADE_RETCODE_DONE:
-                                            profit_pips = (price - p.price_open) / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001)
-                                            if p.type == mt5.POSITION_TYPE_SELL: profit_pips = -profit_pips
+                                            profit_pips = (price - p["price_open"]) / (0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001)
+                                            if p["type"] == mt5.POSITION_TYPE_SELL or p["type"] == "SELL": profit_pips = -profit_pips
                                             
                                             self.trade_analytics.record_exit(
-                                                p.ticket, price, profit_pips, decision.reason, snapshot
+                                                p["ticket"], price, profit_pips, decision.reason, snapshot
                                             )
                                             self.reversal_model.clear_trade()
                                             with self._position_lock:
-                                                if p.ticket in self._tracked_positions:
-                                                    self._tracked_positions.remove(p.ticket)
+                                                if p["ticket"] in self._tracked_positions:
+                                                    self._tracked_positions.remove(p["ticket"])
                                                 
-                                            logger.info("Successfully closed position %d: %s", p.ticket, decision.reason)
+                                            logger.info("Successfully closed position %d: %s", p["ticket"], decision.reason)
 
             # Print stats
             self._log_stats()
@@ -2001,6 +2162,7 @@ class AxonDaemon:
                 pos_sl = pos["sl"]
                 pos_tp = pos["tp"]
                 pos_symbol = pos["symbol"]
+                pos_volume = pos.get("volume", 0.01)
             else:
                 ticket = pos.ticket
                 pos_type = "BUY" if pos.type == mt5.POSITION_TYPE_BUY else "SELL"
@@ -2008,6 +2170,7 @@ class AxonDaemon:
                 pos_sl = pos.sl
                 pos_tp = pos.tp
                 pos_symbol = pos.symbol
+                pos_volume = pos.volume
 
             # Initialize tracking
             if ticket not in self._active_trade_initial_sl:
@@ -2071,11 +2234,12 @@ class AxonDaemon:
                 regime=snap_regime,
                 ticks_in_trade=ticks_in_trade,
                 is_htf_aligned=is_htf_aligned,
+                pip=self._pip_mult,
             )
 
             # Apply SL modification if velocity trailing suggests it
             if trail_result:
-                new_sl = round(trail_result["new_sl"], 5 if "JPY" not in self.mt5_symbol.upper() else 3)
+                new_sl = round(trail_result["new_sl"], 5 if ("JPY" not in self.mt5_symbol.upper() and "XAU" not in self.mt5_symbol.upper()) else 3)
                 logger.info(
                     "AxonDaemon: Velocity trail triggered for ticket %d. SL: %.5f -> %.5f (agg=%.2f)",
                     ticket, pos_sl, new_sl, trail_result["aggressiveness"]
@@ -2153,7 +2317,7 @@ class AxonDaemon:
                         else:
                             logger.error("[EXIT_ENGINE] Failed to close ticket %d: %s", ticket, res)
                 elif exit_signal and exit_signal.action == "ADJUST_SL" and exit_signal.suggested_sl:
-                    new_sl = round(exit_signal.suggested_sl, 5 if "JPY" not in self.mt5_symbol.upper() else 3)
+                    new_sl = round(exit_signal.suggested_sl, 5 if ("JPY" not in self.mt5_symbol.upper() and "XAU" not in self.mt5_symbol.upper()) else 3)
                     logger.info("[EXIT_ENGINE] Adjusting SL for ticket %d: %.5f -> %.5f", ticket, pos_sl, new_sl)
                     # Track SL adjustment for velocity trailing visibility
                     if ticket not in self._active_trade_velocity_events:
@@ -2195,7 +2359,7 @@ class AxonDaemon:
         positions = []
         if is_bridge:
             with self._position_lock:
-                if not self._tracked_positions:
+                if not self._tracked_positions and not self._position_cache:
                     return
             # Use cached position snapshots instead of polling the execution bridge every second.
             # The snapshot is kept fresh by _manage_trailing_stops itself (updated after every SL modify)
@@ -2212,7 +2376,7 @@ class AxonDaemon:
                 positions = res.get("positions", []) if res and res.get("success", False) else []
         else:
             with self._position_lock:
-                if not self._tracked_positions:
+                if not self._tracked_positions and not self._position_cache:
                     return
             from axonai.dataflows.mt5_order_bridge import get_positions_via_bridge
             if not self._trade_terminal_path:
@@ -2503,6 +2667,7 @@ class AxonDaemon:
             if dashboard:
                 dashboard.broadcast({
                     "type": "event",
+                  "symbol": self.mt5_symbol,
                     "id": f"close-{ticket}",
                     "event_type": "TRADE_CLOSED",
                     "priority": "HIGH",

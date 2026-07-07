@@ -140,8 +140,13 @@ async def handle_client(websocket):
                     if info and not info.visible:
                         mt5.symbol_select(symbol, True)
                     
+                    # Determine action and filling type dynamically based on order type
+                    is_limit = order_type not in [mt5.ORDER_TYPE_BUY, mt5.ORDER_TYPE_SELL]
+                    action = mt5.TRADE_ACTION_PENDING if is_limit else mt5.TRADE_ACTION_DEAL
+                    type_filling = mt5.ORDER_FILLING_RETURN if is_limit else mt5.ORDER_FILLING_FOK
+
                     request = {
-                        "action": mt5.TRADE_ACTION_DEAL,
+                        "action": action,
                         "symbol": symbol,
                         "volume": volume,
                         "type": order_type,
@@ -152,11 +157,16 @@ async def handle_client(websocket):
                         "magic": magic,
                         "comment": "AxonAI Exec Bridge",
                         "type_time": mt5.ORDER_TIME_GTC,
-                        "type_filling": mt5.ORDER_FILLING_FOK,
+                        "type_filling": type_filling,
                     }
                     
                     print(f"Sending order to MetaTrader 5: {request}")
                     res = safe_order_send(request)
+                    
+                    if res and res.retcode in [10013, 10014, 10018, 10030]:
+                        print("Open failed with retcode %d. Retrying with ORDER_FILLING_IOC..." % res.retcode)
+                        request["type_filling"] = mt5.ORDER_FILLING_IOC
+                        res = safe_order_send(request)
                     
                     if res is None:
                         err = mt5.last_error()
@@ -184,11 +194,53 @@ async def handle_client(websocket):
                 elif req_type == "close":
                     ticket = int(req.get("position"))
                     symbol = req.get("symbol")
-                    volume = float(req.get("volume"))
-                    order_type = int(req.get("type"))
-                    price = float(req.get("price"))
-                    magic = int(req.get("magic"))
+                    
+                    # Optional fields - might be missing from some exit flows
+                    volume_raw = req.get("volume")
+                    order_type_raw = req.get("type")
+                    price_raw = req.get("price")
+                    magic_raw = req.get("magic")
                     deviation = int(req.get("deviation", 20))
+                    
+                    # Fetch from MT5 if any are missing
+                    if volume_raw is None or order_type_raw is None or price_raw is None or magic_raw is None:
+                        print(f"Close request missing parameters, querying MT5 for ticket {ticket}")
+                        positions = mt5.positions_get(ticket=ticket)
+                        if not positions and symbol:
+                            # Try fallback query by symbol
+                            all_pos = mt5.positions_get(symbol=symbol) or []
+                            positions = [p for p in all_pos if p.ticket == ticket]
+                            
+                        if positions:
+                            p = positions[0]
+                            volume = float(p.volume)
+                            magic = int(p.magic)
+                            symbol = p.symbol
+                            
+                            # Determine close transaction type: buy closes sell, sell closes buy
+                            # MT5: POSITION_TYPE_BUY = 0, POSITION_TYPE_SELL = 1
+                            # MT5: ORDER_TYPE_BUY = 0, ORDER_TYPE_SELL = 1
+                            if p.type == mt5.POSITION_TYPE_BUY:
+                                order_type = mt5.ORDER_TYPE_SELL
+                                tick = mt5.symbol_info_tick(symbol)
+                                close_price = tick.bid if tick else p.price_current
+                            else:
+                                order_type = mt5.ORDER_TYPE_BUY
+                                tick = mt5.symbol_info_tick(symbol)
+                                close_price = tick.ask if tick else p.price_current
+                                
+                            price = float(close_price)
+                        else:
+                            print(f"Error: Position ticket {ticket} not found in MT5 to resolve close details.")
+                            volume = 0.01
+                            order_type = mt5.ORDER_TYPE_SELL
+                            price = 0.0
+                            magic = 0
+                    else:
+                        volume = float(volume_raw)
+                        order_type = int(order_type_raw)
+                        price = float(price_raw)
+                        magic = int(magic_raw)
                     
                     request = {
                         "action": mt5.TRADE_ACTION_DEAL,
@@ -201,11 +253,16 @@ async def handle_client(websocket):
                         "magic": magic,
                         "comment": "Exec Bridge Close",
                         "type_time": mt5.ORDER_TIME_GTC,
-                        "type_filling": mt5.ORDER_FILLING_IOC,
+                        "type_filling": mt5.ORDER_FILLING_FOK,
                     }
                     
                     print(f"Sending close order to MetaTrader 5: {request}")
                     res = safe_order_send(request)
+                    
+                    if res and res.retcode in [10013, 10014, 10018, 10030]:
+                        print("Close failed with retcode %d. Retrying with ORDER_FILLING_IOC..." % res.retcode)
+                        request["type_filling"] = mt5.ORDER_FILLING_IOC
+                        res = safe_order_send(request)
                     
                     if res is None:
                         err = mt5.last_error()
@@ -226,8 +283,24 @@ async def handle_client(websocket):
                 elif req_type == "modify":
                     ticket = int(req.get("position"))
                     symbol = req.get("symbol")
-                    sl = float(req.get("sl"))
-                    tp = float(req.get("tp"))
+                    sl_raw = req.get("sl")
+                    tp_raw = req.get("tp")
+                    
+                    if sl_raw is None or tp_raw is None:
+                        positions = mt5.positions_get(ticket=ticket)
+                        if not positions and symbol:
+                            all_pos = mt5.positions_get(symbol=symbol) or []
+                            positions = [p for p in all_pos if p.ticket == ticket]
+                        if positions:
+                            p = positions[0]
+                            sl = float(p.sl) if sl_raw is None else float(sl_raw)
+                            tp = float(p.tp) if tp_raw is None else float(tp_raw)
+                        else:
+                            sl = 0.0 if sl_raw is None else float(sl_raw)
+                            tp = 0.0 if tp_raw is None else float(tp_raw)
+                    else:
+                        sl = float(sl_raw)
+                        tp = float(tp_raw)
                     
                     request = {
                         "action": mt5.TRADE_ACTION_SLTP,
@@ -255,6 +328,31 @@ async def handle_client(websocket):
                     
                     await websocket.send(json.dumps(response))
                     print(f"Modification result sent to daemon: {response}")
+                    
+                elif req_type == "order_cancel":
+                    ticket = int(req.get("order"))
+                    request = {
+                        "action": mt5.TRADE_ACTION_REMOVE,
+                        "order": ticket
+                    }
+                    print(f"Cancelling pending order: {request}")
+                    res = safe_order_send(request)
+                    
+                    if res is None:
+                        err = mt5.last_error()
+                        response = {"success": False, "reason": f"mt5_internal_error: {err}"}
+                    elif res.retcode != mt5.TRADE_RETCODE_DONE:
+                        response = {
+                            "success": False,
+                            "reason": f"retcode_{res.retcode}",
+                            "retcode": res.retcode,
+                            "comment": getattr(res, "comment", "Unknown order cancel failure")
+                        }
+                    else:
+                        response = {"success": True, "order": int(res.order)}
+                        
+                    await websocket.send(json.dumps(response))
+                    print(f"Order cancel result sent to daemon: {response}")
                     
                 elif req_type == "positions_get":
                     symbol = req.get("symbol")

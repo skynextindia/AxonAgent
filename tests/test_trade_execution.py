@@ -288,8 +288,65 @@ class TestMT5TradeExecutor(unittest.TestCase):
         mock_tick.return_value = MagicMock(ask=1.08600, bid=1.08500)
 
         res = self.executor.execute_signal("EURUSDm", "Buy")
-
+        
         mock_order_send.assert_not_called()
         self.assertIsNotNone(res)
         self.assertEqual(res.get("reason"), "spread_too_wide")
+
+    @patch("axonai.realtime.execution_client.send_execution_command")
+    def test_bridge_execute_signal_buy(self, mock_send_cmd):
+        """Test sending a BUY signal order via bridge mode."""
+        self.executor.config["realtime_execution_mode"] = "bridge"
+        self.executor.config["realtime_dry_run"] = False
+        self.executor.paper_trade = False
+        self.executor.circuit_breaker = MagicMock(is_tripped=False)
+
+        mock_send_cmd.side_effect = [
+            {"success": True, "positions": []},  # positions_get check
+            {"success": True, "equity": 10000.0, "balance": 10000.0},  # account_info
+            {
+                "success": True,
+                "point": 0.00001,
+                "digits": 5,
+                "trade_tick_value": 1.0,
+                "trade_tick_size": 0.00001,
+                "volume_min": 0.01,
+                "volume_step": 0.01,
+                "volume_max": 100.0
+            },  # symbol_info
+            {"success": True, "order": 99991, "volume": 0.02, "price": 1.08500}  # open order result
+        ]
+
+        live_state = MagicMock()
+        live_state.current_bid = 1.08480
+        live_state.current_ask = 1.08500
+        live_state.atr_14_h1 = 0.0015
+
+        res = self.executor.execute_signal("EURUSDm", "Buy", live_state=live_state)
+
+        self.assertIsNotNone(res)
+        self.assertTrue(res["success"])
+        self.assertEqual(res["order"], 99991)
+        self.assertEqual(mock_send_cmd.call_count, 4)
+        
+        # Verify open order request sent to bridge
+        open_args = mock_send_cmd.call_args[0][1]
+        self.assertEqual(open_args["action"], "open")
+        self.assertEqual(open_args["symbol"], "EURUSDm")
+        self.assertEqual(open_args["type"], 0)  # ORDER_TYPE_BUY
+        self.assertEqual(open_args["price"], 1.08500)
+
+    @patch("axonai.realtime.execution_client.send_execution_command")
+    def test_bridge_cancel_pending_order(self, mock_send_cmd):
+        """Test cancelling a pending order via bridge mode."""
+        self.executor.config["realtime_execution_mode"] = "bridge"
+        mock_send_cmd.return_value = {"success": True, "order": 8888}
+
+        success = self.executor.cancel_pending_order(8888)
+        self.assertTrue(success)
+        mock_send_cmd.assert_called_once_with(
+            self.executor.config,
+            {"action": "order_cancel", "order": 8888}
+        )
+
 

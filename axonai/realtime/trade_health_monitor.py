@@ -201,8 +201,15 @@ class TradeHealthMonitor:
             reason = f"{energy} in {phase_val}"
             
         # 4. Failed Breakout / Fakeout Return
-        # If we had a nice run (+10 pips) and it fully retraced to negative
-        if self._max_favorable_excursion > 10.0 and pips_profit < -2.0:
+        # Scale pip thresholds dynamically for Gold and JPY to accommodate volatility
+        scale = 1.0
+        if self._pip == 0.01:
+            if self._entry_price > 1000.0:
+                scale = 15.0  # Gold (e.g. 150 pips breakout, 30 pips drawdown)
+            else:
+                scale = 3.0   # JPY (e.g. 30 pips breakout, 6 pips drawdown)
+                
+        if self._max_favorable_excursion > (10.0 * scale) and pips_profit < (-2.0 * scale):
             score -= 0.85
             reason = "Failed Expansion (Full Retracement)"
             

@@ -97,8 +97,66 @@ def start_execution_bridge(exec_path, port):
           "Continuing — check the bridge window for MT5 login errors.")
     return proc
 
+def start_calibrator_background(symbol="EURUSD"):
+    """Launch the Deep Scan Calibrator in continuous mode for a specific symbol."""
+    import subprocess
+    calib_script = os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "axonai", "scripts", "live_reversal_calibrator.py"
+    )
+    if not os.path.exists(calib_script):
+        print(f"  [!] Calibrator script not found: {calib_script}")
+        return None
 
-# ── Main ───────────────────────────────────────────────────────────
+    cmd = [sys.executable, calib_script, "--dashboard", "--continuous", "--symbol", symbol]
+    print(f"  [+] Starting Deep Scan Calibrator for {symbol} in the background")
+    kwargs = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
+        
+    proc = subprocess.Popen(cmd, **kwargs)
+    return proc
+
+
+import logging
+
+class ColorFormatter(logging.Formatter):
+    """Custom Formatter to add ANSI color coding to log levels in terminal."""
+    GREY = "\x1b[38;20m"
+    CYAN = "\x1b[36;20m"
+    GREEN = "\x1b[32;20m"
+    YELLOW = "\x1b[33;20m"
+    RED = "\x1b[31;20m"
+    BOLD_RED = "\x1b[31;1m"
+    RESET = "\x1b[0m"
+    
+    def __init__(self, fmt):
+        super().__init__()
+        self.fmt = fmt
+        self.FORMATS = {
+            logging.DEBUG: self.GREY + self.fmt + self.RESET,
+            logging.INFO: self.CYAN + self.fmt + self.RESET,
+            logging.WARNING: self.YELLOW + self.fmt + self.RESET,
+            logging.ERROR: self.RED + self.fmt + self.RESET,
+            logging.CRITICAL: self.BOLD_RED + self.fmt + self.RESET,
+        }
+
+    def format(self, record):
+        log_fmt = self.FORMATS.get(record.levelno)
+        formatter = logging.Formatter(log_fmt)
+        return formatter.format(record)
+
+
+def enable_ansi_escape_sequences():
+    if sys.platform == "win32":
+        import ctypes
+        kernel32 = ctypes.windll.kernel32
+        hOut = kernel32.GetStdHandle(-11) # STD_OUTPUT_HANDLE
+        if hOut != -1:
+            mode = ctypes.c_ulong()
+            if kernel32.GetConsoleMode(hOut, ctypes.byref(mode)):
+                # ENABLE_VIRTUAL_TERMINAL_PROCESSING = 0x0004
+                kernel32.SetConsoleMode(hOut, mode.value | 0x0004)
+
 
 def main():
     import logging
@@ -110,14 +168,22 @@ def main():
     os.makedirs(log_dir, exist_ok=True)
     log_file = os.path.join(log_dir, "axon.log")
     fmt = "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+    
     file_handler = RotatingFileHandler(
         log_file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
     )
     file_handler.setFormatter(logging.Formatter(fmt))
+    
+    stream_handler = logging.StreamHandler()
+    try:
+        enable_ansi_escape_sequences()
+        stream_handler.setFormatter(ColorFormatter(fmt))
+    except Exception:
+        stream_handler.setFormatter(logging.Formatter(fmt))
+
     logging.basicConfig(
         level=logging.INFO,
-        format=fmt,
-        handlers=[logging.StreamHandler(), file_handler],
+        handlers=[stream_handler, file_handler],
     )
     logging.getLogger(__name__).info("Logging to %s", log_file)
     parser = argparse.ArgumentParser(description="AxonAI Dashboard")
@@ -131,8 +197,8 @@ def main():
                         help="Dashboard host")
     parser.add_argument("--port", type=int, default=8000,
                         help="Dashboard port")
-    parser.add_argument("--symbol", type=str, default="EURUSD",
-                        help="Symbol to trade")
+    parser.add_argument("--symbol", type=str, default="EURUSD,GBPUSD,USDJPY,AUDUSD,XAUUSD",
+                        help="Comma-separated list of symbols to trade (default: EURUSD,GBPUSD,USDJPY,AUDUSD,XAUUSD)")
     parser.add_argument("--paper", action="store_true",
                         help="Paper-trade mode: simulate fills internally, never send orders to MT5. "
                              "Safe for testing; dry-run (default) still places real demo orders.")
@@ -200,8 +266,13 @@ def main():
 
     else:
         # Windows / Direct mode: start daemon + dashboard
+        # Parse comma-separated symbols
+        symbols = [s.strip().upper() for s in args.symbol.split(",") if s.strip()]
+        if not symbols:
+            symbols = ["EURUSD"]
+
         print(f"  Dashboard: http://{args.host}:{args.port}")
-        print(f"  Symbol: {args.symbol}")
+        print(f"  Symbols: {', '.join(symbols)}")
         print()
 
         # CRITICAL: Set feed terminal path BEFORE importing daemon/api_server
@@ -222,9 +293,8 @@ def main():
         from axonai.realtime.api_server import start_dashboard
         server = start_dashboard(host=args.host, port=args.port)
 
-        # Import and start daemon
+        # Import daemon class
         from axonai.realtime.daemon import AxonDaemon
-        config["symbol"] = args.symbol
         config["realtime_dry_run"] = not args.live
         # Paper-trade: simulate fills (no MT5 send). Default dry-run still sends real demo orders.
         config["paper_trade"] = args.paper
@@ -247,17 +317,66 @@ def main():
             config["realtime_execution_bridge_host"] = "127.0.0.1"
             config["realtime_execution_bridge_port"] = bridge_port
 
-        daemon = AxonDaemon(symbol=args.symbol, config=config)
-        daemon.start()
+        # ── Multicurrency: spin up one daemon thread + one calibrator per symbol ──
+        import threading
 
-        print("  Dashboard + Daemon running. Press Ctrl+C to stop.")
+        daemons = {}       # symbol -> AxonDaemon
+        daemon_threads = {}  # symbol -> Thread
+        calib_procs = []     # list of calibrator subprocess handles
+
+        for sym in symbols:
+            sym_config = config.copy()
+            sym_config["symbol"] = sym
+            sym_config["mt5_symbol"] = sym
+
+            daemon = AxonDaemon(symbol=sym, config=sym_config)
+            daemons[sym] = daemon
+
+            # Register with dashboard so it can route data per symbol
+            if server:
+                server.register_daemon(sym, daemon)
+
+            # Start daemon.start() in a background thread (it blocks internally)
+            t = threading.Thread(
+                target=daemon.start,
+                name=f"daemon-{sym}",
+                daemon=True,
+            )
+            daemon_threads[sym] = t
+
+        # Start all daemon threads
+        for sym, t in daemon_threads.items():
+            print(f"  [+] Starting daemon thread for {sym}...")
+            t.start()
+            # Small stagger to avoid MT5 API contention on startup
+            import time
+            time.sleep(2)
+
+        # Start one calibrator subprocess per symbol
+        for sym in symbols:
+            cp = start_calibrator_background(sym)
+            if cp:
+                calib_procs.append(cp)
+
+        print()
+        print(f"  Dashboard + {len(daemons)} Daemon(s) running. Press Ctrl+C to stop.")
         try:
             import time
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
             print("\n  Stopping...")
-            daemon.stop()
+            for sym, d in daemons.items():
+                print(f"  Stopping daemon {sym}...")
+                d.stop()
+            for cp in calib_procs:
+                if cp.poll() is None:
+                    print("  Stopping calibrator...")
+                    cp.terminate()
+                    try:
+                        cp.wait(timeout=5)
+                    except Exception:
+                        cp.kill()
             if bridge_proc is not None and bridge_proc.poll() is None:
                 print("  Stopping execution bridge...")
                 bridge_proc.terminate()

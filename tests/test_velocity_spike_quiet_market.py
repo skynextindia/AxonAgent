@@ -183,19 +183,10 @@ class TestVelocitySpikeQuietMarket:
 
         decision = fsm.evaluate(price, now, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
 
-        # Should transition to RETEST_WAIT
-        assert fsm._current_state == STATE_RETEST_WAIT
-        assert decision.is_valid_entry is False
-
-        # 4. Retest at zone -> TRIGGERED
-        price = 1.09998  # Below the 1.10000 anomaly price (reversal SELL retest from below)
-        velocity = self._make_velocity(decay_ratio=0.3, tick_rate_10s=5.0, tick_rate_300s=10.0, vol_pips=3.0)
-        decision = fsm.evaluate(price, now, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
-
+        # Should transition to TRIGGERED
         assert fsm._current_state == STATE_TRIGGERED
         assert decision.is_valid_entry is True
         assert decision.direction == "SELL"
-        assert decision.state == STATE_TRIGGERED
 
     def test_full_cycle_idle_to_triggered_in_quiet_market(self):
         """Full state machine cycle in quiet market: IDLE → ANOMALY → ARMING → RETEST_WAIT → TRIGGERED."""
@@ -240,13 +231,7 @@ class TestVelocitySpikeQuietMarket:
         displacement = self._make_displacement(DISPLACEMENT_IMPULSE, net_displacement_pips=-10.0)
 
         decision = fsm.evaluate(price, base_time, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
-        assert fsm._current_state == STATE_RETEST_WAIT
-        assert decision.is_valid_entry is False
-
-        # === TICK 5: Retest at zone (confirm reversal) ===
-        price = 1.10004
-        velocity = self._make_velocity(decay_ratio=0.3, tick_rate_10s=4.0, tick_rate_300s=10.0, vol_pips=3.0)
-        decision = fsm.evaluate(price, base_time, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
+        assert fsm._current_state == STATE_TRIGGERED
         assert fsm._current_state == STATE_TRIGGERED
         assert decision.is_valid_entry is True
         assert decision.direction == "SELL"

@@ -44,23 +44,54 @@ def convert_numpy(obj: Any) -> Any:
 class DashboardServer:
     """Manages the FastAPI lifecycle and WebSocket broadcasts."""
 
+    # Default empty history template for per-symbol caches
+    @staticmethod
+    def _new_symbol_history():
+        return {
+            "tick": None,
+            "regime": None,
+            "levels": None,
+            "candles": {},
+            "events": [],
+            "decision": None,
+            "trigger_metrics": None,
+            "mode": None,
+            "trade_state": None,
+            "location_context": None,
+        }
+
     def __init__(self, host: str = "127.0.0.1", port: int = 8000):
         self.host = host
         self.port = port
         self.app = FastAPI(title="AxonAI Real-Time Signaling Dashboard")
         self.active_connections: Set[WebSocket] = set()
-        self._lock = threading.Lock()
+        self.client_subscriptions: Dict[WebSocket, str] = {}
+        self._lock = threading.RLock()
+        self._symbol_locks: Dict[str, threading.Lock] = {}
 
+        # Multicurrency: dict of symbol -> AxonDaemon
+        self.daemons: Dict[str, Any] = {}
+        # Legacy single-daemon reference (for backward compatibility)
         self.daemon = None
         self.fallback_config = DEFAULT_CONFIG.copy()
+
+        # Active symbols list (populated by register_daemon)
+        self.active_symbols: list = []
 
         # CHANGE 10A: Broadcast throttle
         self._last_broadcast_ms: float = 0.0
         self._broadcast_interval_ms: float = DEFAULT_CONFIG.get(
-            "dashboard_broadcast_interval_ms", 125.0
+            "dashboard_broadcast_interval_ms", 32.0
         )
 
-        # In-memory history for hydrating newly connected clients instantly
+        # Per-symbol history caches for hydrating newly connected clients instantly
+        self.symbol_history: Dict[str, Dict[str, Any]] = {}
+        
+        # Per-symbol positions and orders caches to construct merged account state
+        self.symbol_positions: Dict[str, list] = {}
+        self.symbol_orders: Dict[str, list] = {}
+
+        # Global (non-symbol-specific) history
         self.history: Dict[str, Any] = {
             "tick": None,
             "regime": None,
@@ -80,6 +111,35 @@ class DashboardServer:
         self._setup_routes()
         self._load_session()
 
+    def _get_symbol_lock(self, symbol: str) -> threading.Lock:
+        """Retrieve or create a thread lock specific to a symbol to reduce contention."""
+        if not symbol:
+            return self._lock
+        sym_clean = symbol.replace("=X", "").replace("=x", "").upper()
+        with self._lock:
+            if sym_clean not in self._symbol_locks:
+                self._symbol_locks[sym_clean] = threading.Lock()
+            return self._symbol_locks[sym_clean]
+
+    def register_daemon(self, symbol: str, daemon: Any):
+        """Register a daemon instance for multicurrency support."""
+        with self._lock:
+            self.daemons[symbol] = daemon
+            if symbol not in self.active_symbols:
+                self.active_symbols.append(symbol)
+            if symbol not in self.symbol_history:
+                self.symbol_history[symbol] = self._new_symbol_history()
+            
+            # Keep legacy self.daemon pointing to the first one for backwards compatibility
+            if self.daemon is None:
+                self.daemon = daemon
+
+        # Broadcast the updated active symbols list to all active connections
+        self.broadcast({
+            "type": "active_symbols",
+            "symbols": self.active_symbols
+        })
+
     def _setup_routes(self):
         """Bind endpoints to FastAPI app."""
         
@@ -93,28 +153,52 @@ class DashboardServer:
                 }
 
         @self.app.get("/config")
-        def get_config():
+        def get_config(symbol: str = None):
             with self._lock:
-                if self.daemon:
-                    return {"status": "success", "config": self.daemon.config}
+                target_daemon = None
+                if symbol:
+                    # Clean symbol (e.g. EURUSD=X to EURUSD)
+                    s_clean = symbol.replace("=X", "").replace("=x", "").upper()
+                    for k, d in self.daemons.items():
+                        if s_clean in k.upper():
+                            target_daemon = d
+                            break
+                            
+                if not target_daemon and self.daemon:
+                    target_daemon = self.daemon
+                    
+                if target_daemon:
+                    return {"status": "success", "config": target_daemon.config}
                 return {"status": "success", "config": self.fallback_config}
 
         @self.app.post("/config")
-        def update_config(new_config: dict):
+        def update_config(new_config: dict, symbol: str = None):
             with self._lock:
-                if self.daemon:
+                target_daemon = None
+                if symbol:
+                    # Clean symbol (e.g. EURUSD=X to EURUSD)
+                    s_clean = symbol.replace("=X", "").replace("=x", "").upper()
+                    for k, d in self.daemons.items():
+                        if s_clean in k.upper():
+                            target_daemon = d
+                            break
+                            
+                if not target_daemon and self.daemon:
+                    target_daemon = self.daemon
+                    
+                if target_daemon:
                     # Update config in daemon and dependent modules!
-                    self.daemon.config.update(new_config)
+                    target_daemon.config.update(new_config)
                     # Expose configuration update to tick_engine, live_state, etc.
-                    if hasattr(self.daemon, "tick_engine") and self.daemon.tick_engine:
-                        self.daemon.tick_engine.poll_interval_ms = int(self.daemon.config.get("tick_poll_interval_ms", 100))
-                    if hasattr(self.daemon, "reversal_model") and self.daemon.reversal_model:
-                        self.daemon.reversal_model.config.update(new_config)
-                    if hasattr(self.daemon, "live_state") and self.daemon.live_state:
-                        self.daemon.live_state.config.update(new_config)
-                    if hasattr(self.daemon, "live_evidence") and self.daemon.live_evidence:
-                        self.daemon.live_evidence.config.update(new_config)
-                    return {"status": "success", "config": self.daemon.config}
+                    if hasattr(target_daemon, "tick_engine") and target_daemon.tick_engine:
+                        target_daemon.tick_engine.poll_interval_ms = int(target_daemon.config.get("tick_poll_interval_ms", 100))
+                    if hasattr(target_daemon, "reversal_model") and target_daemon.reversal_model:
+                        target_daemon.reversal_model.config.update(new_config)
+                    if hasattr(target_daemon, "live_state") and target_daemon.live_state:
+                        target_daemon.live_state.config.update(new_config)
+                    if hasattr(target_daemon, "live_evidence") and target_daemon.live_evidence:
+                        target_daemon.live_evidence.config.update(new_config)
+                    return {"status": "success", "config": target_daemon.config}
                 
                 self.fallback_config.update(new_config)
                 return {"status": "success", "config": self.fallback_config}
@@ -261,7 +345,7 @@ class DashboardServer:
                     return "Rollover"
 
             def compute_drawdown_peak(symbol, direction, entry_price, exit_price, entry_dt, exit_dt, outcome, reason, entry_signal=None):
-                is_jpy = "JPY" in symbol.upper()
+                is_jpy = "JPY" in symbol.upper() or "XAU" in symbol.upper()
                 pip_multiplier = 0.01 if is_jpy else 0.0001
                 
                 if direction.upper() == "BUY":
@@ -503,11 +587,20 @@ class DashboardServer:
             await websocket.accept()
             with self._lock:
                 self.active_connections.add(websocket)
-            logger.info("Dashboard WS: client connected. Total: %d", len(self.active_connections))
+                # Default subscription to the first active symbol, or EURUSD
+                default_sym = self.active_symbols[0] if self.active_symbols else "EURUSD"
+                self.client_subscriptions[websocket] = default_sym
+            logger.info("Dashboard WS: client connected. Total: %d, Subscribed: %s", len(self.active_connections), default_sym)
             
-            # Hydrate client immediately with latest known state
+            # Send initial active symbols list
+            await websocket.send_json({
+                "type": "active_symbols",
+                "symbols": self.active_symbols
+            })
+            
+            # Hydrate client immediately with latest known state for their subscribed symbol
             try:
-                await self._hydrate_client(websocket)
+                await self._hydrate_client(websocket, default_sym)
             except Exception as e:
                 logger.warning("Dashboard WS: failed to hydrate client: %s", e)
 
@@ -524,35 +617,47 @@ class DashboardServer:
                                 })
                             elif msg_type == "switch_pair":
                                 pair = data.get("pair")
-                                mt5_symbol = data.get("mt5")
+                                mt5_symbol = data.get("mt5") or pair
+                                
+                                # Clean the requested symbol
+                                p_clean = mt5_symbol.replace("=X", "").replace("=x", "").upper()
+                                
                                 is_active = False
+                                matched_sym = None
+                                
                                 with self._lock:
-                                    if self.daemon:
-                                        d_clean = self.daemon.mt5_symbol.replace("=X", "").replace("=x", "").upper()
-                                        p_clean = mt5_symbol.replace("=X", "").replace("=x", "").upper() if mt5_symbol else ""
-                                        yf_clean = self.daemon.yf_symbol.replace("=X", "").replace("=x", "").upper()
-                                        if d_clean in p_clean or p_clean in d_clean or yf_clean in p_clean or p_clean in yf_clean:
+                                    # Find matching active symbol
+                                    for sym in self.active_symbols:
+                                        s_clean = sym.replace("=X", "").replace("=x", "").upper()
+                                        if s_clean in p_clean or p_clean in s_clean:
                                             is_active = True
-                                    elif self.bridge_client and self.bridge_client.is_connected():
+                                            matched_sym = sym
+                                            break
+                                            
+                                    if is_active and matched_sym:
+                                        self.client_subscriptions[websocket] = matched_sym
+                                        
+                                    elif getattr(self, "bridge_client", None) and self.bridge_client.is_connected():
                                         # Bridge mode — forward switch to the MT5 bridge
                                         is_active = True
                                         self.bridge_client.send_message({
                                             "type": "switch_pair",
-                                            "symbol": mt5_symbol or pair,
-                                            "mt5": mt5_symbol or pair,
+                                            "symbol": mt5_symbol,
+                                            "mt5": mt5_symbol,
                                         })
-                                        logger.info(f"Bridge: forwarded switch_pair to {mt5_symbol or pair}")
+                                        logger.info(f"Bridge: forwarded switch_pair to {mt5_symbol}")
                                 
                                 if is_active:
-                                    logger.info("Dashboard WS: client switched back to active symbol, re-hydrating")
-                                    await self._hydrate_client(websocket)
+                                    logger.info(f"Dashboard WS: client switched back to {matched_sym or mt5_symbol}, re-hydrating")
+                                    if matched_sym:
+                                        await self._hydrate_client(websocket, matched_sym)
                                 else:
-                                    daemon_sym = self.daemon.yf_symbol if self.daemon else "EURUSD=X"
+                                    active_str = ", ".join(self.active_symbols) if self.active_symbols else "None"
                                     await websocket.send_json({
                                         "type": "agent",
                                         "agent_name": "SYSTEM",
                                         "status": "active",
-                                        "message": f"[WARNING] The trading daemon is currently locked to {daemon_sym}. Live telemetry and cognitive execution are active for that pair only. To monitor or trade {pair}, restart the daemon using: python cli/main.py live --ticker \"{pair}\"",
+                                        "message": f"[WARNING] The trading daemon is currently locked to: {active_str}. Live telemetry and cognitive execution are active for those pairs only.",
                                         "tool_calls": [],
                                         "timestamp": datetime.now().strftime("%H:%M:%S")
                                     })
@@ -565,39 +670,47 @@ class DashboardServer:
             except WebSocketDisconnect:
                 with self._lock:
                     self.active_connections.discard(websocket)
+                    self.client_subscriptions.pop(websocket, None)
                 logger.info("Dashboard WS: client disconnected. Total: %d", len(self.active_connections))
             except Exception as e:
                 with self._lock:
                     self.active_connections.discard(websocket)
+                    self.client_subscriptions.pop(websocket, None)
                 logger.debug("Dashboard WS: connection error: %s", e)
 
-    async def _hydrate_client(self, websocket: WebSocket):
+    async def _hydrate_client(self, websocket: WebSocket, symbol: str = None):
         """Send all cached state history to a newly connected client."""
         # 1. Thread-safely update and copy dynamic state cache
         with self._lock:
+            # Fallback for old behaviour or global messages
+            hist_ref = self.symbol_history.get(symbol) if symbol else self.history
+            if not hist_ref and symbol:
+                 hist_ref = self.history
+                 
             # Update candles dynamically from the active daemon if registered
-            if hasattr(self, "daemon") and self.daemon:
+            daemon = self.daemons.get(symbol) if symbol else self.daemon
+            if daemon:
                 for tf in ["M15", "H1", "H4"]:
                     try:
-                        self.history["candles"][tf] = self.daemon._get_candles_payload(tf)
+                        hist_ref["candles"][tf] = daemon._get_candles_payload(tf)
                     except Exception as e:
                         logger.warning("Dashboard WS: failed to update active candle for %s: %s", tf, e)
 
             # Copy cached states to local variables under lock
-            account_data = self.history["account"]
-            logger.info("Hydrating client: account_data=%s", account_data if account_data else "None")
-            tick_data = self.history["tick"]
-            regime_data = self.history["regime"]
-            levels_data = self.history["levels"]
-            candles_data = list(self.history["candles"].items())
-            events_data = list(self.history["events"])
-            decision_data = self.history["decision"]
-            calendar_data = self.history["calendar_data"]
-            mode_data = self.history["mode"]
-            trigger_metrics_data = self.history.get("trigger_metrics")
+            account_data = self.history["account"]  # Global
+            calendar_data = self.history["calendar_data"] # Global
+            
+            tick_data = hist_ref.get("tick")
+            regime_data = hist_ref.get("regime")
+            levels_data = hist_ref.get("levels")
+            candles_data = list(hist_ref.get("candles", {}).items())
+            events_data = list(hist_ref.get("events", []))
+            decision_data = hist_ref.get("decision")
+            mode_data = hist_ref.get("mode")
+            trigger_metrics_data = hist_ref.get("trigger_metrics")
             # Lifecycle fields
-            trade_state_data = self.history.get("trade_state")
-            location_context_data = self.history.get("location_context")
+            trade_state_data = hist_ref.get("trade_state")
+            location_context_data = hist_ref.get("location_context")
 
         # 2. Perform all asynchronous sends safely OUTSIDE the lock block!
         # 0. Execution mode badge (send first so the header reflects mode immediately)
@@ -638,7 +751,7 @@ class DashboardServer:
             await websocket.send_json(calendar_data)
 
     def broadcast(self, message: Dict[str, Any]):
-        """Thread-safe queueing of message broadcast across all websockets."""
+        """Thread-safe queueing of message broadcast across websockets based on symbol routing."""
         message = convert_numpy(message)
         msg_type = message.get("type")
         if not msg_type:
@@ -652,10 +765,44 @@ class DashboardServer:
             if now_ms - self._last_broadcast_ms < self._broadcast_interval_ms:
                 return  # drop tick, trading logic unaffected
             self._last_broadcast_ms = now_ms
+            
+        # Determine symbol routing
+        sym = message.get("symbol") or message.get("mt5_symbol")
+        
+        # Bridge payload cleanup if necessary
+        if sym:
+            sym = sym.replace("=X", "").replace("=x", "").upper()
+          # If no symbol specified, broadcast to all
+        is_global = msg_type in ["account", "news_data", "system_log", "tick"] or not sym
 
-        with self._lock:
-            # Update cache history
+        # Choose history dict and corresponding lock to update
+        if is_global:
+            hist_ref = self.history
+            lock = self._lock
+        else:
+            with self._lock:
+                hist_ref = self.symbol_history.setdefault(sym, self._new_symbol_history())
+            lock = self._get_symbol_lock(sym)
+
+        with lock:
             save_needed = False
+            # Merge account details (positions/orders) globally to prevent dashboard flickering
+            if msg_type == "account":
+                sym_key = (sym or "").replace("=X", "").replace("=x", "").upper()
+                if sym_key:
+                    self.symbol_positions[sym_key] = message.get("positions", [])
+                    self.symbol_orders[sym_key] = message.get("pending_orders", [])
+                    
+                    merged_positions = []
+                    merged_orders = []
+                    for s_k, plist in list(self.symbol_positions.items()):
+                        merged_positions.extend(plist)
+                    for s_k, olist in list(self.symbol_orders.items()):
+                        merged_orders.extend(olist)
+                        
+                    message["positions"] = merged_positions
+                    message["pending_orders"] = merged_orders
+            
             # Broadcast cache update: batch-update scalar fields directly
             if msg_type in [
                 "tick",
@@ -668,20 +815,20 @@ class DashboardServer:
                 "trade_state",
                 "location_context",
             ]:
-                self.history[msg_type] = message
+                hist_ref[msg_type] = message
                 if msg_type == "decision":
                     save_needed = True
             elif msg_type == "news_data":
-                # Calendar-only payload — store under the correct key
+                # Calendar-only payload ?" store globally
                 self.history["calendar_data"] = message
             elif msg_type in ["candle", "candles"]:
                 tf = message.get("timeframe")
                 if tf:
-                    self.history["candles"][tf] = message
+                    hist_ref.setdefault("candles", {})[tf] = message
             elif msg_type == "event":
-                self.history["events"].append(message)
-                if len(self.history["events"]) > 30:
-                    self.history["events"].pop(0)
+                hist_ref.setdefault("events", []).append(message)
+                if len(hist_ref["events"]) > 30:
+                    hist_ref["events"].pop(0)
                 save_needed = True
 
             if save_needed:
@@ -691,22 +838,26 @@ class DashboardServer:
                 if msg_type == "account":
                     import logging
                     logger = logging.getLogger(__name__)
-                    logger.warning("broadcast(%s): no active WebSocket connections! Loop=%s", msg_type, bool(self._loop))
+                    logger.warning("broadcast(%s): no active WebSocket connections!", msg_type)
                 return
 
         # Uvicorn and FastAPI run inside an asyncio event loop.
         # Since daemon operates in a regular thread, we bridge the call to the loop.
         if hasattr(self, "_loop") and self._loop:
-            asyncio.run_coroutine_threadsafe(self._async_broadcast(message), self._loop)
+            asyncio.run_coroutine_threadsafe(self._async_broadcast(message, sym, is_global), self._loop)
         elif msg_type == "account":
             import logging
             logger = logging.getLogger(__name__)
             logger.warning("broadcast(%s): event loop not available!", msg_type)
 
-    async def _async_broadcast(self, message: Dict[str, Any]):
-        """Asynchronously send message to all sockets."""
-        with self._lock:
-            targets = list(self.active_connections)
+    async def _async_broadcast(self, message: Dict[str, Any], symbol: str, is_global: bool):
+        """Asynchronously send message to sockets, routing by subscription."""
+        lock = self._get_symbol_lock(symbol) if not is_global else self._lock
+        with lock:
+            targets = []
+            for ws in self.active_connections:
+                if is_global or self.client_subscriptions.get(ws) == symbol:
+                    targets.append(ws)
         
         for ws in targets:
             try:
@@ -714,6 +865,7 @@ class DashboardServer:
             except Exception:
                 with self._lock:
                     self.active_connections.discard(ws)
+                    self.client_subscriptions.pop(ws, None)
 
     def _save_session(self):
         """Save event history, latest decision, and levels state to disk."""

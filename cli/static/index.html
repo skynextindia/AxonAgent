@@ -70,17 +70,7 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
 <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;border-bottom:1px solid var(--border);padding:5px 4px;margin-bottom:6px;">
   <span style="font-size:9px;color:var(--text-dim);font-weight:700;letter-spacing:.1em;white-space:nowrap;flex-shrink:0;">PAIRS &#8250;</span>
   <div id="pair-navigator">
-    <button class="pair-btn active" data-pair="EURUSD=X" data-mt5="EURUSD">EUR/USD</button>
-    <button class="pair-btn" data-pair="GBPUSD=X" data-mt5="GBPUSD">GBP/USD</button>
-    <button class="pair-btn" data-pair="USDJPY=X" data-mt5="USDJPY">USD/JPY</button>
-    <button class="pair-btn" data-pair="USDCHF=X" data-mt5="USDCHF">USD/CHF</button>
-    <button class="pair-btn" data-pair="AUDUSD=X" data-mt5="AUDUSD">AUD/USD</button>
-    <button class="pair-btn" data-pair="NZDUSD=X" data-mt5="NZDUSD">NZD/USD</button>
-    <button class="pair-btn" data-pair="USDCAD=X" data-mt5="USDCAD">USD/CAD</button>
-    <button class="pair-btn" data-pair="EURGBP=X" data-mt5="EURGBP">EUR/GBP</button>
-    <button class="pair-btn" data-pair="EURJPY=X" data-mt5="EURJPY">EUR/JPY</button>
-    <button class="pair-btn" data-pair="GBPJPY=X" data-mt5="GBPJPY">GBP/JPY</button>
-    <button class="pair-btn" data-pair="XAUUSD=X" data-mt5="XAUUSD">XAU/USD</button>
+    <span style="font-size:9px;color:var(--text-dim);font-style:italic;">Awaiting symbols...</span>
   </div>
   <div style="flex:1;"></div>
   <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><span style="font-size:9px;color:var(--text-dim);">ACTIVE</span><span id="header-ticker" style="font-size:13px;font-weight:700;color:var(--cyan);letter-spacing:.05em;">EURUSD</span></div>
@@ -142,9 +132,10 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
 <!-- RIGHT COLUMN -->
 <div style="flex:1;display:flex;flex-direction:column;gap:3px;min-height:0;overflow-y:auto;padding-right:4px;">
   <!-- TOP STATS ROW -->
-  <div style="display:grid;grid-template-columns:2fr 2fr 2fr 4fr 2fr;gap:3px;flex-shrink:0;">
+  <div style="display:grid;grid-template-columns:2fr 2fr 2fr 2fr 4fr 2fr;gap:3px;flex-shrink:0;">
     <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;border-top:3px solid var(--purple);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">BELIEF</span><div style="display:flex;align-items:flex-end;gap:6px;margin-top:2px;"><span id="belief-val" style="font-size:16px;font-weight:900;color:#fff;line-height:1;">0.00</span><div style="flex:1;height:4px;background:#0d0d0f;border:1px solid #1a1a1a;overflow:hidden;"><div id="belief-bar" style="height:100%;background:linear-gradient(90deg,var(--purple),var(--cyan),var(--green));width:0%;"></div></div></div></div>
     <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;border-top:3px solid var(--cyan);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">REGIME</span><span id="regime-type" style="font-size:13px;font-weight:900;color:var(--cyan);text-transform:uppercase;letter-spacing:.04em;">UNKNOWN</span><span id="regime-vol" style="font-size:6.5px;color:var(--text-dim);margin-top:1px;font-weight:700;">VOL: MED | ATR: 0.0</span></div>
+    <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;border-top:3px solid var(--purple);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">ATR_MATH</span><span id="atr-math-val" style="font-size:13px;font-weight:900;color:var(--purple);letter-spacing:.04em;">0.00000</span><span id="atr-math-sltp" style="font-size:6.5px;color:var(--text-dim);margin-top:1px;font-weight:700;">SL: 0p | TP: 0p</span></div>
     <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;border-top:3px solid var(--green);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">MACRO</span><span id="macro-bias" style="font-size:13px;font-weight:900;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;">WAIT</span><span id="macro-lvl" style="font-size:6.5px;color:var(--text-dim);margin-top:1px;font-weight:700;">LVL: 0.00000</span><span id="macro-conf" style="font-size:6.5px;color:var(--text-dim);font-weight:700;">--%</span></div>
     <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;border-top:3px solid var(--purple);background:#040406;"><div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">SESSIONS</span><span id="market-status-badge" style="font-size:6.5px;color:var(--green);background:rgba(0,255,102,.1);border:1px solid rgba(0,255,102,.2);padding:1px 6px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;">OPEN</span></div><div id="session-stack" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4px;margin-top:2px;">
       <div data-sess="Sydney" style="display:flex;flex-direction:column;"><span style="font-size:6.5px;font-weight:700;color:#555;letter-spacing:.04em;">SYD</span><span class="sess-time" style="font-size:5.5px;color:#333;">22-07</span><div style="height:2px;background:#111;border:1px solid #222;margin-top:1px;"><div class="sess-bar" style="height:100%;width:0%;transition:width 1s linear;background:#222;"></div></div></div>
@@ -486,6 +477,16 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
         <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:4px 6px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:6px;">Correct Rule A</span><input type="checkbox" name="realtime_correct_rule_a_direction" style="accent-color:var(--purple);"></div>
         <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:4px 6px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:6px;">Bypass Cooldown</span><input type="checkbox" name="realtime_cooldown_bypass_better_peak" style="accent-color:var(--purple);"></div>
       </div>
+      <div style="display:grid;grid-template-columns:1fr;gap:4px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:4px 6px;border:1px solid #1f1f2e;">
+          <span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:6px;">Entry Execution Style</span>
+          <select name="realtime_entry_style" style="background:#0f0f1a;color:#fff;border:1px solid #1f1f2e;font-size:6px;padding:2px;font-family:inherit;outline:none;border-radius:2px;cursor:pointer;">
+            <option value="limit">Pending Limit Order (Retest Zone)</option>
+            <option value="instant">Instant Sweep Entry (Market on Sweep)</option>
+            <option value="confirmed">Confirmed Reversal (Market on Peak Triggered)</option>
+          </select>
+        </div>
+      </div>
       <button type="submit" style="width:100%;background:rgba(157,0,255,.2);color:var(--purple);border:1px solid var(--purple);font-weight:900;text-transform:uppercase;padding:6px;font-size:8px;font-family:inherit;cursor:pointer;letter-spacing:.08em;margin-top:4px;">APPLY CHANGES</button>
     </form>
   </div>
@@ -555,11 +556,38 @@ class DashboardController {
   }
   updateSessionTimers() {
     const now=new Date(),h=now.getUTCHours(),m=now.getUTCMinutes(),s=now.getUTCSeconds(),t=h+m/60+s/3600;
+    const y=now.getUTCFullYear();
+    
+    // US DST: 2nd Sunday in March to 1st Sunday in Nov
+    const dstStartUs = new Date(Date.UTC(y, 2, 8, 7));
+    while(dstStartUs.getUTCDay() !== 0) dstStartUs.setUTCDate(dstStartUs.getUTCDate() + 1);
+    const dstEndUs = new Date(Date.UTC(y, 10, 1, 7));
+    while(dstEndUs.getUTCDay() !== 0) dstEndUs.setUTCDate(dstEndUs.getUTCDate() + 1);
+    const isUsDst = now >= dstStartUs && now < dstEndUs;
+    
+    // EU DST: last Sunday in March to last Sunday in Oct
+    const dstStartEu = new Date(Date.UTC(y, 2, 31, 1));
+    while(dstStartEu.getUTCDay() !== 0) dstStartEu.setUTCDate(dstStartEu.getUTCDate() - 1);
+    const dstEndEu = new Date(Date.UTC(y, 9, 31, 1));
+    while(dstEndEu.getUTCDay() !== 0) dstEndEu.setUTCDate(dstEndEu.getUTCDate() - 1);
+    const isEuDst = now >= dstStartEu && now < dstEndEu;
+    
+    // Sydney DST (AEDT): 1st Sunday in Oct to 1st Sunday in April
+    const dstEndAu = new Date(Date.UTC(y, 3, 1, 16));
+    while(dstEndAu.getUTCDay() !== 0) dstEndAu.setUTCDate(dstEndAu.getUTCDate() + 1);
+    const dstStartAu = new Date(Date.UTC(y, 9, 1, 16));
+    while(dstStartAu.getUTCDay() !== 0) dstStartAu.setUTCDate(dstStartAu.getUTCDate() + 1);
+    const isAuDst = now < dstEndAu || now >= dstStartAu;
+    
+    const ldnS = isEuDst ? 7 : 8, ldnE = isEuDst ? 15 : 16;
+    const nyS = isUsDst ? 12 : 13, nyE = isUsDst ? 20 : 21;
+    const sydS = isAuDst ? 21 : 22, sydE = isAuDst ? 6 : 7;
+
     const sess=[
-      {id:"Sydney",nm:"SYD",s:22,e:7,el:document.querySelector('[data-sess="Sydney"]')},
+      {id:"Sydney",nm:"SYD",s:sydS,e:sydE,el:document.querySelector('[data-sess="Sydney"]')},
       {id:"Tokyo",nm:"TYO",s:0,e:9,el:document.querySelector('[data-sess="Tokyo"]')},
-      {id:"London",nm:"LDN",s:8,e:16,el:document.querySelector('[data-sess="London"]')},
-      {id:"New York",nm:"NYC",s:13,e:22,el:document.querySelector('[data-sess="New York"]')}
+      {id:"London",nm:"LDN",s:ldnS,e:ldnE,el:document.querySelector('[data-sess="London"]')},
+      {id:"New York",nm:"NYC",s:nyS,e:nyE,el:document.querySelector('[data-sess="New York"]')}
     ];
     let anyOpen=false;
     sess.forEach(x=>{
@@ -575,6 +603,9 @@ class DashboardController {
         else{r=x.s-t;if(r<0)r+=24;}
       }
       const tel=x.el.querySelector("span"),tmel=x.el.querySelector(".sess-time"),bel=x.el.querySelector(".sess-bar");
+      if(tmel) {
+        tmel.textContent = String(x.s).padStart(2, "0") + "-" + String(x.e).padStart(2, "0");
+      }
       const hrs=Math.floor(r),mins=Math.floor((r-hrs)*60);
       const fs=hrs+"H "+String(mins).padStart(2,"0")+"M";
       if(!this.sessionHeatmaps) this.sessionHeatmaps={};
@@ -631,18 +662,8 @@ class DashboardController {
     this.tickActivityStrip = g("tick-activity-strip");
     const clearBtn = g("clear-console-btn-intel");
     if(clearBtn) clearBtn.onclick = ()=>{ this.consoleBody.innerHTML = '<div style="color:rgba(0,240,255,.6);border-bottom:1px solid #1a1a24;padding-bottom:4px;font-weight:700;text-transform:uppercase;font-size:7px;">[STREAM CLEARED]</div>'; };
-    // Pair buttons
-    document.querySelectorAll(".pair-btn").forEach(b=>{b.onclick=()=>{
-      document.querySelectorAll(".pair-btn").forEach(x=>x.classList.remove("active"));
-      b.classList.add("active"); this.activeMt5Symbol = b.dataset.mt5;
-      const ticker = g("header-ticker"); if(ticker) ticker.textContent = b.textContent.replace("/","");
-      this.pipMult = (b.dataset.pair.includes("JPY")||b.dataset.pair.includes("XAU")) ? 0.01 : 0.0001;
-      this.m15Candles = []; this.h1Candles = []; this.h4Candles = [];
-      this.timeframeLoaded = {M15:false,H1:false,H4:false};
-      this.currentBid = 0; this.currentAsk = 0;
-      if(this.chart) this.candleSeries.setData([]);
-      if(this.ws&&this.ws.readyState===WebSocket.OPEN) this.ws.send(JSON.stringify({type:"switch_pair",pair:b.dataset.pair,mt5:b.dataset.mt5}));
-    }});
+    
+    // Pair buttons (dynamically populated now, so we remove the static binding)
     // Timeframe buttons
     ["M15","H1","H4"].forEach(tf=>{const btn=g("tf-"+tf.toLowerCase()+"-btn");if(btn)btn.onclick=()=>this.selectTimeframe(tf);});
     // Settings modal
@@ -666,9 +687,9 @@ class DashboardController {
         form.querySelectorAll('input[type="checkbox"]').forEach(cb => {
           if (!data.hasOwnProperty(cb.name)) data[cb.name] = false;
         });
-        try{const r=await fetch("/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});const j=await r.json();if(j.status==="success"){modal.style.opacity="0";modal.style.pointerEvents="none";Object.keys(j.config).forEach(k=>{const inp=form.querySelector(`[name="${k}"]`);if(inp){inp.type==="checkbox"?inp.checked=!!j.config[k]:inp.value=j.config[k]}})}}catch(err){console.log(err)}
+        try{const r=await fetch("/config" + (this.activeMt5Symbol ? "?symbol=" + this.activeMt5Symbol : ""),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});const j=await r.json();if(j.status==="success"){modal.style.opacity="0";modal.style.pointerEvents="none";Object.keys(j.config).forEach(k=>{const inp=form.querySelector(`[name="${k}"]`);if(inp){inp.type==="checkbox"?inp.checked=!!j.config[k]:inp.value=j.config[k]}})}}catch(err){console.log(err)}
       };
-      (async()=>{try{const r=await fetch("/config");const j=await r.json();if(j.status==="success"&&j.config){const c=j.config;Object.keys(c).forEach(k=>{const inp=form.querySelector(`[name="${k}"]`);if(inp){if(inp.type==="checkbox")inp.checked=!!c[k];else inp.value=c[k]}})}}catch(e){}})();
+      (async()=>{try{const r=await fetch("/config" + (this.activeMt5Symbol ? "?symbol=" + this.activeMt5Symbol : ""));const j=await r.json();if(j.status==="success"&&j.config){const c=j.config;Object.keys(c).forEach(k=>{const inp=form.querySelector(`[name="${k}"]`);if(inp){if(inp.type==="checkbox")inp.checked=!!c[k];else inp.value=c[k]}})}}catch(e){}})();
     }
     // Tab buttons
     ["cockpit","intel","journal","system"].forEach(t=>{const btn=g("tab-"+t+"-btn");if(btn)btn.onclick=()=>this.switchTab(t);});
@@ -700,8 +721,11 @@ class DashboardController {
   }
   handleMessage(d) {
     if(d.type==="pong"){if(this.latency)this.latency.textContent=(Date.now()-d.timestamp)+"ms";return}
-    if(d.symbol&&d.symbol!==this.activeMt5Symbol){this.activeMt5Symbol=d.symbol;if(this.ticker)this.ticker.textContent=d.symbol.replace("m","")}
+    if(d.symbol&&!this.activeMt5Symbol){this.activeMt5Symbol=d.symbol;if(this.ticker)this.ticker.textContent=d.symbol.replace("m","")}
+    // Ignore incoming messages that are not global and do not match our currently selected symbol
+    if(d.symbol && d.symbol !== this.activeMt5Symbol && d.type !== "account" && d.type !== "event" && d.type !== "decision" && d.type !== "mode" && d.type !== "tick") return;
     switch(d.type){
+      case"active_symbols":this.handleActiveSymbols(d);break;
       case"tick":this.handleTick(d);break;case"regime":this.handleRegime(d);break;case"levels":this.handleLevels(d);break;
       case"account":this.handleAccount(d);break;case"candle":this.handleSingleCandle(d);break;case"candles":this.handleCandles(d);break;
       case"event":this.handleEvent(d);break;case"agent":this.handleAgent(d);break;case"decision":this.handleDecision(d);break;
@@ -715,6 +739,42 @@ class DashboardController {
     // Real-time journal: when a trade closes, refresh the journal live (no manual reload needed)
     if(d.type==="event"&&d.event_type==="TRADE_CLOSED"){this.onTradeClosed(d);}
   }
+  
+  handleActiveSymbols(d) {
+    if (!d.symbols || d.symbols.length === 0) return;
+    const nav = document.getElementById("pair-navigator");
+    if (!nav) return;
+    let html = "";
+    for (const sym of d.symbols) {
+      let label = sym;
+      if (sym.length === 6) label = sym.substring(0,3) + "/" + sym.substring(3,6);
+      let pair = sym + "=X";
+      const isActive = sym === this.activeMt5Symbol ? "active" : "";
+      html += `<button class="pair-btn ${isActive}" data-pair="${pair}" data-mt5="${sym}">${label}</button>`;
+    }
+    nav.innerHTML = html;
+    document.querySelectorAll("#pair-navigator .pair-btn").forEach(b=>{
+      b.onclick=()=>{
+        document.querySelectorAll("#pair-navigator .pair-btn").forEach(x=>x.classList.remove("active"));
+        b.classList.add("active"); 
+        this.activeMt5Symbol = b.dataset.mt5;
+        const ticker = document.getElementById("header-ticker"); 
+        if(ticker) ticker.textContent = b.textContent.replace("/","");
+        this.pipMult = (b.dataset.pair.includes("JPY")||b.dataset.pair.includes("XAU")) ? 0.01 : 0.0001;
+        this.m15Candles = []; this.h1Candles = []; this.h4Candles = [];
+        this.timeframeLoaded = {M15:false,H1:false,H4:false};
+        this.currentBid = 0; this.currentAsk = 0;
+        if(this.chart) this.candleSeries.setData([]);
+        if(this.ws&&this.ws.readyState===WebSocket.OPEN) 
+           this.ws.send(JSON.stringify({type:"switch_pair",pair:b.dataset.pair,mt5:b.dataset.mt5}));
+      }
+    });
+    if (!this.activeMt5Symbol || !d.symbols.includes(this.activeMt5Symbol)) {
+       const first = document.querySelector("#pair-navigator .pair-btn");
+       if (first) first.click();
+    }
+  }
+
   handleLatencyMetrics(d) {
     const upd = (id, val) => { const el = document.getElementById(id); if(el) el.textContent = val + "ms"; };
     if (d.reversal_ms !== undefined) upd("metrics-exec-rev", d.reversal_ms);
@@ -854,6 +914,31 @@ class DashboardController {
   updateMarkers(m) {if(typeof this.candleSeries.setMarkers==="function")this.candleSeries.setMarkers(m);}
   getMarkersForTimeframe(tf){const target=tf==="M15"?this.m15Candles:tf==="H1"?this.h1Candles:this.h4Candles;const active=new Set((target||[]).map(c=>Number(c.time)));const f=this.chartMarkers.filter(m=>(m.details&&m.details.timeframe||"M15")===tf).sort((a,b)=>a.time-b.time).slice(-100);const g={};for(const m of f){let t=m.time;if(tf==="M15")t=Math.floor(t/900)*900;else if(tf==="H1")t=Math.floor(t/3600)*3600;else if(tf==="H4")t=Math.floor(t/14400)*14400;if(!active.has(t))continue;const k=t+"_"+m.position;if(!g[k])g[k]={time:t,position:m.position,color:m.color,shape:m.shape,text:m.shortText||""}}return Object.values(g);}
   handleTick(d) {
+    if (d.symbol) {
+      if (!this.symbolLastPrices) this.symbolLastPrices = {};
+      const btn = document.querySelector(`#pair-navigator .pair-btn[data-mt5="${d.symbol}"]`);
+      if (btn) {
+        const prev = this.symbolLastPrices[d.symbol];
+        const current = Number(d.bid);
+        if (prev !== undefined) {
+          if (current > prev) {
+            btn.style.background = "rgba(0, 240, 102, 0.25)";
+            btn.style.color = "#00ff66";
+            btn.style.borderColor = "#00ff66";
+            btn.style.boxShadow = "0 0 10px rgba(0, 240, 102, 0.6)";
+            setTimeout(() => { btn.style.background = ""; btn.style.color = ""; btn.style.borderColor = ""; btn.style.boxShadow = ""; }, 150);
+          } else if (current < prev) {
+            btn.style.background = "rgba(255, 0, 85, 0.25)";
+            btn.style.color = "#ff0055";
+            btn.style.borderColor = "#ff0055";
+            btn.style.boxShadow = "0 0 10px rgba(255, 0, 85, 0.6)";
+            setTimeout(() => { btn.style.background = ""; btn.style.color = ""; btn.style.borderColor = ""; btn.style.boxShadow = ""; }, 150);
+          }
+        }
+        this.symbolLastPrices[d.symbol] = current;
+      }
+    }
+    if (d.symbol !== this.activeMt5Symbol) return;
     if(d.symbol&&this.ticker)this.ticker.textContent=d.symbol;
     const prevBid=this.currentBid;this.currentBid=d.bid;this.currentAsk=d.ask;
     const e=(id)=>document.getElementById(id);
@@ -1061,6 +1146,12 @@ class DashboardController {
     }
     if(this.regimeType)this.regimeType.textContent=d.dominant||"UNKNOWN";
     if(this.regimeVol)this.regimeVol.textContent="VOL: "+(d.volatility||"").toUpperCase()+" | ATR: "+this.sf(d.atr,5);
+    if(d.atr_h1!==undefined){
+        const am = document.getElementById("atr-math-val");
+        if(am) am.textContent = this.sf(d.atr_h1, d.symbol && (d.symbol.includes("JPY") || d.symbol.includes("XAU")) ? 2 : 5);
+        const as = document.getElementById("atr-math-sltp");
+        if(as) as.textContent = `SL: ${d.sl_pips}p | TP: ${d.tp_pips}p`;
+    }
     if(d.cooldown_remaining!==undefined&&this.cooldownVal){if(d.cooldown_remaining>0){this.cooldownVal.textContent=d.cooldown_remaining+"s";this.cooldownVal.style.color="var(--amber)";if(this.cooldownBar)this.cooldownBar.style.width=Math.min(100,(d.cooldown_remaining/300)*100)+"%"}else{this.cooldownVal.textContent="READY";this.cooldownVal.style.color="var(--green)";if(this.cooldownBar)this.cooldownBar.style.width="0%"}}
     if(d.events_detected!==undefined){if(this.statsDetected)this.statsDetected.textContent=d.events_detected;if(this.statsFired)this.statsFired.textContent=d.events_fired;if(this.statsSkipped)this.statsSkipped.textContent=d.events_skipped}
     // Header velocity metrics: rule_a_max_velocity, rule_b_divergence, tick_efficiency, engine trigger state
@@ -1087,7 +1178,11 @@ class DashboardController {
     if(!d.price_levels||d.price_levels.length===0)return;
     if(!this.candleSeries||typeof LightweightCharts==="undefined")return;
     const sorted=[...d.price_levels].sort((a,b)=>(b.strength||0)-(a.strength||0));
-    const filtered=[];const sampleP=sorted[0].price;this.pipMult=sampleP>200?.01:.0001;const minD=this.pipMult*1.0;
+    const filtered=[];const sampleP=sorted[0].price;
+    const sym = d.symbol || this.activeMt5Symbol || "";
+    const isJpyOrGold = sym.toUpperCase().includes("JPY") || sym.toUpperCase().includes("XAU") || sampleP > 50;
+    this.pipMult = isJpyOrGold ? 0.01 : 0.0001;
+    const minD=this.pipMult*1.0;
     for(const z of sorted){const p=Number(z.price);if(!filtered.some(x=>Math.abs(Number(x.price)-p)<minD))filtered.push(z);if(filtered.length>=40)break}
     this.latestZones=filtered;
     if(this.priceLines){this.priceLines.forEach(l=>{try{this.candleSeries.removePriceLine(l)}catch(e){}});this.priceLines=[]}
@@ -1118,7 +1213,7 @@ class DashboardController {
         lw=2;
         c="#00f0ff";
       }
-      try{this.priceLines.push(this.candleSeries.createPriceLine({price:p,color:c,lineWidth:lw,lineStyle:ls,axisLabelVisible:false,title:""}))}catch(e){}
+      try{this.priceLines.push(this.candleSeries.createPriceLine({price:p,color:c,lineWidth:lw,lineStyle:ls,axisLabelVisible:true,title:z.level_type}))}catch(e){}
     });
     const res=filtered.filter(z=>z.direction==="resistance");const sup=filtered.filter(z=>z.direction==="support");
     if(res.length>0){const r=res[0];this.currentRes=r.price;if(this.levelResVal)this.levelResVal.textContent=this.sf(r.price,5);if(this.levelResTime)this.levelResTime.textContent=r.level_type+" AT "+this.sf(r.price,5)}
@@ -1345,9 +1440,40 @@ class DashboardController {
       const dstEnd=y=>{let d=new Date(Date.UTC(y,10,1,7));while(d.getUTCDay()!==0)d.setUTCDate(d.getUTCDate()+1);return d};
       const edstS=y=>{let d=new Date(Date.UTC(y,2,31,1));while(d.getUTCDay()!==0)d.setUTCDate(d.getUTCDate()-1);return d};
       const edstE=y=>{let d=new Date(Date.UTC(y,9,31,1));while(d.getUTCDay()!==0)d.setUTCDate(d.getUTCDate()-1);return d};
-      const isUs=ref>=dstStart(y)&&ref<dstEnd(y);const isEu=ref>=edstS(y)&&ref<edstE(y);
-      const ldnS=isEu?7:8,ldnE=isEu?15:16,nyS=isUs?12:13,nyE=isUs?18:19;
-      [{nm:"Asian",sh:0,eh:8,c:"rgba(255,170,0,.04)",sc:"rgba(255,170,0,.18)"},{nm:"London",sh:ldnS,eh:ldnE,c:"rgba(157,0,255,.04)",sc:"rgba(157,0,255,.18)"},{nm:"NY",sh:nyS,eh:nyE,c:"rgba(0,240,255,.04)",sc:"rgba(0,240,255,.18)"}].forEach(cfg=>{const sc=items.filter(it=>it.hour>=cfg.sh&&it.hour<cfg.eh).map(it=>it.c);if(sc.length>0){let h=sc[0].high,l=sc[0].low;for(let k=1;k<sc.length;k++){if(sc[k].high>h)h=sc[k].high;if(sc[k].low<l)l=sc[k].low}sessions.push({name:cfg.nm,startTime:sc[0].time,endTime:sc[sc.length-1].time,high:h,low:l,open:sc[0].open,close:sc[sc.length-1].close,color:cfg.c,strokeColor:cfg.sc,lineColor:cfg.sc})}})}return sessions;
+      const dstEndAu=y=>{let d=new Date(Date.UTC(y,3,1,16));while(d.getUTCDay()!==0)d.setUTCDate(d.getUTCDate()+1);return d};
+      const dstStartAu=y=>{let d=new Date(Date.UTC(y,9,1,16));while(d.getUTCDay()!==0)d.setUTCDate(d.getUTCDate()+1);return d};
+
+      const isUs=ref>=dstStart(y)&&ref<dstEnd(y);
+      const isEu=ref>=edstS(y)&&ref<edstE(y);
+      const isAu=ref<dstEndAu(y)||ref>=dstStartAu(y);
+
+      const sydS=isAu?21:22,sydE=isAu?6:7;
+      const ldnS=isEu?7:8,ldnE=isEu?15:16;
+      const nyS=isUs?12:13,nyE=isUs?20:21;
+
+      [
+        {nm:"Sydney",sh:sydS,eh:sydE,c:"rgba(0,191,255,.09)",sc:"rgba(0,191,255,.45)"},
+        {nm:"Tokyo",sh:0,eh:9,c:"rgba(255,107,157,.09)",sc:"rgba(255,107,157,.45)"},
+        {nm:"London",sh:ldnS,eh:ldnE,c:"rgba(157,0,255,.09)",sc:"rgba(157,0,255,.45)"},
+        {nm:"New York",sh:nyS,eh:nyE,c:"rgba(0,255,102,.09)",sc:"rgba(0,255,102,.45)"}
+      ].forEach(cfg=>{
+        let sc = [];
+        if(cfg.sh > cfg.eh) {
+          sc = items.filter(it=>it.hour>=cfg.sh || it.hour<cfg.eh).map(it=>it.c);
+        } else {
+          sc = items.filter(it=>it.hour>=cfg.sh && it.hour<cfg.eh).map(it=>it.c);
+        }
+        if(sc.length>0){
+          let h=sc[0].high,l=sc[0].low;
+          for(let k=1;k<sc.length;k++){
+            if(sc[k].high>h)h=sc[k].high;
+            if(sc[k].low<l)l=sc[k].low;
+          }
+          sessions.push({name:cfg.nm,startTime:sc[0].time,endTime:sc[sc.length-1].time,high:h,low:l,open:sc[0].open,close:sc[sc.length-1].close,color:cfg.c,strokeColor:cfg.sc,lineColor:cfg.sc});
+        }
+      });
+    }
+    return sessions;
   }
   drawSessions() {
     if(!this.chart||!this.candleSeries)return;

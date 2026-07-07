@@ -18,7 +18,7 @@ echo ║                                                                ║
 echo ╚════════════════════════════════════════════════════════════════╝
 echo.
 echo Configuration:
-echo   • Symbol:              EURUSD
+echo   • Symbol:              MULTICURRENCY (5 Pairs + Gold)
 echo   • Mode:                PAPER (Simulated fills, no real orders)
 echo   • Feed Terminal:       Exness
 echo   • Execution Terminal:  MetaQuotes
@@ -33,7 +33,7 @@ echo.
 echo ════════════════════════════════════════════════════════════════
 echo.
 
-python run.py --direct --symbol EURUSD --paper --port 9000 ^
+python run.py --direct --paper --port 9000 ^
   --feed-path "C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe" ^
   --exec-path "C:\Program Files\MetaTrader 5\terminal64.exe"
 

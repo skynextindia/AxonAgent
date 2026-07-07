@@ -174,7 +174,7 @@ def build_world_state(symbol: str = "EURUSD=X") -> WorldState:
         
         dt_ny = now_utc.astimezone(ny_tz)
         ny_open_local = datetime(dt_ny.year, dt_ny.month, dt_ny.day, 8, 0, tzinfo=ny_tz)
-        ny_close_local = datetime(dt_ny.year, dt_ny.month, dt_ny.day, 14, 0, tzinfo=ny_tz)
+        ny_close_local = datetime(dt_ny.year, dt_ny.month, dt_ny.day, 16, 0, tzinfo=ny_tz)
         ny_open_utc = ny_open_local.astimezone(timezone.utc)
         ny_close_utc = ny_close_local.astimezone(timezone.utc)
         

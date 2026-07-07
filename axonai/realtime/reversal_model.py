@@ -62,7 +62,7 @@ class EngineSnapshot:
 # Big-TF = daily/weekly/H4 structural levels. Micro intraday = session / M15 / H1
 # structure. Used to require a MAJOR + MICRO confluence at the reversal price.
 MAJOR_TFS = {"D1", "W1", "H4"}
-MAJOR_TYPES = {"PDH", "PDL", "PWH", "PWL", "H4_SWING"}
+MAJOR_TYPES = {"PDH", "PDL", "PWH", "PWL", "H4_SWING", "ASH", "ASL", "LDH", "LDL", "LNDH", "LNDL", "NYH", "NYL"}
 MICRO_TFS = {"SESSION", "M15", "H1"}
 MICRO_TYPES = {"ASH", "ASL", "LDH", "LDL", "ROUND", "LNDH", "LNDL", "NYH", "NYL", "TODAY_H", "TODAY_L"}
 
@@ -167,7 +167,7 @@ class ReversalModel:
         
         # Instantiate Tier 2
         self.regime = RegimeEngine(pip_mult=self._pip)
-        self.mtf = MTFContext(pip_mult=self._pip)
+        self.mtf = MTFContext(pip_mult=self._pip, config=self._config)
         self.liquidity = LiquidityEngine(pip_mult=self._pip)
         
         # Instantiate Tier 3

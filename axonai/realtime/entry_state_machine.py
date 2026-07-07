@@ -311,8 +311,8 @@ class EntryStateMachine:
             elif sweep_lvl.direction == "resistance":
                 direction = "SELL"
             else:
-                # Fallback if direction is not synced
-                direction = "BUY" if price > sweep_lvl.price else "SELL"
+                # Fallback if direction is not synced: if we sweep above a level, it's a top -> SELL
+                direction = "SELL" if price > sweep_lvl.price else "BUY"
         elif is_climax:
             # Bullish climax (net displacement positive) -> expect SELL reversal
             if disp.net_displacement_pips > 0:
@@ -394,8 +394,7 @@ class EntryStateMachine:
         )
             
         if is_trigger:
-            self._retest_start_time = ts
-            self._transition(STATE_RETEST_WAIT, "Break away confirmed. Awaiting retest at zone.")
+            self._transition(STATE_TRIGGERED, f"Break away confirmed ({disp.classification}). Immediate reversal trigger.")
 
     def _evaluate_retest_wait(
         self, price: float, ts: float, velocity: NormalizedVelocity

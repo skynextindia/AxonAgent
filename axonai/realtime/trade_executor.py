@@ -186,10 +186,8 @@ class MT5TradeExecutor:
         
         # Determine pip size and digits dynamically
         # Symbol-based pip/digits defaults (always valid numbers)
-        if "JPY" in symbol.upper():
+        if "JPY" in symbol.upper() or "XAU" in symbol.upper():
             pip, digits = 0.01, 3
-        elif price > 1000:
-            pip, digits = 0.1, 2
         else:
             pip, digits = 0.0001, 5
         # Prefer broker-reported precision when available AND numeric (guards against
@@ -501,7 +499,7 @@ class MT5TradeExecutor:
 
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
         if is_bridge:
-            from .mt5_bridge_client import send_execution_command
+            from axonai.realtime.execution_client import send_execution_command
             res = send_execution_command(self.config, {"action": "order_cancel", "order": ticket})
             return res.get("success", False)
         else:

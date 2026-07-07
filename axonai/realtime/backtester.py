@@ -458,73 +458,150 @@ class BacktestEngine:
                 
                 # Check for pending limit order placement, execution and cancellation
                 state = snapshot.entry_decision.state
-                
-                # 1. Place Limit Order on entering RETEST_WAIT
-                if state == "RETEST_WAIT" and self._pending_limit_order is None:
-                    anomaly_price = self.reversal_model.entry._anomaly_price
-                    direction = snapshot.entry_decision.direction
-                    
-                    state_obj = self.live_state._state
-                    atr = state_obj.atr_14_h1 if state_obj else 0.0012
-                    buffer = 1.0 * self.pip_mult
-                    spread = ask - bid
-                    
-                    if direction == "BUY":
-                        sl_distance = max(8 * self.pip_mult, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
-                        sl = anomaly_price - sl_distance
-                        tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
-                        tp = anomaly_price + tp_distance
+                entry_style = self.config.get("realtime_entry_style", "limit")
+                if self.config.get("realtime_instant_execution", False):
+                    entry_style = "instant"
+
+                use_market = entry_style in ("instant", "confirmed")
+                should_enter = (state == "TRIGGERED")
+
+                # 1. Place Limit Order or Execute Market Order on entry trigger
+                if should_enter:
+                    if use_market:
+                        if len(self.active_trades) == 0:
+                            anomaly_price = self.reversal_model.entry._anomaly_price
+                            direction = self.reversal_model.entry._anomaly_direction
+                            
+                            state_obj = self.live_state._state
+                            atr = state_obj.atr_14_h1 if state_obj else 0.0012
+                            buffer = 1.0 * self.pip_mult
+                            spread = ask - bid
+                            
+                            if direction == "BUY":
+                                sl_distance = max(8 * self.pip_mult, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
+                                sl = snapshot.price - sl_distance
+                                tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
+                                tp = snapshot.price + tp_distance
+                            else:
+                                sl_distance = max(8 * self.pip_mult, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
+                                sl = snapshot.price + sl_distance
+                                tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
+                                tp = snapshot.price - tp_distance
+                                
+                            # Check Gates (cooldowns & concurrency)
+                            is_blocked = False
+                            vol_pips = getattr(snapshot.velocity, "vol_pips", 3.0)
+                            zone_width = vol_pips * 1.5
+                            cooldown_seconds = self.config.get("realtime_cooldown_seconds", self.config.get("cooldown_seconds", 900))
+                            for trade in self.simulated_trades:
+                                elapsed = (tick_time - trade["entry_time"]).total_seconds()
+                                if elapsed < cooldown_seconds:
+                                    if trade["direction"] == direction:
+                                        dist = abs(snapshot.price - trade["entry_price"]) / self.pip_mult
+                                        if dist <= zone_width:
+                                            is_blocked = True
+                                            logger.info("BacktestEngine: Market entry blocked by Gate 3 (Cooldown)")
+                                            break
+                            if not is_blocked:
+                                loss_cooldown = self.config.get("realtime_loss_cooldown_minutes", self.config.get("loss_cooldown_minutes", 45))
+                                for trade in self.simulated_trades:
+                                    if trade.get("status") == "LOSS" and "exit_time" in trade:
+                                        minutes_since_loss = (tick_time - trade["exit_time"]).total_seconds() / 60.0
+                                        if minutes_since_loss < loss_cooldown:
+                                            if trade["direction"] == direction:
+                                                dist = abs(snapshot.price - trade["entry_price"]) / self.pip_mult
+                                                if dist <= zone_width:
+                                                    is_blocked = True
+                                                    logger.info("BacktestEngine: Market entry blocked by Gate 3b (Loss Cooldown)")
+                                                    break
+                            if not is_blocked:
+                                for trade in self.active_trades:
+                                    if trade["direction"] == direction:
+                                        is_blocked = True
+                                        break
+                                        
+                            if not is_blocked:
+                                logger.info("BacktestEngine: Market order FILLED on sweep (style: %s) at %.5f (SL=%.5f TP=%.5f)", entry_style, snapshot.price, sl, tp)
+                                self._open_position(
+                                    direction, snapshot.price, tick_time, 
+                                    f"Market Sweep ({entry_style}): {snapshot.entry_decision.reason}", 
+                                    snapshot.entry_decision.signal_quality,
+                                    sl=sl,
+                                    tp=tp
+                                )
+                                self.reversal_model.register_trade(
+                                    len(self.simulated_trades), direction, snapshot.price, 
+                                    sl, tp,
+                                    reason=f"Market Sweep ({entry_style}): {snapshot.entry_decision.reason}"
+                                )
+                                self.reversal_model.entry.reset()
+                        self.reversal_model.entry.reset()
                     else:
-                        sl_distance = max(8 * self.pip_mult, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
-                        sl = anomaly_price + sl_distance
-                        tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
-                        tp = anomaly_price - tp_distance
-                        
-                    # Check Gates (cooldowns & concurrency)
-                    is_blocked = False
-                    vol_pips = getattr(snapshot.velocity, "vol_pips", 3.0)
-                    zone_width = vol_pips * 1.5
-                    cooldown_seconds = self.config.get("realtime_cooldown_seconds", self.config.get("cooldown_seconds", 900))
-                    for trade in self.simulated_trades:
-                        elapsed = (tick_time - trade["entry_time"]).total_seconds()
-                        if elapsed < cooldown_seconds:
-                            if trade["direction"] == direction:
-                                dist = abs(anomaly_price - trade["entry_price"]) / self.pip_mult
-                                if dist <= zone_width:
-                                    is_blocked = True
-                                    logger.info("BacktestEngine: Limit order blocked by Gate 3 (Cooldown)")
-                                    break
-                    if not is_blocked:
-                        loss_cooldown = self.config.get("realtime_loss_cooldown_minutes", self.config.get("loss_cooldown_minutes", 45))
-                        for trade in self.simulated_trades:
-                            if trade.get("status") == "LOSS" and "exit_time" in trade:
-                                minutes_since_loss = (tick_time - trade["exit_time"]).total_seconds() / 60.0
-                                if minutes_since_loss < loss_cooldown:
+                        if self._pending_limit_order is None:
+                            anomaly_price = self.reversal_model.entry._anomaly_price
+                            direction = self.reversal_model.entry._anomaly_direction
+                            
+                            state_obj = self.live_state._state
+                            atr = state_obj.atr_14_h1 if state_obj else 0.0012
+                            buffer = 1.0 * self.pip_mult
+                            spread = ask - bid
+                            
+                            if direction == "BUY":
+                                sl_distance = max(8 * self.pip_mult, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
+                                sl = anomaly_price - sl_distance
+                                tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
+                                tp = anomaly_price + tp_distance
+                            else:
+                                sl_distance = max(8 * self.pip_mult, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
+                                sl = anomaly_price + sl_distance
+                                tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
+                                tp = anomaly_price - tp_distance
+                                
+                            # Check Gates
+                            is_blocked = False
+                            vol_pips = getattr(snapshot.velocity, "vol_pips", 3.0)
+                            zone_width = vol_pips * 1.5
+                            cooldown_seconds = self.config.get("realtime_cooldown_seconds", self.config.get("cooldown_seconds", 900))
+                            for trade in self.simulated_trades:
+                                elapsed = (tick_time - trade["entry_time"]).total_seconds()
+                                if elapsed < cooldown_seconds:
                                     if trade["direction"] == direction:
                                         dist = abs(anomaly_price - trade["entry_price"]) / self.pip_mult
                                         if dist <= zone_width:
                                             is_blocked = True
-                                            logger.info("BacktestEngine: Limit order blocked by Gate 3b (Loss Cooldown)")
+                                            logger.info("BacktestEngine: Limit order blocked by Gate 3 (Cooldown)")
                                             break
-                    if not is_blocked:
-                        for trade in self.active_trades:
-                            if trade["direction"] == direction:
-                                is_blocked = True
-                                break
-                                
-                    if not is_blocked:
-                        self._pending_limit_order = {
-                            "limit_price": anomaly_price,
-                            "direction": direction,
-                            "sl": sl,
-                            "tp": tp,
-                            "reason": f"Limit Order: {snapshot.entry_decision.reason}",
-                            "quality": snapshot.entry_decision.signal_quality
-                        }
-                        logger.info("BacktestEngine: Placed pending limit order at %.5f (SL=%.5f TP=%.5f)", anomaly_price, sl, tp)
+                            if not is_blocked:
+                                loss_cooldown = self.config.get("realtime_loss_cooldown_minutes", self.config.get("loss_cooldown_minutes", 45))
+                                for trade in self.simulated_trades:
+                                    if trade.get("status") == "LOSS" and "exit_time" in trade:
+                                        minutes_since_loss = (tick_time - trade["exit_time"]).total_seconds() / 60.0
+                                        if minutes_since_loss < loss_cooldown:
+                                            if trade["direction"] == direction:
+                                                dist = abs(anomaly_price - trade["entry_price"]) / self.pip_mult
+                                                if dist <= zone_width:
+                                                    is_blocked = True
+                                                    logger.info("BacktestEngine: Limit order blocked by Gate 3b (Loss Cooldown)")
+                                                    break
+                            if not is_blocked:
+                                for trade in self.active_trades:
+                                    if trade["direction"] == direction:
+                                        is_blocked = True
+                                        break
+                                        
+                            if not is_blocked:
+                                self._pending_limit_order = {
+                                    "limit_price": anomaly_price,
+                                    "direction": direction,
+                                    "sl": sl,
+                                    "tp": tp,
+                                    "reason": f"Limit Order: {snapshot.entry_decision.reason}",
+                                    "quality": snapshot.entry_decision.signal_quality
+                                }
+                                logger.info("BacktestEngine: Placed pending limit order at %.5f (SL=%.5f TP=%.5f)", anomaly_price, sl, tp)
 
-                # 2. Check Fill for active pending limit order
-                if self._pending_limit_order is not None:
+                # 2. Check Fill for active pending limit order (only if not using instant execution)
+                if not use_market and self._pending_limit_order is not None:
                     limit_price = self._pending_limit_order["limit_price"]
                     direction = self._pending_limit_order["direction"]
                     is_filled = False
@@ -550,8 +627,7 @@ class BacktestEngine:
                         self._pending_limit_order = None
                         self.reversal_model.entry.reset()
 
-                # 3. Cancel Limit Order if state machine becomes INVALIDATED or IDLE
-                if state in ("INVALIDATED", "IDLE") and self._pending_limit_order is not None:
+                if not use_market and state in ("INVALIDATED", "IDLE") and self._pending_limit_order is not None:
                     logger.info("BacktestEngine: Cancelled pending limit order at %.5f", self._pending_limit_order["limit_price"])
                     self._pending_limit_order = None
                     

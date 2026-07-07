@@ -111,7 +111,8 @@ class VelocityNormalizer:
 
         # Volatility length-scale (EWMA of per-window absolute excursion, in pips)
         self._vol_alpha: float = 0.03      # EWMA smoothing (~ last ~33 windows)
-        self._vol_floor_pips: float = 0.5  # never let the scale collapse to ~0
+        is_gold = self._config is not None and "XAU" in str(self._config.get("symbol", "")).upper()
+        self._vol_floor_pips: float = 5.0 if is_gold else 0.5  # never let the scale collapse to ~0
         self._vol_pips: float = self._vol_floor_pips  # seeded at floor
 
         # ── Session-bucketed velocity baselines (per-session z/percentile/vol) ──
