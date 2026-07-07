@@ -109,7 +109,11 @@ def start_calibrator_background(symbol="EURUSD"):
 
     cmd = [sys.executable, calib_script, "--dashboard", "--continuous", "--symbol", symbol]
     print(f"  [+] Starting Deep Scan Calibrator for {symbol} in the background")
-    kwargs = {}
+    kwargs = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+    }
     if sys.platform == "win32":
         kwargs["creationflags"] = 0x08000000  # CREATE_NO_WINDOW
         
