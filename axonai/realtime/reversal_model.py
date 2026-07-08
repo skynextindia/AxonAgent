@@ -53,9 +53,10 @@ class EngineSnapshot:
     entry_decision: EntryDecision
     trade_health: TradeHealth
     exit_decision: ExitDecision
-    # NEW: Lifecycle fields
+    # NEW: Include lifecycle fields
     trade_state: Optional[TradeState] = None
     location_context: Optional[LocationContext] = None
+    atr: float = 0.0
 
 
 # ── Reversal-Confluence Gate constants (fail-closed MTF + level veto) ─────
@@ -360,6 +361,7 @@ class ReversalModel:
             # NEW: Include lifecycle fields
             trade_state=trade_state,
             location_context=location_context,
+            atr=self._h1_atr,
         )
 
     def register_trade(self, ticket: int, direction: str, entry_price: float, sl: float, tp: float, reason: str = "") -> None:
