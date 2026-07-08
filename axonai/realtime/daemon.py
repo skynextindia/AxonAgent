@@ -2687,6 +2687,7 @@ class AxonDaemon:
             # Remove from tracking cache
             with self._position_lock:
                 self._tracked_positions.discard(ticket)
+            self.reversal_model.clear_trade()  # Reset model and state machine so it can trade again!
             self._active_trade_initial_sl.pop(ticket, None)
             self.velocity_trailing.reset(ticket)  # Clean up velocity trail state
             self._lowest_price_since_entry.pop(ticket, None)  # Clean up lowest price tracking
