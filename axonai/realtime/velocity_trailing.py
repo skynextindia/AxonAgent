@@ -92,6 +92,7 @@ class VelocityTrailingManager:
         ticks_in_trade: int = 0,
         is_htf_aligned: bool = False,
         pip: float = 0.0001,
+        symbol: str = "EURUSD",
     ) -> Optional[dict]:
         """
         Real-time velocity trailing with retest detection and dynamic market buffer.
@@ -170,13 +171,15 @@ class VelocityTrailingManager:
             retest_window_pips=self.retest_window_pips * vol_scale,
         )
 
-        # Scale pip thresholds dynamically for JPY and Gold to prevent stop-choking
+        # Scale pip thresholds dynamically for JPY, GBP and Gold to prevent stop-choking
         scale = 1.0
         if pip == 0.01:
             if entry_price > 1000.0:
                 scale = 15.0  # Gold (e.g. 15x scaling on EURUSD values)
             else:
                 scale = 3.0   # JPY
+        elif "GBP" in symbol.upper():
+            scale = 1.6       # GBP pairs (higher volatility)
 
         # Trail conditions:
         # 1. Velocity is accelerating (price moving faster = momentum building)

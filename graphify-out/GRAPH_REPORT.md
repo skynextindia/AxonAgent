@@ -5,12 +5,12 @@
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
-- 1318 nodes · 2677 edges · 63 communities (56 shown, 7 thin omitted)
-- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 218 edges (avg confidence: 0.5)
+- 1318 nodes · 2670 edges · 63 communities (56 shown, 7 thin omitted)
+- Extraction: 92% EXTRACTED · 8% INFERRED · 0% AMBIGUOUS · INFERRED: 217 edges (avg confidence: 0.5)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `e8725d51`
+- Built from commit: `c8f75b74`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -53,6 +53,7 @@
 - [[_COMMUNITY_Community 35|Community 35]]
 - [[_COMMUNITY_Community 36|Community 36]]
 - [[_COMMUNITY_Community 37|Community 37]]
+- [[_COMMUNITY_Community 38|Community 38]]
 - [[_COMMUNITY_Community 39|Community 39]]
 - [[_COMMUNITY_Community 40|Community 40]]
 - [[_COMMUNITY_Community 41|Community 41]]
@@ -72,23 +73,20 @@
 - [[_COMMUNITY_Community 65|Community 65]]
 - [[_COMMUNITY_Community 71|Community 71]]
 - [[_COMMUNITY_Community 72|Community 72]]
-- [[_COMMUNITY_Community 73|Community 73]]
 
 ## God Nodes (most connected - your core abstractions)
 1. `NormalizedVelocity` - 78 edges
 2. `DisplacementState` - 69 edges
 3. `LiveCandle` - 61 edges
 4. `RegimeState` - 49 edges
-5. `AxonDaemon` - 41 edges
-6. `EventDetector` - 41 edges
-7. `MarketContextBuilder` - 40 edges
+5. `EventDetector` - 41 edges
+6. `MarketContextBuilder` - 40 edges
+7. `AxonDaemon` - 38 edges
 8. `LiquidityState` - 38 edges
 9. `EntryStateMachine` - 36 edges
 10. `MTFState` - 34 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `ColorFormatter` --uses--> `AxonDaemon`  [INFERRED]
-  run.py → axonai/realtime/daemon.py
 - `TestDaemonE2E` --uses--> `AxonDaemon`  [INFERRED]
   tests/test_daemon_e2e.py → axonai/realtime/daemon.py
 - `TestSmartCooldown` --uses--> `AxonDaemon`  [INFERRED]
@@ -96,6 +94,8 @@
 - `TestEntryStateMachineWithMarketContext` --uses--> `DisplacementState`  [INFERRED]
   tests/test_entry_state_machine_with_market_context.py → axonai/realtime/displacement_engine.py
 - `TestMarketContext` --uses--> `DisplacementState`  [INFERRED]
+  tests/test_market_context.py → axonai/realtime/displacement_engine.py
+- `TestMarketContextBuilder` --uses--> `DisplacementState`  [INFERRED]
   tests/test_market_context.py → axonai/realtime/displacement_engine.py
 
 ## Import Cycles
@@ -133,7 +133,7 @@ Nodes (9): Dedicated thread that polls MT5 for ticks and feeds candle builders. 
 
 ### Community 7 - "Community 7"
 Cohesion: 0.12
-Nodes (19): FastAPI WebSocket server for real-time visual signaling dashboard.  Integrates, High-fidelity historical backtesting engine with candle, peak, reversal, and swe, AxonAI real-time trading daemon.  Always-alive process that monitors MT5 tick, Pure Python event detection engine.  Watches the live state for structural mar, EventPriority, EventType, Event type definitions for the real-time trading engine., axonai.realtime – Real-time trading engine components. (+11 more)
+Nodes (20): get_dashboard(), FastAPI WebSocket server for real-time visual signaling dashboard.  Integrates, Get the active global dashboard server instance., High-fidelity historical backtesting engine with candle, peak, reversal, and swe, AxonAI real-time trading daemon.  Always-alive process that monitors MT5 tick, Pure Python event detection engine.  Watches the live state for structural mar, EventPriority, EventType (+12 more)
 
 ### Community 8 - "Community 8"
 Cohesion: 0.09
@@ -184,8 +184,8 @@ Cohesion: 0.19
 Nodes (20): _direction_from(), EntryDecision, evaluate_peak_entry(), Shared entry-quality gate for microstructure-peak reversals.  Single source of t, Map an event direction string to a trade side (fail closed)., Decide whether a PEAK_DETECTION event qualifies for entry.      Returns an Entry, _event(), _gate() (+12 more)
 
 ### Community 20 - "Community 20"
-Cohesion: 0.10
-Nodes (12): BridgeClient, MT5 Bridge Client — runs in WSL, connects to the Windows MT5 Bridge Service and, Receive and relay messages from the bridge., Send an arbitrary JSON message to the bridge., Send a request for historical data through the bridge., Send a message via WebSocket., Check if connected to the bridge., Connects to the Windows MT5 Bridge and relays data to the dashboard.      The br (+4 more)
+Cohesion: 0.08
+Nodes (17): BridgeClient, MT5 Bridge Client — runs in WSL, connects to the Windows MT5 Bridge Service and, Receive and relay messages from the bridge., Send an arbitrary JSON message to the bridge., Send a request for historical data through the bridge., Send a message via WebSocket., Check if connected to the bridge., Connects to the Windows MT5 Bridge and relays data to the dashboard.      The br (+9 more)
 
 ### Community 21 - "Community 21"
 Cohesion: 0.18
@@ -205,7 +205,7 @@ Nodes (8): PeakDetector, PeakSignal, datetime, Peak and climax exhaustion detect
 
 ### Community 25 - "Community 25"
 Cohesion: 0.10
-Nodes (13): CandleBuilder, datetime, Builds OHLCV candles from raw ticks for a single timeframe., Compute the period start time for a given timestamp., Process a tick. Returns a closed candle if the period boundary was crossed., Return the last N closed candle close prices., Return the last N closed candle high prices., Return the last N closed candle low prices. (+5 more)
+Nodes (14): CandleBuilder, datetime, Real-time tick ingestion engine.  Continuously polls MT5 for raw tick data and, Builds OHLCV candles from raw ticks for a single timeframe., Compute the period start time for a given timestamp., Process a tick. Returns a closed candle if the period boundary was crossed., Return the last N closed candle close prices., Return the last N closed candle high prices. (+6 more)
 
 ### Community 26 - "Community 26"
 Cohesion: 0.11
@@ -251,6 +251,10 @@ Nodes (4): LocationEngine, Computes market location (distance to levels, at_stru
 Cohesion: 0.06
 Nodes (31): AxonDaemon, Flatten all positions on the active → wind-down session transition.          F, Close every open position for this symbol/magic. Returns count closed., Called by TickEngine on every new tick., Warm MTF EMAs, regime, and daily levels from historical bars before         the, Called by TickEngine when any timeframe candle closes., Main thread: blocks on event queue, fires graph on valid events., Poll slow MT5 endpoints every 1s via bridge. Never blocks tick thread. (+23 more)
 
+### Community 38 - "Community 38"
+Cohesion: 0.36
+Nodes (3): Test session labels from world_state.py session logic., Replicate the session logic from world_state.py lines 167-186., TestSessionDetection
+
 ### Community 39 - "Community 39"
 Cohesion: 0.21
 Nodes (6): Helper checking if circuit breaker has tripped., Drawdown Circuit Breaker.          Tracks daily profit/loss and halts all execut, Seed daily starting equity on first call of the day., Update realized PnL for the day., Check if circuit breaker has tripped., RiskGuard
@@ -280,8 +284,8 @@ Cohesion: 0.27
 Nodes (8): handle_client(), main(), mt5_init(), Initialize MT5 connection to the target execution terminal., Convert MT5 position object to dict., Handle connection from daemon client., run_http_server(), serialize_position()
 
 ### Community 47 - "Community 47"
-Cohesion: 0.10
-Nodes (17): DashboardServer, get_dashboard(), Manages the FastAPI lifecycle and WebSocket broadcasts., Send all cached state history to a newly connected client., Load session state from disk on startup., Launch the API and web server in a daemon thread., Bind endpoints to FastAPI app., Target for Uvicorn runner inside the thread. (+9 more)
+Cohesion: 0.15
+Nodes (10): DashboardServer, Manages the FastAPI lifecycle and WebSocket broadcasts., Send all cached state history to a newly connected client., Load session state from disk on startup., Launch the API and web server in a daemon thread., Bind endpoints to FastAPI app., Target for Uvicorn runner inside the thread., Helper to initialize and start the global dashboard server. (+2 more)
 
 ### Community 48 - "Community 48"
 Cohesion: 0.18
@@ -303,10 +307,6 @@ Nodes (23): EngineSnapshot, The unified Market-State-Aware Reversal Engine., Upd
 Cohesion: 0.47
 Nodes (5): Send command to execution_bridge.py and return the response., Helper to run a coroutine in both synchronous and asynchronous contexts safely., run_coroutine(), send_execution_command(), _ws_send_cmd()
 
-### Community 73 - "Community 73"
-Cohesion: 0.50
-Nodes (3): Feed 2000-word analyst output, verify compression ratio > 0.70., Generate a synthetic analyst report with the given word count., TestCompressEvidence
-
 ## Knowledge Gaps
 - **11 isolated node(s):** `FakeVelocity`, `FakeDisplacement`, `FakeSnapshot`, `FakeTradeState`, `FakeLocationContext` (+6 more)
   These have ≤1 connection - possible missing edges or undocumented components.
@@ -316,9 +316,9 @@ Nodes (3): Feed 2000-word analyst output, verify compression ratio > 0.70., Gene
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `LiveCandle` connect `Community 23` to `Community 3`, `Community 4`, `Community 5`, `Community 6`, `Community 7`, `Community 9`, `Community 13`, `Community 14`, `Community 22`, `Community 25`, `Community 28`, `Community 30`?**
-  _High betweenness centrality (0.179) - this node is a cross-community bridge._
-- **Why does `AxonDaemon` connect `Community 36` to `Community 8`, `Community 49`, `Community 16`, `Community 7`?**
-  _High betweenness centrality (0.124) - this node is a cross-community bridge._
+  _High betweenness centrality (0.176) - this node is a cross-community bridge._
+- **Why does `AxonDaemon` connect `Community 36` to `Community 8`, `Community 16`, `Community 7`?**
+  _High betweenness centrality (0.111) - this node is a cross-community bridge._
 - **Why does `LevelBehaviorTracker` connect `Community 26` to `Community 33`, `Community 5`, `Community 7`, `Community 9`, `Community 43`, `Community 13`, `Community 22`, `Community 24`?**
   _High betweenness centrality (0.101) - this node is a cross-community bridge._
 - **Are the 27 inferred relationships involving `NormalizedVelocity` (e.g. with `AdaptiveExitManager` and `ExitDecision`) actually correct?**

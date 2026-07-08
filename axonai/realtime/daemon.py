@@ -1552,15 +1552,16 @@ class AxonDaemon:
                     atr = 0.0012
                 buffer = 1.0 * pip
 
+                min_sl_pips = 12.0 if "GBP" in self.mt5_symbol.upper() else (15.0 if "JPY" in self.mt5_symbol.upper() else 8.0)
                 if snapshot.entry_decision.direction == "BUY":
                     sl_distance = (snapshot.price - anomaly_price) + spread + buffer
-                    sl_distance = max(8 * pip, min(sl_distance, 1.5 * atr))
+                    sl_distance = max(min_sl_pips * pip, min(sl_distance, 1.5 * atr))
                     sl = snapshot.price - sl_distance
                     tp_distance = max(2.0 * sl_distance, 16 * pip)
                     tp = snapshot.price + tp_distance
                 else:
                     sl_distance = (anomaly_price - snapshot.price) + spread + buffer
-                    sl_distance = max(8 * pip, min(sl_distance, 1.5 * atr))
+                    sl_distance = max(min_sl_pips * pip, min(sl_distance, 1.5 * atr))
                     sl = snapshot.price + sl_distance
                     tp_distance = max(2.0 * sl_distance, 16 * pip)
                     tp = snapshot.price - tp_distance
@@ -1682,14 +1683,15 @@ class AxonDaemon:
                     continue
 
                 if use_market:
+                    min_sl_pips = 12.0 if "GBP" in self.mt5_symbol.upper() else (15.0 if "JPY" in self.mt5_symbol.upper() else 8.0)
                     if direction == "BUY":
-                        sl_distance = max(8 * pip, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
+                        sl_distance = max(min_sl_pips * pip, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
                         sl = snapshot.price - sl_distance
                         tp_distance = max(2.0 * sl_distance, 16 * pip)
                         tp = snapshot.price + tp_distance
                         signal = "Buy"
                     else:
-                        sl_distance = max(8 * pip, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
+                        sl_distance = max(min_sl_pips * pip, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
                         sl = snapshot.price + sl_distance
                         tp_distance = max(2.0 * sl_distance, 16 * pip)
                         tp = snapshot.price - tp_distance
@@ -1764,14 +1766,15 @@ class AxonDaemon:
                     self._events_fired += 1
 
                 else:
+                    min_sl_pips = 12.0 if "GBP" in self.mt5_symbol.upper() else (15.0 if "JPY" in self.mt5_symbol.upper() else 8.0)
                     if direction == "BUY":
-                        sl_distance = max(8 * pip, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
+                        sl_distance = max(min_sl_pips * pip, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
                         sl = anomaly_price - sl_distance
                         tp_distance = max(2.0 * sl_distance, 16 * pip)
                         tp = anomaly_price + tp_distance
                         signal = "BuyLimit"
                     else:
-                        sl_distance = max(8 * pip, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
+                        sl_distance = max(min_sl_pips * pip, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
                         sl = anomaly_price + sl_distance
                         tp_distance = max(2.0 * sl_distance, 16 * pip)
                         tp = anomaly_price - tp_distance
@@ -2247,6 +2250,7 @@ class AxonDaemon:
                 ticks_in_trade=ticks_in_trade,
                 is_htf_aligned=is_htf_aligned,
                 pip=self._pip_mult,
+                symbol=self.mt5_symbol,
             )
 
             # Apply SL modification if velocity trailing suggests it
