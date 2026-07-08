@@ -1818,7 +1818,14 @@ class AxonDaemon:
 
                 # The exit action could be ADJUST_SL or CLOSE_NOW
                 decision = snapshot.exit_decision
-                logger.info("EXIT DECISION: %s - %s", decision.action, decision.reason)
+                import time as pytime
+                now_time = pytime.time()
+                last_log_time = getattr(self, "_last_exit_decision_log_time", 0.0)
+                if decision.action == "CLOSE_NOW" and (now_time - last_log_time < 5.0):
+                    pass
+                else:
+                    logger.info("EXIT DECISION: %s - %s", decision.action, decision.reason)
+                    self._last_exit_decision_log_time = now_time
                 
                 is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
                 if decision.action == "ADJUST_SL" and decision.suggested_sl:
