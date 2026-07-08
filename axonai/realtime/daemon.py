@@ -1835,14 +1835,19 @@ class AxonDaemon:
                         res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol, "magic": self.trade_executor_opt.magic})
                         positions = res.get("positions", []) if res.get("success", False) else []
                         for p in positions:
-                            send_execution_command(self.config, {
+                            res_mod = send_execution_command(self.config, {
                                 "action": "modify",
                                 "position": p["ticket"],
                                 "symbol": p["symbol"],
                                 "sl": decision.suggested_sl,
                                 "tp": p["tp"]
                             })
-                            logger.info("Adjusted SL (Bridge) for ticket %d to %.5f", p["ticket"], decision.suggested_sl)
+                            if res_mod and res_mod.get("success"):
+                                logger.info("Adjusted SL (Bridge) successful for ticket %d to %.5f", p["ticket"], decision.suggested_sl)
+                            else:
+                                reason = res_mod.get("reason") if res_mod else "No response"
+                                comment = res_mod.get("comment") if res_mod else ""
+                                logger.error("Adjusted SL (Bridge) FAILED for ticket %d to %.5f. Reason: %s (%s)", p["ticket"], decision.suggested_sl, reason, comment)
                     else:
                         from axonai.dataflows.mt5_order_bridge import get_positions_via_bridge
                         if self._trade_terminal_path:
@@ -2254,13 +2259,19 @@ class AxonDaemon:
 
                 if is_bridge:
                     from axonai.realtime.execution_client import send_execution_command
-                    send_execution_command(self.config, {
+                    res = send_execution_command(self.config, {
                         "action": "modify",
                         "position": ticket,
                         "symbol": pos_symbol,
                         "sl": new_sl,
                         "tp": pos_tp,
                     })
+                    if res and res.get("success"):
+                        logger.info("AxonDaemon: SL modification successful via bridge for ticket %d", ticket)
+                    else:
+                        reason = res.get("reason") if res else "No response"
+                        comment = res.get("comment") if res else ""
+                        logger.error("AxonDaemon: SL modification FAILED via bridge for ticket %d. Reason: %s (%s)", ticket, reason, comment)
                 else:
                     request = {
                         "action": mt5.TRADE_ACTION_SLTP,

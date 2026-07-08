@@ -1,7 +1,7 @@
 # Graph Report - AxonAgent-Agy  (2026-07-08)
 
 ## Corpus Check
-- 89 files · ~98,027 words
+- 89 files · ~98,054 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `6c24b1e0`
+- Built from commit: `a4c22472`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
@@ -316,9 +316,9 @@ Nodes (3): Feed 2000-word analyst output, verify compression ratio > 0.70., Gene
 _Questions this graph is uniquely positioned to answer:_
 
 - **Why does `LiveCandle` connect `Community 23` to `Community 3`, `Community 4`, `Community 5`, `Community 6`, `Community 7`, `Community 9`, `Community 13`, `Community 14`, `Community 22`, `Community 25`, `Community 28`, `Community 30`?**
-  _High betweenness centrality (0.180) - this node is a cross-community bridge._
+  _High betweenness centrality (0.179) - this node is a cross-community bridge._
 - **Why does `AxonDaemon` connect `Community 36` to `Community 8`, `Community 49`, `Community 16`, `Community 7`?**
-  _High betweenness centrality (0.135) - this node is a cross-community bridge._
+  _High betweenness centrality (0.124) - this node is a cross-community bridge._
 - **Why does `LevelBehaviorTracker` connect `Community 26` to `Community 33`, `Community 5`, `Community 7`, `Community 9`, `Community 43`, `Community 13`, `Community 22`, `Community 24`?**
   _High betweenness centrality (0.101) - this node is a cross-community bridge._
 - **Are the 27 inferred relationships involving `NormalizedVelocity` (e.g. with `AdaptiveExitManager` and `ExitDecision`) actually correct?**

@@ -4,144 +4,144 @@
   "graph": {},
   "nodes": [
     {
-      "label": "reversal_model.py",
+      "label": "daemon.py",
       "file_type": "code",
-      "source_file": "axonai/realtime/reversal_model.py",
+      "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1",
       "_origin": "ast",
-      "id": "axonai_realtime_reversal_model",
-      "community": 30,
-      "norm_label": "reversal_model.py"
+      "id": "axonai_realtime_daemon",
+      "community": 7,
+      "norm_label": "daemon.py"
     },
     {
-      "label": "EngineSnapshot",
+      "label": "SymbolColorLogger",
       "file_type": "code",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L44",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L36",
       "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_enginesnapshot",
-      "community": 55,
-      "norm_label": "enginesnapshot"
-    },
-    {
-      "label": "_reversal_confluence_veto()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L71",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_reversal_confluence_veto",
-      "community": 55,
-      "norm_label": "_reversal_confluence_veto()"
-    },
-    {
-      "label": "MTFState",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "mtfstate",
-      "community": 55,
-      "norm_label": "mtfstate"
-    },
-    {
-      "label": "LiquidityState",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "liquiditystate",
-      "community": 55,
-      "norm_label": "liquiditystate"
-    },
-    {
-      "label": "NormalizedVelocity",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "normalizedvelocity",
-      "community": 55,
-      "norm_label": "normalizedvelocity"
-    },
-    {
-      "label": "DisplacementState",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "displacementstate",
-      "community": 55,
-      "norm_label": "displacementstate"
-    },
-    {
-      "label": "PriceLevel",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "pricelevel",
-      "community": 55,
-      "norm_label": "pricelevel"
-    },
-    {
-      "label": "ReversalModel",
-      "file_type": "code",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L158",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_reversalmodel",
-      "community": 55,
-      "norm_label": "reversalmodel"
+      "id": "axonai_realtime_daemon_symbolcolorlogger",
+      "community": 36,
+      "norm_label": "symbolcolorlogger"
     },
     {
       "label": ".__init__()",
       "file_type": "code",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L161",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L37",
       "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_reversalmodel_init",
-      "community": 55,
+      "id": "axonai_realtime_daemon_symbolcolorlogger_init",
+      "community": 36,
       "norm_label": ".__init__()"
     },
     {
-      "label": ".sync_levels()",
+      "label": "._get_logger()",
       "file_type": "code",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L205",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L40",
       "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_reversalmodel_sync_levels",
-      "community": 55,
-      "norm_label": ".sync_levels()"
-    },
-    {
-      "label": ".on_candle_close()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L211",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_reversalmodel_on_candle_close",
+      "id": "axonai_realtime_daemon_symbolcolorlogger_get_logger",
       "community": 36,
-      "norm_label": ".on_candle_close()"
+      "norm_label": "._get_logger()"
     },
     {
-      "label": "LiveCandle",
+      "label": ".info()",
       "file_type": "code",
-      "source_file": "",
-      "source_location": "",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L48",
       "_origin": "ast",
-      "id": "livecandle",
+      "id": "axonai_realtime_daemon_symbolcolorlogger_info",
       "community": 36,
-      "norm_label": "livecandle"
+      "norm_label": ".info()"
     },
     {
-      "label": ".on_tick()",
+      "label": ".warning()",
       "file_type": "code",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L230",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L50",
       "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_reversalmodel_on_tick",
-      "community": 55,
-      "norm_label": ".on_tick()"
+      "id": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "community": 36,
+      "norm_label": ".warning()"
+    },
+    {
+      "label": ".error()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L52",
+      "_origin": "ast",
+      "id": "axonai_realtime_daemon_symbolcolorlogger_error",
+      "community": 36,
+      "norm_label": ".error()"
+    },
+    {
+      "label": ".debug()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L54",
+      "_origin": "ast",
+      "id": "axonai_realtime_daemon_symbolcolorlogger_debug",
+      "community": 36,
+      "norm_label": ".debug()"
+    },
+    {
+      "label": ".critical()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L56",
+      "_origin": "ast",
+      "id": "axonai_realtime_daemon_symbolcolorlogger_critical",
+      "community": 36,
+      "norm_label": ".critical()"
+    },
+    {
+      "label": ".exception()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L58",
+      "_origin": "ast",
+      "id": "axonai_realtime_daemon_symbolcolorlogger_exception",
+      "community": 36,
+      "norm_label": ".exception()"
+    },
+    {
+      "label": "AxonDaemon",
+      "file_type": "code",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L64",
+      "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon",
+      "community": 36,
+      "norm_label": "axondaemon"
+    },
+    {
+      "label": ".__init__()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L75",
+      "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_init",
+      "community": 36,
+      "norm_label": ".__init__()"
+    },
+    {
+      "label": "._slow_poll_loop()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L189",
+      "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_slow_poll_loop",
+      "community": 36,
+      "norm_label": "._slow_poll_loop()"
+    },
+    {
+      "label": "._get_session_details()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L226",
+      "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_get_session_details",
+      "community": 36,
+      "norm_label": "._get_session_details()"
     },
     {
       "label": "datetime",
@@ -154,294 +154,14 @@
       "norm_label": "datetime"
     },
     {
-      "label": "LocationContext",
-      "file_type": "code",
-      "source_file": "",
-      "source_location": "",
-      "_origin": "ast",
-      "id": "locationcontext",
-      "community": 55,
-      "norm_label": "locationcontext"
-    },
-    {
-      "label": ".register_trade()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L367",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_reversalmodel_register_trade",
-      "community": 55,
-      "norm_label": ".register_trade()"
-    },
-    {
-      "label": ".clear_trade()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L397",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_reversalmodel_clear_trade",
-      "community": 55,
-      "norm_label": ".clear_trade()"
-    },
-    {
-      "label": ".config()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L404",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_reversalmodel_config",
-      "community": 55,
-      "norm_label": ".config()"
-    },
-    {
-      "label": "Advanced Microstructure Reversal Model.  This is the top-level orchestrator th",
-      "file_type": "rationale",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L1",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_rationale_1",
-      "community": 30,
-      "norm_label": "advanced microstructure reversal model.  this is the top-level orchestrator th"
-    },
-    {
-      "label": "A complete snapshot of all engine states at a given tick.",
-      "file_type": "rationale",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L45",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_rationale_45",
-      "community": 55,
-      "norm_label": "a complete snapshot of all engine states at a given tick."
-    },
-    {
-      "label": "Fail-closed reversal gate. Returns the FIRST skip_reason string, or None to allo",
-      "file_type": "rationale",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L82",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_rationale_82",
-      "community": 55,
-      "norm_label": "fail-closed reversal gate. returns the first skip_reason string, or none to allo"
-    },
-    {
-      "label": "The unified Market-State-Aware Reversal Engine.",
-      "file_type": "rationale",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L159",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_rationale_159",
-      "community": 55,
-      "norm_label": "the unified market-state-aware reversal engine."
-    },
-    {
-      "label": "Update structural support/resistance levels.",
-      "file_type": "rationale",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L206",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_rationale_206",
-      "community": 55,
-      "norm_label": "update structural support/resistance levels."
-    },
-    {
-      "label": "Process a completed candle.",
-      "file_type": "rationale",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L212",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_rationale_212",
-      "community": 36,
-      "norm_label": "process a completed candle."
-    },
-    {
-      "label": "Process a new tick through the entire pipeline.          Args:             pr",
-      "file_type": "rationale",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L241",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_rationale_241",
-      "community": 55,
-      "norm_label": "process a new tick through the entire pipeline.          args:             pr"
-    },
-    {
-      "label": "Tell the engine a trade was executed so it can manage it.",
-      "file_type": "rationale",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L368",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_rationale_368",
-      "community": 55,
-      "norm_label": "tell the engine a trade was executed so it can manage it."
-    },
-    {
-      "label": "Tell the engine a trade was closed.",
-      "file_type": "rationale",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L398",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_rationale_398",
-      "community": 55,
-      "norm_label": "tell the engine a trade was closed."
-    },
-    {
-      "label": "Expose config for update propagation.",
-      "file_type": "rationale",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L405",
-      "_origin": "ast",
-      "id": "axonai_realtime_reversal_model_rationale_405",
-      "community": 55,
-      "norm_label": "expose config for update propagation."
-    },
-    {
-      "label": "daemon.py",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1",
-      "_origin": "ast",
-      "community": 7,
-      "norm_label": "daemon.py",
-      "id": "axonai_realtime_daemon"
-    },
-    {
-      "label": "SymbolColorLogger",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L36",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": "symbolcolorlogger",
-      "id": "axonai_realtime_daemon_symbolcolorlogger"
-    },
-    {
-      "label": ".__init__()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L37",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": ".__init__()",
-      "id": "axonai_realtime_daemon_symbolcolorlogger_init"
-    },
-    {
-      "label": "._get_logger()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L40",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": "._get_logger()",
-      "id": "axonai_realtime_daemon_symbolcolorlogger_get_logger"
-    },
-    {
-      "label": ".info()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L48",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": ".info()",
-      "id": "axonai_realtime_daemon_symbolcolorlogger_info"
-    },
-    {
-      "label": ".warning()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L50",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": ".warning()",
-      "id": "axonai_realtime_daemon_symbolcolorlogger_warning"
-    },
-    {
-      "label": ".error()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L52",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": ".error()",
-      "id": "axonai_realtime_daemon_symbolcolorlogger_error"
-    },
-    {
-      "label": ".debug()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L54",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": ".debug()",
-      "id": "axonai_realtime_daemon_symbolcolorlogger_debug"
-    },
-    {
-      "label": ".critical()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L56",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": ".critical()",
-      "id": "axonai_realtime_daemon_symbolcolorlogger_critical"
-    },
-    {
-      "label": ".exception()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L58",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": ".exception()",
-      "id": "axonai_realtime_daemon_symbolcolorlogger_exception"
-    },
-    {
-      "label": "AxonDaemon",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L64",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": "axondaemon",
-      "id": "axonai_realtime_daemon_axondaemon"
-    },
-    {
-      "label": ".__init__()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L75",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": ".__init__()",
-      "id": "axonai_realtime_daemon_axondaemon_init"
-    },
-    {
-      "label": "._slow_poll_loop()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L189",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": "._slow_poll_loop()",
-      "id": "axonai_realtime_daemon_axondaemon_slow_poll_loop"
-    },
-    {
-      "label": "._get_session_details()",
-      "file_type": "code",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L226",
-      "_origin": "ast",
-      "community": 36,
-      "norm_label": "._get_session_details()",
-      "id": "axonai_realtime_daemon_axondaemon_get_session_details"
-    },
-    {
       "label": "._entry_direction()",
       "file_type": "code",
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L298",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_entry_direction",
       "community": 36,
-      "norm_label": "._entry_direction()",
-      "id": "axonai_realtime_daemon_axondaemon_entry_direction"
+      "norm_label": "._entry_direction()"
     },
     {
       "label": "._get_mode_payload()",
@@ -449,9 +169,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L312",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_get_mode_payload",
       "community": 36,
-      "norm_label": "._get_mode_payload()",
-      "id": "axonai_realtime_daemon_axondaemon_get_mode_payload"
+      "norm_label": "._get_mode_payload()"
     },
     {
       "label": "._get_regime_payload()",
@@ -459,9 +179,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L333",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_get_regime_payload",
       "community": 36,
-      "norm_label": "._get_regime_payload()",
-      "id": "axonai_realtime_daemon_axondaemon_get_regime_payload"
+      "norm_label": "._get_regime_payload()"
     },
     {
       "label": "._get_levels_payload()",
@@ -469,9 +189,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L531",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_get_levels_payload",
       "community": 36,
-      "norm_label": "._get_levels_payload()",
-      "id": "axonai_realtime_daemon_axondaemon_get_levels_payload"
+      "norm_label": "._get_levels_payload()"
     },
     {
       "label": "._get_candles_payload()",
@@ -479,9 +199,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L568",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_get_candles_payload",
       "community": 36,
-      "norm_label": "._get_candles_payload()",
-      "id": "axonai_realtime_daemon_axondaemon_get_candles_payload"
+      "norm_label": "._get_candles_payload()"
     },
     {
       "label": "._send_order()",
@@ -489,9 +209,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L615",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_send_order",
       "community": 36,
-      "norm_label": "._send_order()",
-      "id": "axonai_realtime_daemon_axondaemon_send_order"
+      "norm_label": "._send_order()"
     },
     {
       "label": "._enrich_positions()",
@@ -499,9 +219,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L623",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_enrich_positions",
       "community": 36,
-      "norm_label": "._enrich_positions()",
-      "id": "axonai_realtime_daemon_axondaemon_enrich_positions"
+      "norm_label": "._enrich_positions()"
     },
     {
       "label": "._get_account_payload()",
@@ -509,9 +229,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L663",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_get_account_payload",
       "community": 36,
-      "norm_label": "._get_account_payload()",
-      "id": "axonai_realtime_daemon_axondaemon_get_account_payload"
+      "norm_label": "._get_account_payload()"
     },
     {
       "label": ".start()",
@@ -519,9 +239,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L764",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_start",
       "community": 36,
-      "norm_label": ".start()",
-      "id": "axonai_realtime_daemon_axondaemon_start"
+      "norm_label": ".start()"
     },
     {
       "label": "._check_eod_close()",
@@ -529,9 +249,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1000",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_check_eod_close",
       "community": 36,
-      "norm_label": "._check_eod_close()",
-      "id": "axonai_realtime_daemon_axondaemon_check_eod_close"
+      "norm_label": "._check_eod_close()"
     },
     {
       "label": "._close_all_positions()",
@@ -539,9 +259,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1022",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_close_all_positions",
       "community": 36,
-      "norm_label": "._close_all_positions()",
-      "id": "axonai_realtime_daemon_axondaemon_close_all_positions"
+      "norm_label": "._close_all_positions()"
     },
     {
       "label": "._on_tick()",
@@ -549,9 +269,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1102",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_on_tick",
       "community": 36,
-      "norm_label": "._on_tick()",
-      "id": "axonai_realtime_daemon_axondaemon_on_tick"
+      "norm_label": "._on_tick()"
     },
     {
       "label": "._backfill_history()",
@@ -559,9 +279,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1383",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_backfill_history",
       "community": 36,
-      "norm_label": "._backfill_history()",
-      "id": "axonai_realtime_daemon_axondaemon_backfill_history"
+      "norm_label": "._backfill_history()"
     },
     {
       "label": "._on_candle_close()",
@@ -569,9 +289,19 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1440",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_on_candle_close",
       "community": 36,
-      "norm_label": "._on_candle_close()",
-      "id": "axonai_realtime_daemon_axondaemon_on_candle_close"
+      "norm_label": "._on_candle_close()"
+    },
+    {
+      "label": "LiveCandle",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "id": "livecandle",
+      "community": 36,
+      "norm_label": "livecandle"
     },
     {
       "label": "._event_loop()",
@@ -579,109 +309,109 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1471",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_event_loop",
       "community": 36,
-      "norm_label": "._event_loop()",
-      "id": "axonai_realtime_daemon_axondaemon_event_loop"
+      "norm_label": "._event_loop()"
     },
     {
       "label": "._log_signal()",
       "file_type": "code",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1938",
+      "source_location": "L1945",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_log_signal",
       "community": 36,
-      "norm_label": "._log_signal()",
-      "id": "axonai_realtime_daemon_axondaemon_log_signal"
+      "norm_label": "._log_signal()"
     },
     {
       "label": "._seconds_until_ready()",
       "file_type": "code",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1982",
+      "source_location": "L1989",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_seconds_until_ready",
       "community": 36,
-      "norm_label": "._seconds_until_ready()",
-      "id": "axonai_realtime_daemon_axondaemon_seconds_until_ready"
+      "norm_label": "._seconds_until_ready()"
     },
     {
       "label": "._log_stats()",
       "file_type": "code",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2042",
+      "source_location": "L2049",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_log_stats",
       "community": 36,
-      "norm_label": "._log_stats()",
-      "id": "axonai_realtime_daemon_axondaemon_log_stats"
+      "norm_label": "._log_stats()"
     },
     {
       "label": "._signal_handler()",
       "file_type": "code",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2057",
+      "source_location": "L2064",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_signal_handler",
       "community": 36,
-      "norm_label": "._signal_handler()",
-      "id": "axonai_realtime_daemon_axondaemon_signal_handler"
+      "norm_label": "._signal_handler()"
     },
     {
       "label": ".stop()",
       "file_type": "code",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2062",
+      "source_location": "L2069",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_stop",
       "community": 36,
-      "norm_label": ".stop()",
-      "id": "axonai_realtime_daemon_axondaemon_stop"
+      "norm_label": ".stop()"
     },
     {
       "label": ".is_running()",
       "file_type": "code",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2083",
+      "source_location": "L2090",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_is_running",
       "community": 36,
-      "norm_label": ".is_running()",
-      "id": "axonai_realtime_daemon_axondaemon_is_running"
+      "norm_label": ".is_running()"
     },
     {
       "label": "._log_dry_run_event()",
       "file_type": "code",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2086",
+      "source_location": "L2093",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_log_dry_run_event",
       "community": 36,
-      "norm_label": "._log_dry_run_event()",
-      "id": "axonai_realtime_daemon_axondaemon_log_dry_run_event"
+      "norm_label": "._log_dry_run_event()"
     },
     {
       "label": "._manage_trailing_stops()",
       "file_type": "code",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2110",
+      "source_location": "L2117",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_manage_trailing_stops",
       "community": 36,
-      "norm_label": "._manage_trailing_stops()",
-      "id": "axonai_realtime_daemon_axondaemon_manage_trailing_stops"
+      "norm_label": "._manage_trailing_stops()"
     },
     {
       "label": "._check_for_closed_positions()",
       "file_type": "code",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2352",
+      "source_location": "L2359",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_axondaemon_check_for_closed_positions",
       "community": 36,
-      "norm_label": "._check_for_closed_positions()",
-      "id": "axonai_realtime_daemon_axondaemon_check_for_closed_positions"
+      "norm_label": "._check_for_closed_positions()"
     },
     {
       "label": "generate_session_summary()",
       "file_type": "code",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2711",
+      "source_location": "L2718",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_generate_session_summary",
       "community": 8,
-      "norm_label": "generate_session_summary()",
-      "id": "axonai_realtime_daemon_generate_session_summary"
+      "norm_label": "generate_session_summary()"
     },
     {
       "label": "AxonAI real-time trading daemon.  Always-alive process that monitors MT5 tick",
@@ -689,9 +419,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_1",
       "community": 7,
-      "norm_label": "axonai real-time trading daemon.  always-alive process that monitors mt5 tick",
-      "id": "axonai_realtime_daemon_rationale_1"
+      "norm_label": "axonai real-time trading daemon.  always-alive process that monitors mt5 tick"
     },
     {
       "label": "Always-alive trading daemon.      Lifecycle:     1. Initialize MT5 connection",
@@ -699,9 +429,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L65",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_65",
       "community": 36,
-      "norm_label": "always-alive trading daemon.      lifecycle:     1. initialize mt5 connection",
-      "id": "axonai_realtime_daemon_rationale_65"
+      "norm_label": "always-alive trading daemon.      lifecycle:     1. initialize mt5 connection"
     },
     {
       "label": "Poll slow MT5 endpoints every 1s via bridge. Never blocks tick thread.",
@@ -709,9 +439,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L190",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_190",
       "community": 36,
-      "norm_label": "poll slow mt5 endpoints every 1s via bridge. never blocks tick thread.",
-      "id": "axonai_realtime_daemon_rationale_190"
+      "norm_label": "poll slow mt5 endpoints every 1s via bridge. never blocks tick thread."
     },
     {
       "label": "Compute active/inactive state + progress for each forex session with dynamic DST",
@@ -719,9 +449,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L227",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_227",
       "community": 36,
-      "norm_label": "compute active/inactive state + progress for each forex session with dynamic dst",
-      "id": "axonai_realtime_daemon_rationale_227"
+      "norm_label": "compute active/inactive state + progress for each forex session with dynamic dst"
     },
     {
       "label": "Map a peak event to a trade side. Returns 'BUY', 'SELL', or None.          Sin",
@@ -729,9 +459,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L299",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_299",
       "community": 36,
-      "norm_label": "map a peak event to a trade side. returns 'buy', 'sell', or none.          sin",
-      "id": "axonai_realtime_daemon_rationale_299"
+      "norm_label": "map a peak event to a trade side. returns 'buy', 'sell', or none.          sin"
     },
     {
       "label": "Describe the daemon's execution mode for the dashboard badge.",
@@ -739,9 +469,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L313",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_313",
       "community": 36,
-      "norm_label": "describe the daemon's execution mode for the dashboard badge.",
-      "id": "axonai_realtime_daemon_rationale_313"
+      "norm_label": "describe the daemon's execution mode for the dashboard badge."
     },
     {
       "label": "Send an order via the bridge subprocess.",
@@ -749,9 +479,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L616",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_616",
       "community": 36,
-      "norm_label": "send an order via the bridge subprocess.",
-      "id": "axonai_realtime_daemon_rationale_616"
+      "norm_label": "send an order via the bridge subprocess."
     },
     {
       "label": "Cold start and enter main event loop.",
@@ -759,9 +489,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L765",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_765",
       "community": 36,
-      "norm_label": "cold start and enter main event loop.",
-      "id": "axonai_realtime_daemon_rationale_765"
+      "norm_label": "cold start and enter main event loop."
     },
     {
       "label": "Flatten all positions on the active \u2192 wind-down session transition.          F",
@@ -769,9 +499,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1001",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_1001",
       "community": 36,
-      "norm_label": "flatten all positions on the active \u2192 wind-down session transition.          f",
-      "id": "axonai_realtime_daemon_rationale_1001"
+      "norm_label": "flatten all positions on the active \u2192 wind-down session transition.          f"
     },
     {
       "label": "Close every open position for this symbol/magic. Returns count closed.",
@@ -779,9 +509,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1023",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_1023",
       "community": 36,
-      "norm_label": "close every open position for this symbol/magic. returns count closed.",
-      "id": "axonai_realtime_daemon_rationale_1023"
+      "norm_label": "close every open position for this symbol/magic. returns count closed."
     },
     {
       "label": "Called by TickEngine on every new tick.",
@@ -789,9 +519,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1103",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_1103",
       "community": 36,
-      "norm_label": "called by tickengine on every new tick.",
-      "id": "axonai_realtime_daemon_rationale_1103"
+      "norm_label": "called by tickengine on every new tick."
     },
     {
       "label": "Warm MTF EMAs, regime, and daily levels from historical bars before         the",
@@ -799,9 +529,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1384",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_1384",
       "community": 36,
-      "norm_label": "warm mtf emas, regime, and daily levels from historical bars before         the",
-      "id": "axonai_realtime_daemon_rationale_1384"
+      "norm_label": "warm mtf emas, regime, and daily levels from historical bars before         the"
     },
     {
       "label": "Called by TickEngine when any timeframe candle closes.",
@@ -809,9 +539,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1441",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_1441",
       "community": 36,
-      "norm_label": "called by tickengine when any timeframe candle closes.",
-      "id": "axonai_realtime_daemon_rationale_1441"
+      "norm_label": "called by tickengine when any timeframe candle closes."
     },
     {
       "label": "Main thread: blocks on event queue, fires graph on valid events.",
@@ -819,89 +549,359 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1472",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_1472",
       "community": 36,
-      "norm_label": "main thread: blocks on event queue, fires graph on valid events.",
-      "id": "axonai_realtime_daemon_rationale_1472"
+      "norm_label": "main thread: blocks on event queue, fires graph on valid events."
     },
     {
       "label": "Persistently log every generated signal to reports/signals.jsonl and reports/sig",
       "file_type": "rationale",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1939",
+      "source_location": "L1946",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_1946",
       "community": 36,
-      "norm_label": "persistently log every generated signal to reports/signals.jsonl and reports/sig",
-      "id": "axonai_realtime_daemon_rationale_1939"
+      "norm_label": "persistently log every generated signal to reports/signals.jsonl and reports/sig"
     },
     {
       "label": "Smart dynamic level-aware and direction-aware cooldown check.",
       "file_type": "rationale",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1983",
+      "source_location": "L1990",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_1990",
       "community": 36,
-      "norm_label": "smart dynamic level-aware and direction-aware cooldown check.",
-      "id": "axonai_realtime_daemon_rationale_1983"
+      "norm_label": "smart dynamic level-aware and direction-aware cooldown check."
     },
     {
       "label": "Log daemon statistics.",
       "file_type": "rationale",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2043",
+      "source_location": "L2050",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_2050",
       "community": 36,
-      "norm_label": "log daemon statistics.",
-      "id": "axonai_realtime_daemon_rationale_2043"
+      "norm_label": "log daemon statistics."
     },
     {
       "label": "Handle SIGINT/SIGTERM for graceful shutdown.",
       "file_type": "rationale",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2058",
+      "source_location": "L2065",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_2065",
       "community": 36,
-      "norm_label": "handle sigint/sigterm for graceful shutdown.",
-      "id": "axonai_realtime_daemon_rationale_2058"
+      "norm_label": "handle sigint/sigterm for graceful shutdown."
     },
     {
       "label": "Append an event to the dry run session log.",
       "file_type": "rationale",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2087",
+      "source_location": "L2094",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_2094",
       "community": 36,
-      "norm_label": "append an event to the dry run session log.",
-      "id": "axonai_realtime_daemon_rationale_2087"
+      "norm_label": "append an event to the dry run session log."
     },
     {
       "label": "Manage velocity-based trailing stops on active MT5 positions.",
       "file_type": "rationale",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2111",
+      "source_location": "L2118",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_2118",
       "community": 36,
-      "norm_label": "manage velocity-based trailing stops on active mt5 positions.",
-      "id": "axonai_realtime_daemon_rationale_2111"
+      "norm_label": "manage velocity-based trailing stops on active mt5 positions."
     },
     {
       "label": "Detect closed positions and log outcomes.",
       "file_type": "rationale",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2353",
+      "source_location": "L2360",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_2360",
       "community": 36,
-      "norm_label": "detect closed positions and log outcomes.",
-      "id": "axonai_realtime_daemon_rationale_2353"
+      "norm_label": "detect closed positions and log outcomes."
     },
     {
       "label": "Read reports/dry_run_session.jsonl and print a formatted summary.",
       "file_type": "rationale",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2712",
+      "source_location": "L2719",
       "_origin": "ast",
+      "id": "axonai_realtime_daemon_rationale_2719",
       "community": 8,
-      "norm_label": "read reports/dry_run_session.jsonl and print a formatted summary.",
-      "id": "axonai_realtime_daemon_rationale_2712"
+      "norm_label": "read reports/dry_run_session.jsonl and print a formatted summary."
+    },
+    {
+      "label": "reversal_model.py",
+      "file_type": "code",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 30,
+      "norm_label": "reversal_model.py",
+      "id": "axonai_realtime_reversal_model"
+    },
+    {
+      "label": "EngineSnapshot",
+      "file_type": "code",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L44",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "enginesnapshot",
+      "id": "axonai_realtime_reversal_model_enginesnapshot"
+    },
+    {
+      "label": "_reversal_confluence_veto()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L71",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "_reversal_confluence_veto()",
+      "id": "axonai_realtime_reversal_model_reversal_confluence_veto"
+    },
+    {
+      "label": "MTFState",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "mtfstate",
+      "id": "mtfstate"
+    },
+    {
+      "label": "LiquidityState",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "liquiditystate",
+      "id": "liquiditystate"
+    },
+    {
+      "label": "NormalizedVelocity",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "normalizedvelocity",
+      "id": "normalizedvelocity"
+    },
+    {
+      "label": "DisplacementState",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "displacementstate",
+      "id": "displacementstate"
+    },
+    {
+      "label": "PriceLevel",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "pricelevel",
+      "id": "pricelevel"
+    },
+    {
+      "label": "ReversalModel",
+      "file_type": "code",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L158",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "reversalmodel",
+      "id": "axonai_realtime_reversal_model_reversalmodel"
+    },
+    {
+      "label": ".__init__()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L161",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": ".__init__()",
+      "id": "axonai_realtime_reversal_model_reversalmodel_init"
+    },
+    {
+      "label": ".sync_levels()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L205",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": ".sync_levels()",
+      "id": "axonai_realtime_reversal_model_reversalmodel_sync_levels"
+    },
+    {
+      "label": ".on_candle_close()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L211",
+      "_origin": "ast",
+      "community": 36,
+      "norm_label": ".on_candle_close()",
+      "id": "axonai_realtime_reversal_model_reversalmodel_on_candle_close"
+    },
+    {
+      "label": ".on_tick()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L230",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": ".on_tick()",
+      "id": "axonai_realtime_reversal_model_reversalmodel_on_tick"
+    },
+    {
+      "label": "LocationContext",
+      "file_type": "code",
+      "source_file": "",
+      "source_location": "",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "locationcontext",
+      "id": "locationcontext"
+    },
+    {
+      "label": ".register_trade()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L367",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": ".register_trade()",
+      "id": "axonai_realtime_reversal_model_reversalmodel_register_trade"
+    },
+    {
+      "label": ".clear_trade()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L397",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": ".clear_trade()",
+      "id": "axonai_realtime_reversal_model_reversalmodel_clear_trade"
+    },
+    {
+      "label": ".config()",
+      "file_type": "code",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L404",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": ".config()",
+      "id": "axonai_realtime_reversal_model_reversalmodel_config"
+    },
+    {
+      "label": "Advanced Microstructure Reversal Model.  This is the top-level orchestrator th",
+      "file_type": "rationale",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L1",
+      "_origin": "ast",
+      "community": 30,
+      "norm_label": "advanced microstructure reversal model.  this is the top-level orchestrator th",
+      "id": "axonai_realtime_reversal_model_rationale_1"
+    },
+    {
+      "label": "A complete snapshot of all engine states at a given tick.",
+      "file_type": "rationale",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L45",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "a complete snapshot of all engine states at a given tick.",
+      "id": "axonai_realtime_reversal_model_rationale_45"
+    },
+    {
+      "label": "Fail-closed reversal gate. Returns the FIRST skip_reason string, or None to allo",
+      "file_type": "rationale",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L82",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "fail-closed reversal gate. returns the first skip_reason string, or none to allo",
+      "id": "axonai_realtime_reversal_model_rationale_82"
+    },
+    {
+      "label": "The unified Market-State-Aware Reversal Engine.",
+      "file_type": "rationale",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L159",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "the unified market-state-aware reversal engine.",
+      "id": "axonai_realtime_reversal_model_rationale_159"
+    },
+    {
+      "label": "Update structural support/resistance levels.",
+      "file_type": "rationale",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L206",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "update structural support/resistance levels.",
+      "id": "axonai_realtime_reversal_model_rationale_206"
+    },
+    {
+      "label": "Process a completed candle.",
+      "file_type": "rationale",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L212",
+      "_origin": "ast",
+      "community": 36,
+      "norm_label": "process a completed candle.",
+      "id": "axonai_realtime_reversal_model_rationale_212"
+    },
+    {
+      "label": "Process a new tick through the entire pipeline.          Args:             pr",
+      "file_type": "rationale",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L241",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "process a new tick through the entire pipeline.          args:             pr",
+      "id": "axonai_realtime_reversal_model_rationale_241"
+    },
+    {
+      "label": "Tell the engine a trade was executed so it can manage it.",
+      "file_type": "rationale",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L368",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "tell the engine a trade was executed so it can manage it.",
+      "id": "axonai_realtime_reversal_model_rationale_368"
+    },
+    {
+      "label": "Tell the engine a trade was closed.",
+      "file_type": "rationale",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L398",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "tell the engine a trade was closed.",
+      "id": "axonai_realtime_reversal_model_rationale_398"
+    },
+    {
+      "label": "Expose config for update propagation.",
+      "file_type": "rationale",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L405",
+      "_origin": "ast",
+      "community": 55,
+      "norm_label": "expose config for update propagation.",
+      "id": "axonai_realtime_reversal_model_rationale_405"
     },
     {
       "label": "run.py",
@@ -13200,726 +13200,12 @@
       "relation": "imports_from",
       "context": "import",
       "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/backtester.py",
+      "source_file": "axonai/realtime/daemon.py",
       "source_location": "L23",
       "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_backtester",
-      "target": "axonai_realtime_reversal_model"
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L28",
-      "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_reversal_model"
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L31",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_adaptive_exit",
+      "target": "axonai_dataflows_mt5_data",
       "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L21",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_displacement_engine",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L29",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_entry_state_machine",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L17",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_event_types",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L38",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_exit_engine",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L33",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_exit_stats",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L26",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_liquidity_engine",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L16",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_live_state",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L36",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_location_engine",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L25",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_mtf_context",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L24",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_regime_engine",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L44",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_reversal_model_enginesnapshot",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L71",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_reversal_model_reversal_confluence_veto",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "contains",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L158",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_reversal_model_reversalmodel",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L30",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_trade_health_monitor",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L32",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_trade_phase",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L37",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_trade_state_engine",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L20",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "axonai_realtime_velocity_normalizer",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L13",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model",
-      "target": "datetime",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "rationale_for",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L1",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_rationale_1",
-      "target": "axonai_realtime_reversal_model",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/trade_analytics.py",
-      "source_location": "L15",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_trade_analytics",
-      "target": "axonai_realtime_reversal_model"
-    },
-    {
-      "relation": "rationale_for",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L45",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_rationale_45",
-      "target": "axonai_realtime_reversal_model_enginesnapshot",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "references",
-      "context": "return_type",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L230",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel_on_tick",
-      "target": "axonai_realtime_reversal_model_enginesnapshot",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/trade_analytics.py",
-      "source_location": "L15",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_trade_analytics",
-      "target": "axonai_realtime_reversal_model_enginesnapshot"
-    },
-    {
-      "relation": "uses",
-      "confidence": "INFERRED",
-      "source_file": "axonai/realtime/trade_analytics.py",
-      "source_location": "L15",
-      "weight": 0.8,
-      "confidence_score": 0.5,
-      "source": "axonai_realtime_trade_analytics_tradeanalytics",
-      "target": "axonai_realtime_reversal_model_enginesnapshot"
-    },
-    {
-      "relation": "references",
-      "context": "parameter_type",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/trade_analytics.py",
-      "source_location": "L59",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_trade_analytics_tradeanalytics_record_entry",
-      "target": "axonai_realtime_reversal_model_enginesnapshot"
-    },
-    {
-      "relation": "references",
-      "context": "parameter_type",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/trade_analytics.py",
-      "source_location": "L92",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_trade_analytics_tradeanalytics_record_exit",
-      "target": "axonai_realtime_reversal_model_enginesnapshot"
-    },
-    {
-      "relation": "uses",
-      "confidence": "INFERRED",
-      "source_file": "axonai/realtime/trade_analytics.py",
-      "source_location": "L15",
-      "weight": 0.8,
-      "confidence_score": 0.5,
-      "source": "axonai_realtime_trade_analytics_traderecord",
-      "target": "axonai_realtime_reversal_model_enginesnapshot"
-    },
-    {
-      "relation": "rationale_for",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L82",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_rationale_82",
-      "target": "axonai_realtime_reversal_model_reversal_confluence_veto",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "references",
-      "context": "parameter_type",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L71",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversal_confluence_veto",
-      "target": "displacementstate",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "references",
-      "context": "parameter_type",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L71",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversal_confluence_veto",
-      "target": "liquiditystate",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "references",
-      "context": "parameter_type",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L71",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversal_confluence_veto",
-      "target": "mtfstate",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "references",
-      "context": "parameter_type",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L71",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversal_confluence_veto",
-      "target": "normalizedvelocity",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "references",
-      "context": "generic_arg",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L71",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversal_confluence_veto",
-      "target": "pricelevel",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L189",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel_init",
-      "target": "mtfstate",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L190",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel_init",
-      "target": "liquiditystate",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L191",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel_init",
-      "target": "normalizedvelocity",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L192",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel_init",
-      "target": "displacementstate",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "references",
-      "context": "generic_arg",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L205",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel_sync_levels",
-      "target": "pricelevel",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/backtester.py",
-      "source_location": "L23",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_backtester",
-      "target": "axonai_realtime_reversal_model_reversalmodel"
-    },
-    {
-      "relation": "uses",
-      "confidence": "INFERRED",
-      "source_file": "axonai/realtime/backtester.py",
-      "source_location": "L23",
-      "weight": 0.8,
-      "confidence_score": 0.5,
-      "source": "axonai_realtime_backtester_backtestengine",
-      "target": "axonai_realtime_reversal_model_reversalmodel"
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "source_file": "axonai/realtime/backtester.py",
-      "source_location": "L55",
-      "weight": 1.0,
-      "source": "axonai_realtime_backtester_backtestengine_init",
-      "target": "axonai_realtime_reversal_model_reversalmodel"
-    },
-    {
-      "relation": "rationale_for",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L159",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_rationale_159",
-      "target": "axonai_realtime_reversal_model_reversalmodel",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "method",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L397",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel",
-      "target": "axonai_realtime_reversal_model_reversalmodel_clear_trade",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "method",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L404",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel",
-      "target": "axonai_realtime_reversal_model_reversalmodel_config",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "method",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L161",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel",
-      "target": "axonai_realtime_reversal_model_reversalmodel_init",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "method",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L211",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel",
-      "target": "axonai_realtime_reversal_model_reversalmodel_on_candle_close",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "method",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L230",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel",
-      "target": "axonai_realtime_reversal_model_reversalmodel_on_tick",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "method",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L367",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel",
-      "target": "axonai_realtime_reversal_model_reversalmodel_register_trade",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "method",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L205",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel",
-      "target": "axonai_realtime_reversal_model_reversalmodel_sync_levels",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "rationale_for",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L206",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_rationale_206",
-      "target": "axonai_realtime_reversal_model_reversalmodel_sync_levels",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "rationale_for",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L212",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_rationale_212",
-      "target": "axonai_realtime_reversal_model_reversalmodel_on_candle_close",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "references",
-      "context": "parameter_type",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L211",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel_on_candle_close",
-      "target": "livecandle",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1406",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_axondaemon_backfill_history",
-      "target": "livecandle"
-    },
-    {
-      "relation": "references",
-      "context": "parameter_type",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1440",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_axondaemon_on_candle_close",
-      "target": "livecandle"
-    },
-    {
-      "relation": "rationale_for",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L241",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_rationale_241",
-      "target": "axonai_realtime_reversal_model_reversalmodel_on_tick",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "references",
-      "context": "parameter_type",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L230",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel_on_tick",
-      "target": "datetime",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "references",
-      "context": "generic_arg",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L230",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_reversalmodel_on_tick",
-      "target": "locationcontext",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L15",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon",
-      "target": "datetime"
-    },
-    {
-      "relation": "calls",
-      "context": "call",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L379",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_axondaemon_get_regime_payload",
-      "target": "datetime"
-    },
-    {
-      "relation": "references",
-      "context": "parameter_type",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L226",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_axondaemon_get_session_details",
-      "target": "datetime"
-    },
-    {
-      "relation": "references",
-      "context": "parameter_type",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1102",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_axondaemon_on_tick",
-      "target": "datetime"
-    },
-    {
-      "relation": "rationale_for",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L368",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_rationale_368",
-      "target": "axonai_realtime_reversal_model_reversalmodel_register_trade",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "rationale_for",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L398",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_rationale_398",
-      "target": "axonai_realtime_reversal_model_reversalmodel_clear_trade",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "rationale_for",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/reversal_model.py",
-      "source_location": "L405",
-      "weight": 1.0,
-      "source": "axonai_realtime_reversal_model_rationale_405",
-      "target": "axonai_realtime_reversal_model_reversalmodel_config",
-      "confidence_score": 1.0
-    },
-    {
-      "relation": "imports_from",
-      "context": "import",
-      "confidence": "EXTRACTED",
-      "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L23",
-      "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon",
-      "target": "axonai_dataflows_mt5_data"
     },
     {
       "relation": "imports_from",
@@ -13928,9 +13214,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L24",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_dataflows_mt5_order_bridge"
+      "target": "axonai_dataflows_mt5_order_bridge",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -13939,9 +13225,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L34",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_adaptive_exit"
+      "target": "axonai_realtime_adaptive_exit",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -13950,9 +13236,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L32",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_api_server"
+      "target": "axonai_realtime_api_server",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -13960,19 +13246,19 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L64",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_daemon_axondaemon"
+      "target": "axonai_realtime_daemon_axondaemon",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2711",
+      "source_location": "L2718",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_daemon_generate_session_summary"
+      "target": "axonai_realtime_daemon_generate_session_summary",
+      "confidence_score": 1.0
     },
     {
       "relation": "contains",
@@ -13980,9 +13266,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L36",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_daemon_symbolcolorlogger"
+      "target": "axonai_realtime_daemon_symbolcolorlogger",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -13991,9 +13277,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L29",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_displacement_normalizer"
+      "target": "axonai_realtime_displacement_normalizer",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -14002,9 +13288,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L25",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_event_types"
+      "target": "axonai_realtime_event_types",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -14013,9 +13299,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L33",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_exit_engine"
+      "target": "axonai_realtime_exit_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -14024,9 +13310,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L27",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_live_state"
+      "target": "axonai_realtime_live_state",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L28",
+      "weight": 1.0,
+      "source": "axonai_realtime_daemon",
+      "target": "axonai_realtime_reversal_model",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -14035,9 +13332,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L26",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_tick_engine"
+      "target": "axonai_realtime_tick_engine",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -14046,9 +13343,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L30",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_trade_analytics"
+      "target": "axonai_realtime_trade_analytics",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports_from",
@@ -14057,9 +13354,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L31",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "axonai_realtime_trade_executor"
+      "target": "axonai_realtime_trade_executor",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L15",
+      "weight": 1.0,
+      "source": "axonai_realtime_daemon",
+      "target": "datetime",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports",
@@ -14068,9 +13376,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L11",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon",
-      "target": "queue"
+      "target": "queue",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -14078,9 +13386,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_1",
-      "target": "axonai_realtime_daemon"
+      "target": "axonai_realtime_daemon",
+      "confidence_score": 1.0
     },
     {
       "relation": "re_exports",
@@ -14121,9 +13429,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L56",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_critical"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_critical",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14131,9 +13439,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L54",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_debug"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_debug",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14141,9 +13449,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L52",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_error"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_error",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14151,9 +13459,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L58",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_exception"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_exception",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14161,9 +13469,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L40",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14171,9 +13479,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L48",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_info"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_info",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14181,9 +13489,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L37",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_init"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_init",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14191,9 +13499,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L50",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_warning"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14202,9 +13510,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L57",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger_critical",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14213,9 +13521,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L55",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger_debug",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14224,9 +13532,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L53",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger_error",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14235,9 +13543,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L59",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger_exception",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14246,9 +13554,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L49",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger_info",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14257,9 +13565,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L51",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_symbolcolorlogger_warning",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_get_logger",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14268,9 +13576,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1430",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_backfill_history",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_info"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_info",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14279,20 +13587,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1019",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_check_eod_close",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_info"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_info",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2417",
+      "source_location": "L2424",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_check_for_closed_positions",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_info"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_info",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14301,9 +13609,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1059",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_close_all_positions",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_info"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_info",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14312,31 +13620,31 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1501",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_event_loop",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_info"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_info",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2046",
+      "source_location": "L2053",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_log_stats",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_info"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_info",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2243",
+      "source_location": "L2250",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_manage_trailing_stops",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_info"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_info",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14345,20 +13653,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1168",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_tick",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_info"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_info",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2059",
+      "source_location": "L2066",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_signal_handler",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_info"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_info",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14367,20 +13675,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L776",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_start",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_info"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_info",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2064",
+      "source_location": "L2071",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_stop",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_info"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_info",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14389,20 +13697,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1415",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_backfill_history",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_warning"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2436",
+      "source_location": "L2443",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_check_for_closed_positions",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_warning"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14411,9 +13719,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1813",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_event_loop",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_warning"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14422,9 +13730,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L706",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_get_account_payload",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_warning"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14433,20 +13741,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L572",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_get_candles_payload",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_warning"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2285",
+      "source_location": "L2292",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_manage_trailing_stops",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_warning"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14455,9 +13763,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1366",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_tick",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_warning"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14466,9 +13774,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L198",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_slow_poll_loop",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_warning"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14477,31 +13785,31 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L774",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_start",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_warning"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2076",
+      "source_location": "L2083",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_stop",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_warning"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2742",
+      "source_location": "L2749",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_generate_session_summary",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_warning"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_warning",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14510,20 +13818,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1436",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_backfill_history",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_error"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_error",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2663",
+      "source_location": "L2670",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_check_for_closed_positions",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_error"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_error",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14532,9 +13840,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1063",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_close_all_positions",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_error"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_error",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14543,31 +13851,31 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1517",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_event_loop",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_error"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_error",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1969",
+      "source_location": "L1976",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_log_signal",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_error"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_error",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2318",
+      "source_location": "L2325",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_manage_trailing_stops",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_error"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_error",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14576,9 +13884,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1113",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_tick",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_error"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_error",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14587,9 +13895,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L619",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_send_order",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_error"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_error",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14598,20 +13906,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L787",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_start",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_error"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_error",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2388",
+      "source_location": "L2395",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_check_for_closed_positions",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_debug"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_debug",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14620,9 +13928,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L685",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_get_account_payload",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_debug"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_debug",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14631,9 +13939,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1446",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_candle_close",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_debug"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_debug",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14642,9 +13950,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1176",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_tick",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_debug"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_debug",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -14653,9 +13961,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L207",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_slow_poll_loop",
-      "target": "axonai_realtime_daemon_symbolcolorlogger_debug"
+      "target": "axonai_realtime_daemon_symbolcolorlogger_debug",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14663,9 +13971,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1383",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_backfill_history"
+      "target": "axonai_realtime_daemon_axondaemon_backfill_history",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14673,19 +13981,19 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1000",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_check_eod_close"
+      "target": "axonai_realtime_daemon_axondaemon_check_eod_close",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2352",
+      "source_location": "L2359",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_check_for_closed_positions"
+      "target": "axonai_realtime_daemon_axondaemon_check_for_closed_positions",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14693,9 +14001,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1022",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_close_all_positions"
+      "target": "axonai_realtime_daemon_axondaemon_close_all_positions",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14703,9 +14011,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L623",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_enrich_positions"
+      "target": "axonai_realtime_daemon_axondaemon_enrich_positions",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14713,9 +14021,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L298",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_entry_direction"
+      "target": "axonai_realtime_daemon_axondaemon_entry_direction",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14723,9 +14031,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1471",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_event_loop"
+      "target": "axonai_realtime_daemon_axondaemon_event_loop",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14733,9 +14041,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L663",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_get_account_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_account_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14743,9 +14051,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L568",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_get_candles_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_candles_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14753,9 +14061,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L531",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_get_levels_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_levels_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14763,9 +14071,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L312",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_get_mode_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_mode_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14773,9 +14081,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L333",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_get_regime_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_regime_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14783,9 +14091,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L226",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_get_session_details"
+      "target": "axonai_realtime_daemon_axondaemon_get_session_details",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14793,59 +14101,59 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L75",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_init"
+      "target": "axonai_realtime_daemon_axondaemon_init",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2083",
+      "source_location": "L2090",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_is_running"
+      "target": "axonai_realtime_daemon_axondaemon_is_running",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2086",
+      "source_location": "L2093",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_log_dry_run_event"
+      "target": "axonai_realtime_daemon_axondaemon_log_dry_run_event",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1938",
+      "source_location": "L1945",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_log_signal"
+      "target": "axonai_realtime_daemon_axondaemon_log_signal",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2042",
+      "source_location": "L2049",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_log_stats"
+      "target": "axonai_realtime_daemon_axondaemon_log_stats",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2110",
+      "source_location": "L2117",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_manage_trailing_stops"
+      "target": "axonai_realtime_daemon_axondaemon_manage_trailing_stops",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14853,9 +14161,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1440",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_on_candle_close"
+      "target": "axonai_realtime_daemon_axondaemon_on_candle_close",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14863,19 +14171,19 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1102",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_on_tick"
+      "target": "axonai_realtime_daemon_axondaemon_on_tick",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1982",
+      "source_location": "L1989",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_seconds_until_ready"
+      "target": "axonai_realtime_daemon_axondaemon_seconds_until_ready",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14883,19 +14191,19 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L615",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_send_order"
+      "target": "axonai_realtime_daemon_axondaemon_send_order",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2057",
+      "source_location": "L2064",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_signal_handler"
+      "target": "axonai_realtime_daemon_axondaemon_signal_handler",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14903,9 +14211,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L189",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_slow_poll_loop"
+      "target": "axonai_realtime_daemon_axondaemon_slow_poll_loop",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
@@ -14913,19 +14221,19 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L764",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_start"
+      "target": "axonai_realtime_daemon_axondaemon_start",
+      "confidence_score": 1.0
     },
     {
       "relation": "method",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2062",
+      "source_location": "L2069",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon",
-      "target": "axonai_realtime_daemon_axondaemon_stop"
+      "target": "axonai_realtime_daemon_axondaemon_stop",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -14933,9 +14241,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L65",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_65",
-      "target": "axonai_realtime_daemon_axondaemon"
+      "target": "axonai_realtime_daemon_axondaemon",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports",
@@ -15073,9 +14381,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L186",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_init",
-      "target": "axonai_realtime_daemon_axondaemon_start"
+      "target": "axonai_realtime_daemon_axondaemon_start",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -15083,9 +14391,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L190",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_190",
-      "target": "axonai_realtime_daemon_axondaemon_slow_poll_loop"
+      "target": "axonai_realtime_daemon_axondaemon_slow_poll_loop",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15094,9 +14402,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L376",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_get_regime_payload",
-      "target": "axonai_realtime_daemon_axondaemon_get_session_details"
+      "target": "axonai_realtime_daemon_axondaemon_get_session_details",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L226",
+      "weight": 1.0,
+      "source": "axonai_realtime_daemon_axondaemon_get_session_details",
+      "target": "datetime",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -15104,9 +14423,53 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L227",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_227",
-      "target": "axonai_realtime_daemon_axondaemon_get_session_details"
+      "target": "axonai_realtime_daemon_axondaemon_get_session_details",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L379",
+      "weight": 1.0,
+      "source": "axonai_realtime_daemon_axondaemon_get_regime_payload",
+      "target": "datetime",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L1102",
+      "weight": 1.0,
+      "source": "axonai_realtime_daemon_axondaemon_on_tick",
+      "target": "datetime",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L13",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "datetime"
+    },
+    {
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L230",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel_on_tick",
+      "target": "datetime"
     },
     {
       "relation": "rationale_for",
@@ -15114,9 +14477,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L299",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_299",
-      "target": "axonai_realtime_daemon_axondaemon_entry_direction"
+      "target": "axonai_realtime_daemon_axondaemon_entry_direction",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15158,9 +14521,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L934",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_start",
-      "target": "axonai_realtime_daemon_axondaemon_get_mode_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_mode_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -15168,9 +14531,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L313",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_313",
-      "target": "axonai_realtime_daemon_axondaemon_get_mode_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_mode_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15179,9 +14542,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L477",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_get_regime_payload",
-      "target": "axonai_realtime_daemon_axondaemon_seconds_until_ready"
+      "target": "axonai_realtime_daemon_axondaemon_seconds_until_ready",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15190,9 +14553,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1469",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_candle_close",
-      "target": "axonai_realtime_daemon_axondaemon_get_regime_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_regime_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15201,9 +14564,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1370",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_tick",
-      "target": "axonai_realtime_daemon_axondaemon_get_regime_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_regime_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15212,9 +14575,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L940",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_start",
-      "target": "axonai_realtime_daemon_axondaemon_get_regime_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_regime_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15223,9 +14586,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1468",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_candle_close",
-      "target": "axonai_realtime_daemon_axondaemon_get_levels_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_levels_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15234,9 +14597,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L937",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_start",
-      "target": "axonai_realtime_daemon_axondaemon_get_levels_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_levels_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15245,9 +14608,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1467",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_candle_close",
-      "target": "axonai_realtime_daemon_axondaemon_get_candles_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_candles_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15256,9 +14619,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L943",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_start",
-      "target": "axonai_realtime_daemon_axondaemon_get_candles_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_candles_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15267,31 +14630,31 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1084",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_close_all_positions",
-      "target": "axonai_realtime_daemon_axondaemon_send_order"
+      "target": "axonai_realtime_daemon_axondaemon_send_order",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1855",
+      "source_location": "L1862",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_event_loop",
-      "target": "axonai_realtime_daemon_axondaemon_send_order"
+      "target": "axonai_realtime_daemon_axondaemon_send_order",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2265",
+      "source_location": "L2272",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_manage_trailing_stops",
-      "target": "axonai_realtime_daemon_axondaemon_send_order"
+      "target": "axonai_realtime_daemon_axondaemon_send_order",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -15299,9 +14662,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L616",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_616",
-      "target": "axonai_realtime_daemon_axondaemon_send_order"
+      "target": "axonai_realtime_daemon_axondaemon_send_order",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15310,9 +14673,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L691",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_get_account_payload",
-      "target": "axonai_realtime_daemon_axondaemon_enrich_positions"
+      "target": "axonai_realtime_daemon_axondaemon_enrich_positions",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15321,9 +14684,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1373",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_tick",
-      "target": "axonai_realtime_daemon_axondaemon_get_account_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_account_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15332,9 +14695,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L876",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_start",
-      "target": "axonai_realtime_daemon_axondaemon_get_account_payload"
+      "target": "axonai_realtime_daemon_axondaemon_get_account_payload",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15343,9 +14706,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L907",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_start",
-      "target": "axonai_realtime_daemon_axondaemon_backfill_history"
+      "target": "axonai_realtime_daemon_axondaemon_backfill_history",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15354,9 +14717,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L998",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_start",
-      "target": "axonai_realtime_daemon_axondaemon_event_loop"
+      "target": "axonai_realtime_daemon_axondaemon_event_loop",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -15364,9 +14727,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L765",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_765",
-      "target": "axonai_realtime_daemon_axondaemon_start"
+      "target": "axonai_realtime_daemon_axondaemon_start",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15375,9 +14738,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1020",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_check_eod_close",
-      "target": "axonai_realtime_daemon_axondaemon_close_all_positions"
+      "target": "axonai_realtime_daemon_axondaemon_close_all_positions",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15386,9 +14749,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1111",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_tick",
-      "target": "axonai_realtime_daemon_axondaemon_check_eod_close"
+      "target": "axonai_realtime_daemon_axondaemon_check_eod_close",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -15396,9 +14759,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1001",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_1001",
-      "target": "axonai_realtime_daemon_axondaemon_check_eod_close"
+      "target": "axonai_realtime_daemon_axondaemon_check_eod_close",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -15406,9 +14769,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1023",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_1023",
-      "target": "axonai_realtime_daemon_axondaemon_close_all_positions"
+      "target": "axonai_realtime_daemon_axondaemon_close_all_positions",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15417,9 +14780,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1239",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_tick",
-      "target": "axonai_realtime_daemon_axondaemon_check_for_closed_positions"
+      "target": "axonai_realtime_daemon_axondaemon_check_for_closed_positions",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15428,9 +14791,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1235",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_on_tick",
-      "target": "axonai_realtime_daemon_axondaemon_manage_trailing_stops"
+      "target": "axonai_realtime_daemon_axondaemon_manage_trailing_stops",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -15438,9 +14801,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1103",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_1103",
-      "target": "axonai_realtime_daemon_axondaemon_on_tick"
+      "target": "axonai_realtime_daemon_axondaemon_on_tick",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L1406",
+      "weight": 1.0,
+      "source": "axonai_realtime_daemon_axondaemon_backfill_history",
+      "target": "livecandle",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -15448,9 +14822,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1384",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_1384",
-      "target": "axonai_realtime_daemon_axondaemon_backfill_history"
+      "target": "axonai_realtime_daemon_axondaemon_backfill_history",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/daemon.py",
+      "source_location": "L1440",
+      "weight": 1.0,
+      "source": "axonai_realtime_daemon_axondaemon_on_candle_close",
+      "target": "livecandle",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -15458,9 +14843,20 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1441",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_1441",
-      "target": "axonai_realtime_daemon_axondaemon_on_candle_close"
+      "target": "axonai_realtime_daemon_axondaemon_on_candle_close",
+      "confidence_score": 1.0
+    },
+    {
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L211",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel_on_candle_close",
+      "target": "livecandle"
     },
     {
       "relation": "calls",
@@ -15469,9 +14865,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1641",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_event_loop",
-      "target": "axonai_realtime_daemon_axondaemon_log_dry_run_event"
+      "target": "axonai_realtime_daemon_axondaemon_log_dry_run_event",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15480,9 +14876,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1480",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_event_loop",
-      "target": "axonai_realtime_daemon_axondaemon_log_stats"
+      "target": "axonai_realtime_daemon_axondaemon_log_stats",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
@@ -15491,9 +14887,9 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1505",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_event_loop",
-      "target": "axonai_realtime_daemon_axondaemon_seconds_until_ready"
+      "target": "axonai_realtime_daemon_axondaemon_seconds_until_ready",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
@@ -15501,122 +14897,122 @@
       "source_file": "axonai/realtime/daemon.py",
       "source_location": "L1472",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_rationale_1472",
-      "target": "axonai_realtime_daemon_axondaemon_event_loop"
+      "target": "axonai_realtime_daemon_axondaemon_event_loop",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1939",
+      "source_location": "L1946",
       "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_rationale_1939",
-      "target": "axonai_realtime_daemon_axondaemon_log_signal"
+      "source": "axonai_realtime_daemon_rationale_1946",
+      "target": "axonai_realtime_daemon_axondaemon_log_signal",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2054",
+      "source_location": "L2061",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_log_stats",
-      "target": "axonai_realtime_daemon_axondaemon_seconds_until_ready"
+      "target": "axonai_realtime_daemon_axondaemon_seconds_until_ready",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L1983",
+      "source_location": "L1990",
       "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_rationale_1983",
-      "target": "axonai_realtime_daemon_axondaemon_seconds_until_ready"
+      "source": "axonai_realtime_daemon_rationale_1990",
+      "target": "axonai_realtime_daemon_axondaemon_seconds_until_ready",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2079",
+      "source_location": "L2086",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_stop",
-      "target": "axonai_realtime_daemon_axondaemon_log_stats"
+      "target": "axonai_realtime_daemon_axondaemon_log_stats",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2043",
+      "source_location": "L2050",
       "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_rationale_2043",
-      "target": "axonai_realtime_daemon_axondaemon_log_stats"
+      "source": "axonai_realtime_daemon_rationale_2050",
+      "target": "axonai_realtime_daemon_axondaemon_log_stats",
+      "confidence_score": 1.0
     },
     {
       "relation": "calls",
       "context": "call",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2060",
+      "source_location": "L2067",
       "weight": 1.0,
-      "confidence_score": 1.0,
       "source": "axonai_realtime_daemon_axondaemon_signal_handler",
-      "target": "axonai_realtime_daemon_axondaemon_stop"
+      "target": "axonai_realtime_daemon_axondaemon_stop",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2058",
+      "source_location": "L2065",
       "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_rationale_2058",
-      "target": "axonai_realtime_daemon_axondaemon_signal_handler"
+      "source": "axonai_realtime_daemon_rationale_2065",
+      "target": "axonai_realtime_daemon_axondaemon_signal_handler",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2087",
+      "source_location": "L2094",
       "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_rationale_2087",
-      "target": "axonai_realtime_daemon_axondaemon_log_dry_run_event"
+      "source": "axonai_realtime_daemon_rationale_2094",
+      "target": "axonai_realtime_daemon_axondaemon_log_dry_run_event",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2111",
+      "source_location": "L2118",
       "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_rationale_2111",
-      "target": "axonai_realtime_daemon_axondaemon_manage_trailing_stops"
+      "source": "axonai_realtime_daemon_rationale_2118",
+      "target": "axonai_realtime_daemon_axondaemon_manage_trailing_stops",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2353",
+      "source_location": "L2360",
       "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_rationale_2353",
-      "target": "axonai_realtime_daemon_axondaemon_check_for_closed_positions"
+      "source": "axonai_realtime_daemon_rationale_2360",
+      "target": "axonai_realtime_daemon_axondaemon_check_for_closed_positions",
+      "confidence_score": 1.0
     },
     {
       "relation": "rationale_for",
       "confidence": "EXTRACTED",
       "source_file": "axonai/realtime/daemon.py",
-      "source_location": "L2712",
+      "source_location": "L2719",
       "weight": 1.0,
-      "confidence_score": 1.0,
-      "source": "axonai_realtime_daemon_rationale_2712",
-      "target": "axonai_realtime_daemon_generate_session_summary"
+      "source": "axonai_realtime_daemon_rationale_2719",
+      "target": "axonai_realtime_daemon_generate_session_summary",
+      "confidence_score": 1.0
     },
     {
       "relation": "imports",
@@ -15639,6 +15035,610 @@
       "weight": 1.0,
       "source": "cli_main_live",
       "target": "axonai_realtime_daemon_generate_session_summary"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/backtester.py",
+      "source_location": "L23",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_backtester",
+      "target": "axonai_realtime_reversal_model"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L31",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_adaptive_exit"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L21",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_displacement_engine"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L29",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_entry_state_machine"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L17",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_event_types"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L38",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_exit_engine"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L33",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_exit_stats"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L26",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_liquidity_engine"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L16",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_live_state"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L36",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_location_engine"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L25",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_mtf_context"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L24",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_regime_engine"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L44",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_reversal_model_enginesnapshot"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L71",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_reversal_model_reversal_confluence_veto"
+    },
+    {
+      "relation": "contains",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L158",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_reversal_model_reversalmodel"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L30",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_trade_health_monitor"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L32",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_trade_phase"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L37",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_trade_state_engine"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L20",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model",
+      "target": "axonai_realtime_velocity_normalizer"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L1",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_rationale_1",
+      "target": "axonai_realtime_reversal_model"
+    },
+    {
+      "relation": "imports_from",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/trade_analytics.py",
+      "source_location": "L15",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_trade_analytics",
+      "target": "axonai_realtime_reversal_model"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L45",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_rationale_45",
+      "target": "axonai_realtime_reversal_model_enginesnapshot"
+    },
+    {
+      "relation": "references",
+      "context": "return_type",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L230",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel_on_tick",
+      "target": "axonai_realtime_reversal_model_enginesnapshot"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/trade_analytics.py",
+      "source_location": "L15",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_trade_analytics",
+      "target": "axonai_realtime_reversal_model_enginesnapshot"
+    },
+    {
+      "relation": "uses",
+      "confidence": "INFERRED",
+      "source_file": "axonai/realtime/trade_analytics.py",
+      "source_location": "L15",
+      "weight": 0.8,
+      "confidence_score": 0.5,
+      "source": "axonai_realtime_trade_analytics_tradeanalytics",
+      "target": "axonai_realtime_reversal_model_enginesnapshot"
+    },
+    {
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/trade_analytics.py",
+      "source_location": "L59",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_trade_analytics_tradeanalytics_record_entry",
+      "target": "axonai_realtime_reversal_model_enginesnapshot"
+    },
+    {
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/trade_analytics.py",
+      "source_location": "L92",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_trade_analytics_tradeanalytics_record_exit",
+      "target": "axonai_realtime_reversal_model_enginesnapshot"
+    },
+    {
+      "relation": "uses",
+      "confidence": "INFERRED",
+      "source_file": "axonai/realtime/trade_analytics.py",
+      "source_location": "L15",
+      "weight": 0.8,
+      "confidence_score": 0.5,
+      "source": "axonai_realtime_trade_analytics_traderecord",
+      "target": "axonai_realtime_reversal_model_enginesnapshot"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L82",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_rationale_82",
+      "target": "axonai_realtime_reversal_model_reversal_confluence_veto"
+    },
+    {
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L71",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversal_confluence_veto",
+      "target": "displacementstate"
+    },
+    {
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L71",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversal_confluence_veto",
+      "target": "liquiditystate"
+    },
+    {
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L71",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversal_confluence_veto",
+      "target": "mtfstate"
+    },
+    {
+      "relation": "references",
+      "context": "parameter_type",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L71",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversal_confluence_veto",
+      "target": "normalizedvelocity"
+    },
+    {
+      "relation": "references",
+      "context": "generic_arg",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L71",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversal_confluence_veto",
+      "target": "pricelevel"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L189",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel_init",
+      "target": "mtfstate"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L190",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel_init",
+      "target": "liquiditystate"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L191",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel_init",
+      "target": "normalizedvelocity"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L192",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel_init",
+      "target": "displacementstate"
+    },
+    {
+      "relation": "references",
+      "context": "generic_arg",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L205",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel_sync_levels",
+      "target": "pricelevel"
+    },
+    {
+      "relation": "imports",
+      "context": "import",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/backtester.py",
+      "source_location": "L23",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_backtester",
+      "target": "axonai_realtime_reversal_model_reversalmodel"
+    },
+    {
+      "relation": "uses",
+      "confidence": "INFERRED",
+      "source_file": "axonai/realtime/backtester.py",
+      "source_location": "L23",
+      "weight": 0.8,
+      "confidence_score": 0.5,
+      "source": "axonai_realtime_backtester_backtestengine",
+      "target": "axonai_realtime_reversal_model_reversalmodel"
+    },
+    {
+      "relation": "calls",
+      "context": "call",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "source_file": "axonai/realtime/backtester.py",
+      "source_location": "L55",
+      "weight": 1.0,
+      "source": "axonai_realtime_backtester_backtestengine_init",
+      "target": "axonai_realtime_reversal_model_reversalmodel"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L159",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_rationale_159",
+      "target": "axonai_realtime_reversal_model_reversalmodel"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L397",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel",
+      "target": "axonai_realtime_reversal_model_reversalmodel_clear_trade"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L404",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel",
+      "target": "axonai_realtime_reversal_model_reversalmodel_config"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L161",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel",
+      "target": "axonai_realtime_reversal_model_reversalmodel_init"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L211",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel",
+      "target": "axonai_realtime_reversal_model_reversalmodel_on_candle_close"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L230",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel",
+      "target": "axonai_realtime_reversal_model_reversalmodel_on_tick"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L367",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel",
+      "target": "axonai_realtime_reversal_model_reversalmodel_register_trade"
+    },
+    {
+      "relation": "method",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L205",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel",
+      "target": "axonai_realtime_reversal_model_reversalmodel_sync_levels"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L206",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_rationale_206",
+      "target": "axonai_realtime_reversal_model_reversalmodel_sync_levels"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L212",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_rationale_212",
+      "target": "axonai_realtime_reversal_model_reversalmodel_on_candle_close"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L241",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_rationale_241",
+      "target": "axonai_realtime_reversal_model_reversalmodel_on_tick"
+    },
+    {
+      "relation": "references",
+      "context": "generic_arg",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L230",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_reversalmodel_on_tick",
+      "target": "locationcontext"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L368",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_rationale_368",
+      "target": "axonai_realtime_reversal_model_reversalmodel_register_trade"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L398",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_rationale_398",
+      "target": "axonai_realtime_reversal_model_reversalmodel_clear_trade"
+    },
+    {
+      "relation": "rationale_for",
+      "confidence": "EXTRACTED",
+      "source_file": "axonai/realtime/reversal_model.py",
+      "source_location": "L405",
+      "weight": 1.0,
+      "confidence_score": 1.0,
+      "source": "axonai_realtime_reversal_model_rationale_405",
+      "target": "axonai_realtime_reversal_model_reversalmodel_config"
     },
     {
       "relation": "contains",
@@ -41223,5 +41223,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "6c24b1e03cba511262eb23588a3444ce46714629"
+  "built_at_commit": "a4c224729c38c907bafc41e1edf169664844a4e0"
 }
