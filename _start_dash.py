@@ -15,8 +15,8 @@ from axonai.realtime.tick_behavior import TickBehaviorAnalyzer
 import argparse
 
 parser = argparse.ArgumentParser(description="Start Axon Dashboard (Bridge Mode)")
-parser.add_argument("--symbol", type=str, default="EURUSD,GBPUSD,USDJPY,AUDUSD,XAUUSD",
-                    help="Comma-separated list of symbols (default: EURUSD,GBPUSD,USDJPY,AUDUSD,XAUUSD)")
+parser.add_argument("--symbol", type=str, default="EURUSD,GBPUSD,USDJPY,AUDUSD",
+                    help="Comma-separated list of symbols (default: EURUSD,GBPUSD,USDJPY,AUDUSD)")
 args = parser.parse_args()
 
 symbols = [s.strip().upper() for s in args.symbol.split(",") if s.strip()]

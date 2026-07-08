@@ -197,8 +197,8 @@ def main():
                         help="Dashboard host")
     parser.add_argument("--port", type=int, default=8000,
                         help="Dashboard port")
-    parser.add_argument("--symbol", type=str, default="EURUSD,GBPUSD,USDJPY,AUDUSD,XAUUSD",
-                        help="Comma-separated list of symbols to trade (default: EURUSD,GBPUSD,USDJPY,AUDUSD,XAUUSD)")
+    parser.add_argument("--symbol", type=str, default="EURUSD,GBPUSD,USDJPY,AUDUSD",
+                        help="Comma-separated list of symbols to trade (default: EURUSD,GBPUSD,USDJPY,AUDUSD)")
     parser.add_argument("--paper", action="store_true",
                         help="Paper-trade mode: simulate fills internally, never send orders to MT5. "
                              "Safe for testing; dry-run (default) still places real demo orders.")

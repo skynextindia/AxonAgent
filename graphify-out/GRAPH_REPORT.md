@@ -1,7 +1,7 @@
 # Graph Report - AxonAgent-Agy  (2026-07-08)
 
 ## Corpus Check
-- 89 files · ~98,054 words
+- 89 files · ~98,140 words
 - Verdict: corpus is large enough that graph structure adds value.
 
 ## Summary
@@ -10,7 +10,7 @@
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `a4c22472`
+- Built from commit: `e8725d51`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
