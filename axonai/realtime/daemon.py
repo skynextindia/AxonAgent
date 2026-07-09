@@ -81,6 +81,45 @@ class AxonDaemon:
         # entrypoint (the `daemon` CLI path doesn't set config["symbol"]); prevents
         # cross-pair baseline contamination. setdefault preserves an explicit value.
         config.setdefault("symbol", self.mt5_symbol)
+        # Load per-pair calibration params emitted by the calibrator (EOD analysis
+        # of the engine-snapshot store). Priority: explicit config > calibration
+        # JSON > pair-scaled defaults below. Fail-open: absent/broken file = ignore.
+        try:
+            import json as _json, os as _os
+            _cp = _os.path.join("reports", f"calibration_params_{self.mt5_symbol}.json")
+            if _os.path.exists(_cp):
+                with open(_cp, "r", encoding="utf-8") as _f:
+                    _params = _json.load(_f) or {}
+                for _k, _v in _params.items():
+                    config.setdefault(_k, _v)  # explicit config already present wins
+                logger.info("Loaded %d calibration params from %s", len(_params), _cp)
+        except Exception as _e:
+            logger.warning("Calibration params load failed (%s); using defaults", _e)
+        # Per-pair raw-scale calibration. Velocity/displacement are measured in
+        # raw pips (price-delta / pip_mult). For XAUUSD pip_mult=0.01 but gold
+        # moves whole dollars, so raw pip counts run ~10x an FX pair's — every
+        # hardcoded FX-scale threshold (exhaustion move>3, velocity>1.5, rejection
+        # vel>5/8, VOL_PIPS_REF=1.0) misfires on gold. Inject pair-scaled DEFAULTS
+        # here (explicit config values always win). Tunable via `pair_move_scale`;
+        # the calibrator can later refine per symbol.
+        _sym_u = self.mt5_symbol.upper()
+        _scale = float(config.get("pair_move_scale") or (10.0 if "XAU" in _sym_u else 1.0))
+        config["pair_move_scale"] = _scale
+        config.setdefault("displacement_exhaustion_min_move_pips", 3.0 * _scale)
+        config.setdefault("displacement_trend_net_pips", 2.0 * _scale)
+        config.setdefault("context_exhaustion_net_max_pips", 2.0 * _scale)
+        config.setdefault("microstructure_velocity_min", 1.5 * _scale)
+        config.setdefault("absorption_max_move_pips", 2.0 * _scale)
+        config.setdefault("level_rejection_vel_min", 5.0 * _scale)
+        config.setdefault("level_strong_rejection_vel", 8.0 * _scale)
+        config.setdefault("vol_pips_ref", 1.0 * _scale)
+        # Trail pip-distances are FX-tuned; scale defaults for gold so trailing
+        # isn't ~10x too tight (setdefault: explicit config still wins).
+        config.setdefault("realtime_min_price_distance_to_trail", 2.0 * _scale)
+        config.setdefault("realtime_max_trail_distance", 15.0 * _scale)
+        config.setdefault("realtime_base_trail_buffer", 7.5 * _scale)
+        config.setdefault("realtime_min_trail_floor_pips", 4.0 * _scale)
+        config.setdefault("exit_profit_protect_pips", 4.0 * _scale)
         self._trade_terminal_path = config.get("mt5_trade_terminal_path")
         self.offset_hours = 0
         self.tz = timezone.utc
@@ -129,7 +168,7 @@ class AxonDaemon:
 
         # Layer 5: Velocity-based Trailing Stops
         from axonai.realtime.velocity_trailing import VelocityTrailingManager
-        self.velocity_trailing = VelocityTrailingManager()
+        self.velocity_trailing = VelocityTrailingManager(config=config)
         self._lowest_price_since_entry = {}  # Track lowest price for retest detection
         self._last_velocity_percentile = 0.0
 
@@ -165,6 +204,8 @@ class AxonDaemon:
         self._start_time: Optional[datetime] = None
         self.paused: bool = False
         self._last_snapshot = None
+        self._snap_store_fh = None          # engine-snapshot store file handle
+        self._snap_store_ready = False
         self.current_bid: float = 0.0
         self.current_ask: float = 0.0
 
@@ -849,6 +890,23 @@ class AxonDaemon:
                     ticket, direction, estimated_ticks, entry_price
                 )
 
+            # Register with trade state engine & reversal model so tracking is restored
+            if hasattr(self, "reversal_model"):
+                self.reversal_model.trade_state_engine.register_trade(
+                    ticket=ticket,
+                    direction=direction,
+                    entry_price=entry_price,
+                    entry_time=datetime.now(timezone.utc),
+                    entry_sl=pos.get("sl", 0.0),
+                    entry_tp=pos.get("tp", 0.0),
+                    entry_reason="Re-adopted on daemon restart",
+                    position_size=volume,
+                )
+                self.reversal_model.register_trade(
+                    ticket, direction, entry_price, pos.get("sl", 0.0), pos.get("tp", 0.0),
+                    reason="Re-adopted on daemon restart"
+                )
+
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
         try:
             positions = []
@@ -1141,6 +1199,14 @@ class AxonDaemon:
         # Expose latest snapshot on the engine so the exit-engine path (below) can read it.
         self.reversal_model.latest_snapshot = snapshot
 
+        # WS4: append the DAEMON-processed engine snapshot to a per-pair store so the
+        # calibrator / EOD analysis can inspect the exact metrics + market-state
+        # context in the run-up to major reversals. Fail-open (never break the tick).
+        try:
+            self._record_engine_snapshot(snapshot, timestamp, mid)
+        except Exception:
+            pass
+
         # CHANGE 9C: Dependency injection for EntryDecision
         if snapshot and snapshot.entry_decision:
             snapshot.entry_decision.entry_location_context = {
@@ -1265,7 +1331,8 @@ class AxonDaemon:
                 spread_delta = ticks[-1]['ask'] - ticks[-1]['bid'] - (ticks[-2]['ask'] - ticks[-2]['bid'])
                 # 1. Check for tick efficiency collapse (Price is moving fast but not going anywhere)
                 eff = snapshot.velocity.tick_efficiency if 'snapshot' in locals() else 1.0
-                collapse = (eff < 0.15) and (velocity > 1.5)
+                _vel_min = self.config.get("microstructure_velocity_min", 1.5)
+                collapse = (eff < 0.15) and (velocity > _vel_min)
 
                 # 2. Check for aggression shift (Sudden reversal in order flow dominance)
                 i60 = imb.get("imbalance_60s", 0.0)
@@ -1275,7 +1342,8 @@ class AxonDaemon:
                 # 3. Check for absorption (High volume, high velocity, but zero displacement)
                 t_30s = [t for t in ticks if (ticks[-1]['time'] - t['time']).total_seconds() <= 30.0]
                 pip_unit = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
-                absorption = len(t_30s) >= 20 and velocity > 1.5 and abs(t_30s[-1]['mid'] - t_30s[0]['mid']) < (2.0 * pip_unit)
+                _abs_move_max = self.config.get("absorption_max_move_pips", 2.0)
+                absorption = len(t_30s) >= 20 and velocity > _vel_min and abs(t_30s[-1]['mid'] - t_30s[0]['mid']) < (_abs_move_max * pip_unit)
 
             dashboard.broadcast({
                 "type": "tick",
@@ -1552,7 +1620,7 @@ class AxonDaemon:
                     atr = 0.0012
                 buffer = 1.0 * pip
 
-                min_sl_pips = 12.0 if "GBP" in self.mt5_symbol.upper() else (15.0 if "JPY" in self.mt5_symbol.upper() else 8.0)
+                min_sl_pips = 12.0 if "GBP" in self.mt5_symbol.upper() else (15.0 if "JPY" in self.mt5_symbol.upper() else (8.0 * float(self.config.get("pair_move_scale", 1.0)) if "XAU" in self.mt5_symbol.upper() else 8.0))
                 if snapshot.entry_decision.direction == "BUY":
                     sl_distance = (snapshot.price - anomaly_price) + spread + buffer
                     sl_distance = max(min_sl_pips * pip, min(sl_distance, 1.5 * atr))
@@ -1683,7 +1751,7 @@ class AxonDaemon:
                     continue
 
                 if use_market:
-                    min_sl_pips = 12.0 if "GBP" in self.mt5_symbol.upper() else (15.0 if "JPY" in self.mt5_symbol.upper() else 8.0)
+                    min_sl_pips = 12.0 if "GBP" in self.mt5_symbol.upper() else (15.0 if "JPY" in self.mt5_symbol.upper() else (8.0 * float(self.config.get("pair_move_scale", 1.0)) if "XAU" in self.mt5_symbol.upper() else 8.0))
                     if direction == "BUY":
                         sl_distance = max(min_sl_pips * pip, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
                         sl = snapshot.price - sl_distance
@@ -1766,7 +1834,7 @@ class AxonDaemon:
                     self._events_fired += 1
 
                 else:
-                    min_sl_pips = 12.0 if "GBP" in self.mt5_symbol.upper() else (15.0 if "JPY" in self.mt5_symbol.upper() else 8.0)
+                    min_sl_pips = 12.0 if "GBP" in self.mt5_symbol.upper() else (15.0 if "JPY" in self.mt5_symbol.upper() else (8.0 * float(self.config.get("pair_move_scale", 1.0)) if "XAU" in self.mt5_symbol.upper() else 8.0))
                     if direction == "BUY":
                         sl_distance = max(min_sl_pips * pip, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
                         sl = anomaly_price - sl_distance
@@ -2098,6 +2166,62 @@ class AxonDaemon:
     def is_running(self) -> bool:
         return self._running
 
+    def _record_engine_snapshot(self, snapshot, timestamp, price: float) -> None:
+        """Append the daemon-processed engine snapshot to a per-pair CSV store.
+
+        Columns capture the metrics + market-state context at each tick so the
+        calibrator / EOD job can look back at what the engine looked like right
+        before a major reversal. Controlled by config `enable_snapshot_store`.
+        """
+        if not self.config.get("enable_snapshot_store", True) or snapshot is None:
+            return
+        import os, csv
+        v = getattr(snapshot, "velocity", None)
+        d = getattr(snapshot, "displacement", None)
+        m = self.reversal_model._last_mtf_state
+        liq = getattr(snapshot, "liquidity", None) or self.reversal_model._last_liquidity_state
+        rg = getattr(snapshot, "regime", None)
+        ed = getattr(snapshot, "entry_decision", None)
+        row = {
+            "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] if hasattr(timestamp, "strftime") else str(timestamp),
+            "price": round(float(price), 5),
+            "vel_pct": round(float(getattr(v, "percentile", 0.0) or 0.0), 2),
+            "vel_z": round(float(getattr(v, "z_score", 0.0) or 0.0), 2),
+            "vel_decaying": int(bool(getattr(v, "is_decaying", False))),
+            "decay_ratio": round(float(getattr(v, "decay_ratio", 0.0) or 0.0), 3),
+            "vol_pips": round(float(getattr(v, "vol_pips", 0.0) or 0.0), 3),
+            "tick_eff": round(float(getattr(v, "tick_efficiency", 0.0) or 0.0), 3),
+            "disp_class": getattr(d, "classification", ""),
+            "disp_ratio": round(float(getattr(d, "displacement_ratio", 0.0) or 0.0), 3),
+            "net_disp_pips": round(float(getattr(d, "net_displacement_pips", 0.0) or 0.0), 2),
+            "regime": getattr(rg, "dominant", "") or getattr(rg, "regime", ""),
+            "h4_bias": getattr(m, "h4_bias", 0.0),
+            "h1_bias": getattr(m, "h1_bias", 0.0),
+            "m15_bias": getattr(m, "m15_bias", 0.0),
+            "reversal_pressure": round(float(getattr(m, "reversal_pressure", 0.0) or 0.0), 3),
+            "is_exhaustion_zone": int(bool(getattr(m, "is_exhaustion_zone", False))),
+            "structure_break": int(bool(getattr(m, "structure_break", False))),
+            "active_sweeps": len(getattr(liq, "active_sweeps", []) or []),
+            "active_breaks": len(getattr(liq, "active_breaks", []) or []),
+            "liquidity_void": int(bool(getattr(liq, "liquidity_void_active", False))),
+            "entry_state": getattr(ed, "state", ""),
+            "entry_dir": getattr(ed, "direction", "") or "",
+            "signal_quality": getattr(ed, "signal_quality", 0.0),
+            "skip_reason": getattr(ed, "skip_reason", "") or "",
+        }
+        if self._snap_store_fh is None and not self._snap_store_ready:
+            os.makedirs("reports", exist_ok=True)
+            path = os.path.join("reports", f"engine_snapshots_{self.mt5_symbol}.csv")
+            need_header = not os.path.exists(path) or os.path.getsize(path) == 0
+            self._snap_store_fh = open(path, "a", newline="", encoding="utf-8")
+            self._snap_store_writer = csv.DictWriter(self._snap_store_fh, fieldnames=list(row.keys()))
+            if need_header:
+                self._snap_store_writer.writeheader()
+            self._snap_store_ready = True
+        if self._snap_store_fh is not None:
+            self._snap_store_writer.writerow(row)
+            self._snap_store_fh.flush()
+
     def _log_dry_run_event(self, event_type: str, details: dict):
         """Append an event to the dry run session log."""
         if not self.config.get('realtime_dry_run'):
@@ -2383,14 +2507,8 @@ class AxonDaemon:
             with self._position_lock:
                 if not self._tracked_positions and not self._position_cache:
                     return
-            # Use cached position snapshots instead of polling the execution bridge every second.
-            # The snapshot is kept fresh by _manage_trailing_stops itself (updated after every SL modify)
-            # and by the position re-adoption on startup.
-            positions = [
-                dict(snap, ticket=ticket)
-                for ticket, snap in self._last_position_snapshot.items()
-                if ticket in self._tracked_positions
-            ]
+            # Use the live position cache from the slow poll loop to detect fills and adoptions
+            positions = self._position_cache if self._position_cache is not None else []
             if not positions:
                 # Fallback: if cache is empty (first tick after restart), do one live fetch
                 from axonai.realtime.execution_client import send_execution_command

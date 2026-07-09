@@ -68,7 +68,7 @@ MICRO_TFS = {"SESSION", "M15", "H1"}
 MICRO_TYPES = {"ASH", "ASL", "LDH", "LDL", "ROUND", "LNDH", "LNDL", "NYH", "NYL", "TODAY_H", "TODAY_L"}
 
 
-def _reversal_confluence_veto(
+def _reversal_confluence_grade(
     direction: Optional[str],
     price: float,
     pip: float,
@@ -78,81 +78,102 @@ def _reversal_confluence_veto(
     vel: NormalizedVelocity,
     disp: DisplacementState,
     price_levels: Optional[List[PriceLevel]],
-) -> Optional[str]:
-    """Fail-closed reversal gate. Returns the FIRST skip_reason string, or None to allow.
+    config: Optional[dict] = None,
+):
+    """Graded, FAIL-OPEN reversal filter. Returns (allow, score, reason).
 
-    Runs five ordered checks; any missing/ambiguous/unwarmed data => SKIP (never fire blind).
+    Intraday design (replaces the old fail-closed AND-veto that blocked all
+    entries): only a few unambiguous conditions HARD-REJECT; everything else
+    contributes to a 0..1 confluence score compared against min_confluence_score.
+    Missing levels / unwarmed MTF LOWER the score, they never veto — so the
+    machine keeps trading instead of freezing when data is thin.
     """
-    # GATE 1 - DIRECTION SANITY (fail-closed)
+    cfg = config or {}
     if direction not in ("BUY", "SELL"):
-        return "indeterminate direction"
-
+        return (False, 0.0, "indeterminate direction")
     want = 1.0 if direction == "BUY" else -1.0
 
-    # GATE 2 - MTF warm check + FADE-AT-EXTREMES context (fail-closed on unwarmed)
+    # Weights (config-tunable) and threshold.
+    w_mtf = float(cfg.get("gate_w_mtf", 0.25))
+    w_major = float(cfg.get("gate_w_major", 0.20))
+    w_micro = float(cfg.get("gate_w_micro", 0.15))
+    w_confirm = float(cfg.get("gate_w_confirm", 0.30))
+    w_revp = float(cfg.get("gate_w_reversal_pressure", 0.25))
+    w_struct = float(cfg.get("gate_w_structure_break", 0.15))
+    min_score = float(cfg.get("min_confluence_score", 0.35))
+    revp_thresh = float(cfg.get("gate_reversal_pressure_min", 0.5))
+
+    score = 0.0
+
+    # --- HARD REJECT: falling knife (structural break in progress) ---
+    if len(getattr(liq, "active_breaks", []) or []) > 0:
+        return (False, 0.0, "structural break in progress (falling knife)")
+    # --- HARD REJECT: raw velocity spike into a liquidity void ---
+    if getattr(vel, "is_unusual", False) and getattr(liq, "liquidity_void_active", False):
+        return (False, 0.0, "velocity spike in liquidity void")
+
+    # --- MTF (graded; fail-open on unwarmed) ---
     h4b, h1b, m15b = mtf.h4_bias, mtf.h1_bias, mtf.m15_bias
-    # Truly unwarmed only when ALL three biases are exactly 0.0 (EMA-None sentinel
-    # from _calculate_tf_bias). A warm-but-flat market keeps at least one non-zero
-    # bias, so it is NOT falsely blocked here.
-    if h4b == 0.0 and h1b == 0.0 and m15b == 0.0:
-        return "MTF not warm (all bias 0)"
-    # Fade-at-extremes policy: WITH-trend entries are always allowed; AGAINST the
-    # big-TF trend is allowed ONLY when the HTF move is exhausted / pulling back
-    # (a real reversal, not a falling knife). Open-space counter-trend is further
-    # blocked by GATE 3 (must be at a level) + GATE 4 (must show exhaustion/sweep).
-    big_lean = h4b + h1b
-    if big_lean * want < 0 and not (mtf.is_exhaustion_zone or mtf.is_pullback):
-        return f"against big-TF trend w/o exhaustion (H4={h4b:.2f},H1={h1b:.2f})"
+    mtf_warm = not (h4b == 0.0 and h1b == 0.0 and m15b == 0.0)
+    revp = float(getattr(mtf, "reversal_pressure", 0.0) or 0.0)
+    struct_ok = bool(getattr(mtf, "structure_break", False)) and (getattr(mtf, "structure_break_dir", 0) == (1 if direction == "BUY" else -1))
+    if mtf_warm:
+        big_lean = h4b + h1b
+        exhausted = mtf.is_exhaustion_zone or mtf.is_pullback or revp >= revp_thresh or struct_ok
+        if big_lean * want < 0:
+            # Counter-trend: allowed ONLY with a real reversal signal; else HARD REJECT.
+            if not exhausted:
+                return (False, 0.0, f"against big-TF trend w/o exhaustion (H4={h4b:.2f},H1={h1b:.2f})")
+            score += w_mtf  # counter-trend but exhaustion-confirmed
+        else:
+            score += w_mtf  # with-trend
+    # unwarmed MTF: no contribution, no veto (fail-open)
 
-    # GATE 3 - MAJOR+MICRO LEVEL CONFLUENCE (no open-space / mid-move entries)
-    if not price_levels:
-        return "no levels synced (open space)"
-    side = "resistance" if direction == "SELL" else "support"  # fade resistance / bounce support
-    conf_pips = max(3.0, 0.3 * (h1_atr / pip))  # ATR-scaled 'at a level' window
-    has_major = False
-    has_micro = False
-    for lvl in price_levels:
-        if not getattr(lvl, "is_active", False):
-            continue
-        # Include the level price is sitting ON: within ~2 pips it gets relabeled
-        # "current" (not support/resistance), yet that is exactly the level being
-        # reversed. Accept "current" alongside the correct fade side.
-        lvl_dir = getattr(lvl, "direction", "")
-        if lvl_dir != side and lvl_dir != "current":
-            continue
-        if abs(price - lvl.price) / pip > conf_pips:
-            continue
-        tf = getattr(lvl, "timeframe", "")
-        lt = getattr(lvl, "level_type", "")
-        if tf in MAJOR_TFS or lt in MAJOR_TYPES:
-            has_major = True
-        if tf in MICRO_TFS or lt in MICRO_TYPES:
-            has_micro = True
-    if not has_major:
-        return "no MAJOR level at price (open space)"
-    if not has_micro:
-        return "no MICRO level confluence"
+    # reversal_pressure contribution (scaled) + structure break
+    score += w_revp * min(1.0, revp)
+    if struct_ok:
+        score += w_struct
 
-    # GATE 4 - REVERSAL CONFIRMATION AT LEVEL (no falling knives; fail-closed)
-    # Falling-knife veto: an accepted/broken level = continuation, never fade it
-    if len(liq.active_breaks) > 0:
-        return "structural break in progress (falling knife)"
-    # SHARP: liquidity sweep at level + displacement flip/exhaustion
-    sharp = len(liq.active_sweeps) > 0 and (
+    # --- LEVELS (graded; single strong level is enough, fail-open if none) ---
+    if price_levels:
+        side = "resistance" if direction == "SELL" else "support"
+        conf_pips = max(3.0, 0.3 * (h1_atr / pip)) if pip else 3.0
+        has_major = False
+        has_micro = False
+        for lvl in price_levels:
+            if not getattr(lvl, "is_active", False):
+                continue
+            lvl_dir = getattr(lvl, "direction", "")
+            if lvl_dir != side and lvl_dir != "current":
+                continue
+            if pip and abs(price - lvl.price) / pip > conf_pips:
+                continue
+            tf = getattr(lvl, "timeframe", "")
+            lt = getattr(lvl, "level_type", "")
+            if tf in MAJOR_TFS or lt in MAJOR_TYPES:
+                has_major = True
+            if tf in MICRO_TFS or lt in MICRO_TYPES:
+                has_micro = True
+        if has_major:
+            score += w_major
+        if has_micro:
+            score += w_micro
+    # no levels synced: fail-open (score just doesn't get the level bonus)
+
+    # --- REVERSAL CONFIRMATION (graded) ---
+    sharp = len(getattr(liq, "active_sweeps", []) or []) > 0 and (
         disp.is_exhausting or disp.classification in ("EXHAUSTION", "TRAP", "ABSORPTION")
     )
-    # DECAYED: momentum decay/exhaustion at level
-    decayed = vel.is_decaying and (
-        disp.is_exhausting or disp.classification == "EXHAUSTION" or disp.displacement_ratio < 0.3
+    decayed = getattr(vel, "is_decaying", False) and (
+        disp.is_exhausting or disp.classification == "EXHAUSTION" or getattr(disp, "displacement_ratio", 1.0) < 0.3
     )
-    if not (sharp or decayed):
-        return "no sharp/decayed reversal confirmation (knife)"
+    if sharp or decayed:
+        score += w_confirm
 
-    # GATE 5 - RAW-SPIKE-IN-VOID BACKSTOP (belt-and-suspenders)
-    if vel.is_unusual and liq.liquidity_void_active:
-        return "velocity spike in liquidity void"
-
-    return None  # all checks passed -> allow the reversal
+    score = min(1.0, score)
+    if score >= min_score:
+        return (True, score, f"graded allow score={score:.2f}")
+    return (False, score, f"below confluence threshold ({score:.2f}<{min_score:.2f})")
 
 
 class ReversalModel:
@@ -172,7 +193,7 @@ class ReversalModel:
         self.liquidity = LiquidityEngine(pip_mult=self._pip)
         
         # Instantiate Tier 3
-        self.entry = EntryStateMachine(pip_mult=self._pip)
+        self.entry = EntryStateMachine(pip_mult=self._pip, config=self._config)
         self.health = TradeHealthMonitor(pip_mult=self._pip, config=self._config)
         self.exit = AdaptiveExitManager(pip_mult=self._pip, config=self._config)
         self.phase_tracker = TradePhaseTracker(pip_mult=self._pip)
@@ -262,6 +283,23 @@ class ReversalModel:
         )
         self._last_disp_state = disp_state
 
+        # Populate MTF reversal_pressure from tick-level velocity decay +
+        # displacement exhaustion (MTFContext itself has no tick data). This is
+        # the reversal/exhaustion signal the EMA-slope bias structurally lacks;
+        # the entry gate uses it to allow a genuine counter-trend reversal.
+        try:
+            rp = 0.0
+            if getattr(vel_state, "is_decaying", False):
+                rp += 0.5
+            dr = getattr(vel_state, "decay_ratio", 1.0)
+            if dr is not None and dr < 0.5:
+                rp += min(0.5, (0.5 - dr))
+            if getattr(disp_state, "is_exhausting", False) or getattr(disp_state, "classification", "") in ("EXHAUSTION", "TRAP", "ABSORPTION"):
+                rp += 0.5
+            self._last_mtf_state.reversal_pressure = min(1.0, rp)
+        except Exception:
+            pass
+
         # --- TIER 2: ANALYSIS PIPELINE ---
         liq_state = self.liquidity.update(price, timestamp, vel_state, disp_state)
         self._last_liquidity_state = liq_state
@@ -284,19 +322,27 @@ class ReversalModel:
             spread=spread
         )
 
-        # 1b. FAIL-CLOSED reversal-confluence gate — DISABLED (was blocking all entries).
-        # Re-enable by uncommenting when level/MTF data pipeline is verified.
-        # if entry_decision.is_valid_entry:
-        #     skip = _reversal_confluence_veto(
-        #         entry_decision.direction, price, self._pip, self._h1_atr,
-        #         self._last_mtf_state, self._last_liquidity_state,
-        #         vel_state, disp_state, self._price_levels,
-        #     )
-        #     if skip:
-        #         entry_decision.is_valid_entry = False
-        #         entry_decision.skip_reason = skip
-        #         entry_decision.reason = f"GATE_SKIP: {skip}"  # observable in dashboard/logs
-        #         logger.info("REVERSAL GATE veto dir=%s: %s", entry_decision.direction, skip)
+        # 1b. GRADED, FAIL-OPEN reversal-confluence gate (ENABLED). Hard-rejects
+        # only falling knives / open-space spikes / counter-trend-without-exhaustion;
+        # otherwise scores confluence (MTF + levels + confirmation + reversal_pressure
+        # + structure break) and allows when score >= min_confluence_score. Missing
+        # levels/MTF lower the score, never veto. Can be disabled via config
+        # `enable_reversal_gate=False` for shadow comparison.
+        if entry_decision.is_valid_entry and self._config.get("enable_reversal_gate", True):
+            allow, score, reason = _reversal_confluence_grade(
+                entry_decision.direction, price, self._pip, self._h1_atr,
+                self._last_mtf_state, self._last_liquidity_state,
+                vel_state, disp_state, self._price_levels, self._config,
+            )
+            # Carry the confluence score for sizing/observability regardless.
+            entry_decision.signal_quality = max(entry_decision.signal_quality, round(score, 2))
+            if not allow:
+                entry_decision.is_valid_entry = False
+                entry_decision.skip_reason = reason
+                entry_decision.reason = f"GATE_SKIP: {reason}"
+                logger.info("REVERSAL GATE veto dir=%s: %s", entry_decision.direction, reason)
+            else:
+                logger.info("REVERSAL GATE allow dir=%s: %s", entry_decision.direction, reason)
 
         # 2. Evaluate Active Trade Health
         phase_snap = self.phase_tracker.update(price, vel_state, disp_state, liq_state)
@@ -399,6 +445,7 @@ class ReversalModel:
         self.health.clear()
         self.exit.clear()
         self.phase_tracker.clear()
+        self.trade_state_engine.reset()  # Reset trade state engine too!
 
     @property
     def config(self) -> dict:

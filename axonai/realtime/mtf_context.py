@@ -8,6 +8,7 @@ with a continuous strength scale.
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from typing import Dict, List, Optional
 
@@ -29,7 +30,15 @@ class MTFState:
 
     # ── Micro-structure contexts ────────────────────────────────
     is_pullback: bool = False         # M15 is against H4/H1 trend
-    is_exhaustion_zone: bool = False  # Price extended on HTF
+    is_exhaustion_zone: bool = False  # Price extended on HTF (ATR-normalized)
+
+    # ── Reversal / inception signals (NOT trend-derived) ────────
+    # reversal_pressure: 0..1 blend of velocity decay + displacement exhaustion,
+    # populated by ReversalModel.on_tick (MTFContext has no tick data). Lets the
+    # entry gate allow a counter-trend reversal that the EMA bias would veto.
+    reversal_pressure: float = 0.0
+    structure_break: bool = False     # M15 swing-structure flip (BOS/CHoCH)
+    structure_break_dir: int = 0      # +1 bullish break, -1 bearish break, 0 none
 
     # ── Key HTF Levels (Dynamic) ────────────────────────────────
     pdh: float = 0.0                  # Previous Daily High
@@ -63,6 +72,16 @@ class MTFContext:
         self._pdl = 0.0
         self._daily_bars: List[LiveCandle] = []
 
+        # H4 ATR tracking (for ATR-normalized exhaustion, replaces 80-pip literal)
+        self._h4_tr = deque(maxlen=14)
+        self._h4_prev_close: Optional[float] = None
+        self._h4_atr: float = 0.0
+
+        # M15 swing structure window (for BOS/CHoCH structure-break detection)
+        self._m15_highs = deque(maxlen=6)
+        self._m15_lows = deque(maxlen=6)
+        self._structure_dir: int = 0  # last confirmed structure direction
+
     def update_candle(self, candle: LiveCandle) -> MTFState:
         """Update state when a candle closes on any timeframe."""
         tf = candle.timeframe.upper()
@@ -77,6 +96,21 @@ class MTFContext:
             else:
                 self._emas[tf][20] = c * self._k20 + self._emas[tf][20] * (1 - self._k20)
                 self._emas[tf][50] = c * self._k50 + self._emas[tf][50] * (1 - self._k50)
+
+        # Track H4 ATR (14-period) for ATR-normalized exhaustion
+        if tf == "H4":
+            tr = candle.high - candle.low
+            if self._h4_prev_close is not None:
+                tr = max(tr, abs(candle.high - self._h4_prev_close), abs(candle.low - self._h4_prev_close))
+            self._h4_prev_close = candle.close
+            self._h4_tr.append(tr)
+            if len(self._h4_tr) >= 3:
+                self._h4_atr = sum(self._h4_tr) / len(self._h4_tr)
+
+        # Track M15 swing highs/lows for structure-break detection
+        if tf == "M15":
+            self._m15_highs.append(candle.high)
+            self._m15_lows.append(candle.low)
 
         # Update Daily levels
         if tf in ("D1", "DAILY"):
@@ -111,15 +145,38 @@ class MTFContext:
         if (h4_bias > 0.5 and m15_bias < -0.2) or (h4_bias < -0.5 and m15_bias > 0.2):
             is_pullback = True
 
-        # Extension detection (price very far from H4 EMA)
+        # Extension detection (price far from H4 EMA), ATR-normalized per pair.
+        # Threshold = mult * H4_ATR; falls back to the legacy 80-pip literal only
+        # until the H4 ATR warms. This is what makes exhaustion detection scale to
+        # XAUUSD instead of using an FX-tuned constant.
         is_extended = False
         h4_ema = self._emas["H4"][20]
         if h4_ema and "M15" in self._latest_candles:
             curr_price = self._latest_candles["M15"].close
-            dist = abs(curr_price - h4_ema) / self._pip
-            # 80 pips is a generic placeholder; should be dynamic based on ATR
-            if dist > 80.0:
+            dist_pips = abs(curr_price - h4_ema) / self._pip
+            atr_pips = (self._h4_atr / self._pip) if self._h4_atr > 0 else 0.0
+            mult = float(self.config.get("mtf_exhaustion_atr_mult", 2.0))
+            thresh = (mult * atr_pips) if atr_pips > 0 else 80.0
+            if dist_pips > thresh:
                 is_extended = True
+
+        # Structure-break (BOS/CHoCH): a new lower-low after a rising sequence
+        # (bearish CHoCH) or a new higher-high after a falling sequence (bullish).
+        structure_break = False
+        structure_break_dir = 0
+        if len(self._m15_highs) >= 4:
+            highs = list(self._m15_highs)
+            lows = list(self._m15_lows)
+            prior_hi = max(highs[:-1])
+            prior_lo = min(lows[:-1])
+            if lows[-1] < prior_lo and self._structure_dir >= 0:
+                structure_break = True
+                structure_break_dir = -1
+                self._structure_dir = -1
+            elif highs[-1] > prior_hi and self._structure_dir <= 0:
+                structure_break = True
+                structure_break_dir = 1
+                self._structure_dir = 1
 
         # Context summary string
         if is_aligned:
@@ -137,6 +194,8 @@ class MTFContext:
             m15_bias=round(m15_bias, 3),
             is_pullback=is_pullback,
             is_exhaustion_zone=is_extended,
+            structure_break=structure_break,
+            structure_break_dir=structure_break_dir,
             pdh=self._pdh,
             pdl=self._pdl,
             context_summary=summary

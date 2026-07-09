@@ -287,7 +287,8 @@ class MarketContextBuilder:
                 phase = "HUNTING"
 
         # Heuristic 2: Sudden reversal after directional move
-        if displacement.classification == "EXHAUSTION" and displacement.net_displacement_pips < 2.0:
+        _exh_net_max = self._config.get("context_exhaustion_net_max_pips", 2.0)
+        if displacement.classification == "EXHAUSTION" and displacement.net_displacement_pips < _exh_net_max:
             severity += 30
             phase = "SWEEPING"
 

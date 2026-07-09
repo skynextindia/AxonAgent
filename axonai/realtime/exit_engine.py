@@ -108,11 +108,21 @@ class ExitEngine:
                 )
 
         # --- PRIORITY 2: ADVERSE IMPULSE (high urgency) ---
+        # Only cut on an adverse impulse if the trade is NOT already meaningfully
+        # profitable and has been held past a minimum number of ticks. A single
+        # opposing velocity spike is usually noise: cutting a winner on it caps
+        # every winning trade at scalp size. Once the trade is in profit past
+        # `exit_profit_protect_pips`, hand it to the trailing manager instead of
+        # closing here. Losing/flat trades are still cut instantly (correct).
+        adverse_min_ticks = self.config.get("adverse_impulse_min_ticks", 3)
+        profit_protect_pips = self.config.get("exit_profit_protect_pips", 4.0)
         if (
             velocity_pct > 70
             and displacement == "IMPULSE"
             and not trade_state.last_displacement_direction_favorable
             and trade_state.current_phase in ["ENTRY", "EXPANSION"]
+            and trade_state.ticks_in_trade > adverse_min_ticks
+            and trade_state.current_profit_pips < profit_protect_pips
         ):
             urgency = self.config.get("adverse_impulse_urgency", 0.9) * htf_mult
             return ExitSignal(
@@ -234,9 +244,10 @@ if __name__ == "__main__":
     test2_pass = "RETEST_TRAP" in signal.reason and signal.should_exit == False
     print(f"  Test 2 (retest trap gate): {'PASS' if test2_pass else 'FAIL'}")
 
-    # Test 3: Adverse impulse (opposite direction) -> CLOSE_NOW
+    # Test 3: Adverse impulse (opposite direction) on a non-winning trade -> CLOSE_NOW
     trade_state.last_displacement_direction_favorable = False
     trade_state.current_phase = "ENTRY"
+    trade_state.current_profit_pips = -2.0  # not yet profitable -> not protected
     signal = engine.evaluate(trade_state, snapshot, location_ctx, current_price=1.0805)
     test3_pass = signal.should_exit == True and signal.reason.startswith("Adverse")
     print(f"  Test 3 (adverse impulse): {'PASS' if test3_pass else 'FAIL'}")

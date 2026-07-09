@@ -77,8 +77,14 @@ class LevelBehaviorTracker:
         pullback_reset_pips: float = 10.0,
         max_approach_duration_sec: float = 120.0,
         absorption_ticks_threshold: int = 30,
+        rejection_vel_min: float = 5.0,
+        strong_rejection_vel: float = 8.0,
     ):
         self._pip_mult = pip_mult
+        # Raw pip/sec rejection-velocity cutoffs (FX defaults; pass pair-scaled
+        # values for XAU so they aren't trivially exceeded on gold).
+        self._rejection_vel_min = rejection_vel_min
+        self._strong_rejection_vel = strong_rejection_vel
         self._outer_zone = outer_zone_pips * pip_mult
         self._inner_zone = inner_zone_pips * pip_mult
         self._rejection_confirm = rejection_confirm_pips * pip_mult
@@ -402,7 +408,7 @@ class LevelBehaviorTracker:
         """Summarize the quality of price interaction at this level."""
         if bhv.total_attacks == 0:
             return "untested"
-        if bhv.rejection_count >= 3 and bhv.last_rejection_velocity > 5.0:
+        if bhv.rejection_count >= 3 and bhv.last_rejection_velocity > self._rejection_vel_min:
             return "strong_defense"
         if bhv.consecutive_attacks >= 3 and absorption > self._absorption_ticks_threshold:
             return "weakening"
@@ -410,6 +416,6 @@ class LevelBehaviorTracker:
             return "pressured"
         if bhv.rejection_count >= 2:
             return "tested"
-        if bhv.total_attacks == 1 and bhv.last_rejection_velocity > 8.0:
+        if bhv.total_attacks == 1 and bhv.last_rejection_velocity > self._strong_rejection_vel:
             return "rejected_sharply"
         return "approached"

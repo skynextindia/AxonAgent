@@ -37,6 +37,7 @@ echo.
 REM Start the live trading system with dual terminals
 REM Feed: Exness (data) | Execution: MetaQuotes (orders)
 python run.py --direct --live ^
+  --symbol "EURUSD,GBPUSD,USDJPY,AUDUSD,XAUUSD" ^
   --feed-path "C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe" ^
   --exec-path "C:\Program Files\MetaTrader 5\terminal64.exe"
 

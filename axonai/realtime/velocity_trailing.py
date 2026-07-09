@@ -23,8 +23,12 @@ logger = logging.getLogger(__name__)
 # Reference volatility length-scale (pips) at which pip-distance constants are
 # unscaled. Chosen so EURUSD-normal behavior is IDENTICAL to today: the legacy
 # constants were tuned on EURUSD, whose typical 10s absolute-excursion length
-# sits around this value. ASSUMPTION: VOL_PIPS_REF = 3.0 pips.
-VOL_PIPS_REF = 3.0
+# sits around this value. CALIBRATED 2026-07-09 from persisted per-session
+# EURUSD vol_pips baselines (asian 0.75, london 2.74, overlap 1.06, ny 0.81,
+# rollover 0.67 -> median ~1.0). The old 3.0 guess pinned vol_scale at the 0.4
+# floor in 4/5 sessions, shrinking every trail distance to 40% and knocking
+# stops out on noise. 1.0 restores ~full intended width and lets London widen.
+VOL_PIPS_REF = 1.0
 # Scaling clamp: effective constant stays within [0.4x, 2.5x] of its original.
 _VOL_SCALE_MIN = 0.4
 _VOL_SCALE_MAX = 2.5
@@ -56,6 +60,10 @@ class VelocityTrailingManager:
         self.base_trail_buffer = float(self.config.get("realtime_base_trail_buffer", 7.5))
         self.min_trail_floor_pips = float(self.config.get("realtime_min_trail_floor_pips", 4.0))
 
+        # MTF retrace delay parameters
+        self.enable_mtf_retrace_delay = bool(self.config.get("enable_mtf_retrace_delay", True))
+        self.mtf_retrace_threshold_pips = float(self.config.get("mtf_retrace_threshold_pips", 1.0))
+
     def _vol_scale(self, velocity: Optional[NormalizedVelocity]) -> float:
         """Reference-ratio scale for pip-distance constants.
 
@@ -68,7 +76,8 @@ class VelocityTrailingManager:
         vp = getattr(velocity, "vol_pips", None)
         if vp is None or vp <= 0.0:
             return 1.0
-        ratio = vp / VOL_PIPS_REF
+        ref = float(self.config.get("vol_pips_ref", VOL_PIPS_REF)) or VOL_PIPS_REF
+        ratio = vp / ref
         return max(_VOL_SCALE_MIN, min(ratio, _VOL_SCALE_MAX))
 
     def on_tick(
@@ -129,9 +138,18 @@ class VelocityTrailingManager:
                 "support_level": None,
                 "dynamic_buffer": None,
                 "smoothed_width_mult": None,
+                "peak_price": bid if position_type == "BUY" else ask,
             }
 
         state = self._trail_state[ticket]
+
+        # Update peak price (most favorable price seen since entry)
+        if position_type == "BUY":
+            if "peak_price" not in state or bid > state["peak_price"]:
+                state["peak_price"] = bid
+        else:
+            if "peak_price" not in state or ask < state["peak_price"]:
+                state["peak_price"] = ask
 
         # Single volatility-length-scale multiplier reused for all pip-distance
         # constants this tick. 1.0 (identity) when vol_pips unavailable/==REF.
@@ -161,6 +179,23 @@ class VelocityTrailingManager:
         # Only trail if profitable (any profit > 0)
         if current_profit <= 0:
             return None
+
+        # MTF Retrace Delay Check: prevent trailing stop cuts on pullbacks when HTF is aligned
+        enable_retrace_delay = self.config.get("enable_mtf_retrace_delay", True)
+        retrace_threshold = float(self.config.get("mtf_retrace_threshold_pips", 1.0))
+        
+        if is_htf_aligned and enable_retrace_delay:
+            if position_type == "BUY":
+                retrace_pips = (state["peak_price"] - bid) / pip
+            else:
+                retrace_pips = (ask - state["peak_price"]) / pip
+                
+            if retrace_pips > retrace_threshold:
+                logger.info(
+                    "VelocityTrail #%d: Retrace delay active. Price retraced %.1f pips from peak %.5f. MTF aligned, skipping SL update.",
+                    ticket, retrace_pips, state["peak_price"]
+                )
+                return None
 
         # Detect velocity acceleration (getting faster)
         velocity_accelerating = velocity_acceleration >= self.velocity_acceleration_threshold

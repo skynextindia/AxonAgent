@@ -304,6 +304,7 @@ class TradeStateEngine:
             self._state.close_price = close_price
             self._state.close_time = datetime.utcnow()
             self._state.current_phase = PHASE_EXIT
+            self._state.is_active = False
             logger.info(
                 "TradeStateEngine: Trade closed | ticket=%d | reason=%s | profit=%.1f pips",
                 self._state.ticket,

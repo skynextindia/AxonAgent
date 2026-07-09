@@ -63,7 +63,7 @@ class EntryDecision:
 class EntryStateMachine:
     """Stateful trade entry execution manager."""
 
-    def __init__(self, timeout_sec: float = 120.0, pip_mult: float = 0.0001):
+    def __init__(self, timeout_sec: float = 120.0, pip_mult: float = 0.0001, config: Optional[dict] = None):
         # Late import to avoid circular dependency
         from axonai.realtime.regime_engine import REGIME_RANGE_CHOP, REGIME_EXHAUSTION, REGIME_REVERSAL
 
@@ -73,6 +73,16 @@ class EntryStateMachine:
 
         self._pip = pip_mult
         self._timeout_sec = timeout_sec
+        self._config = config or {}
+        # Sniper-entry tunables (pair-scalable; FX defaults preserve behavior).
+        _scale = float(self._config.get("pair_move_scale", 1.0))
+        self._climax_efficiency_max = float(self._config.get("entry_climax_efficiency_max", 0.2))
+        self._mae_invalidate_pips = float(self._config.get("entry_mae_invalidate_pips", 5.0 * _scale))
+        # When True, a plain-impulse breakaway routes through RETEST_WAIT for a
+        # velocity-decay exhaustion confirmation (sniper), instead of triggering
+        # on the breakout itself. A clear EXHAUSTION signature still triggers now.
+        self._require_retest_confirm = bool(self._config.get("entry_require_retest_confirm", True))
+        self._prev_net_sign = 0  # displacement-flip detector
 
         # State tracking
         self._current_state = STATE_IDLE
@@ -101,6 +111,7 @@ class EntryStateMachine:
         self._max_adverse_excursion = 0.0
         self._last_tick_time = 0.0
         self._retest_start_time = 0.0
+        self._prev_net_sign = 0
         self._last_reason = "Reset"
 
     def evaluate(
@@ -292,7 +303,7 @@ class EntryStateMachine:
     ) -> None:
         """Look for the initial anomaly (Microstructure Peak)."""
         # Anomaly criteria: High velocity + low tick efficiency (Climax)
-        is_climax = vel.is_unusual and vel.tick_efficiency < 0.2
+        is_climax = vel.is_unusual and vel.tick_efficiency < self._climax_efficiency_max
 
         # Or an active liquidity sweep
         is_sweep = len(liq.active_sweeps) > 0
@@ -347,7 +358,7 @@ class EntryStateMachine:
             self._max_adverse_excursion = -dist
 
         # Invalidate if it pushes too far against us without absorption
-        if self._max_adverse_excursion > 5.0 and disp.classification == DISPLACEMENT_IMPULSE:
+        if self._max_adverse_excursion > self._mae_invalidate_pips and disp.classification == DISPLACEMENT_IMPULSE:
             self._transition(STATE_INVALIDATED, "Anomaly broken by strong impulse")
             return
 
@@ -387,14 +398,34 @@ class EntryStateMachine:
         elif self._anomaly_direction == "BUY" and dist > trigger_pips and is_impulse:
             is_trigger = True
 
+        # Displacement-flip detector: net displacement flipping toward our
+        # expected reversal direction is a direct reversal-inception tell.
+        net = getattr(disp, "net_displacement_pips", 0.0) or 0.0
+        net_sign = 1 if net > 0 else (-1 if net < 0 else 0)
+        flip_favorable = (
+            (self._anomaly_direction == "BUY" and self._prev_net_sign < 0 and net_sign > 0) or
+            (self._anomaly_direction == "SELL" and self._prev_net_sign > 0 and net_sign < 0)
+        )
+        self._prev_net_sign = net_sign if net_sign != 0 else self._prev_net_sign
+
+        # A clear exhaustion signature (velocity already decayed at the extreme) or
+        # a favorable displacement flip is the actual reversal inflection -> trigger
+        # now. A plain-impulse/ratio breakaway is a breakout, not yet a confirmed
+        # reversal: route it through RETEST_WAIT for velocity-decay confirmation.
+        strong_reversal = (disp.classification == "EXHAUSTION") or getattr(disp, "is_exhausting", False) or flip_favorable
+
         # Debug logging for trigger condition
         logger.info(
-            "EntryStateMachine ARMING check: dir=%s dist=%.2f is_impulse=%s (class=%s ratio=%.2f) trigger=%s",
-            self._anomaly_direction, dist, is_impulse, disp.classification, disp.displacement_ratio, is_trigger
+            "EntryStateMachine ARMING check: dir=%s dist=%.2f is_impulse=%s (class=%s ratio=%.2f) flip=%s strong=%s trigger=%s",
+            self._anomaly_direction, dist, is_impulse, disp.classification, disp.displacement_ratio, flip_favorable, strong_reversal, is_trigger
         )
-            
+
         if is_trigger:
-            self._transition(STATE_TRIGGERED, f"Break away confirmed ({disp.classification}). Immediate reversal trigger.")
+            if strong_reversal or not self._require_retest_confirm:
+                self._transition(STATE_TRIGGERED, f"Reversal inflection confirmed ({disp.classification}, flip={flip_favorable}). Trigger.")
+            else:
+                self._retest_start_time = ts
+                self._transition(STATE_RETEST_WAIT, f"Breakaway impulse ({disp.classification}); awaiting velocity-decay retest confirmation.")
 
     def _evaluate_retest_wait(
         self, price: float, ts: float, velocity: NormalizedVelocity

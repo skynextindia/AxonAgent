@@ -40,6 +40,7 @@ echo.
 REM Start the paper trading system with dual terminals
 REM Feed: Exness (data) | Execution: MetaQuotes (simulated)
 python run.py --direct --paper ^
+  --symbol "EURUSD,GBPUSD,USDJPY,AUDUSD,XAUUSD" ^
   --feed-path "C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe" ^
   --exec-path "C:\Program Files\MetaTrader 5\terminal64.exe"
 

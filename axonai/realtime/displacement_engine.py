@@ -92,6 +92,11 @@ class DisplacementEngine:
         self._trap_threshold = trap_ratio_threshold
         self._compression_z = compression_velocity_z
 
+        # Pair-scaled raw-pip thresholds (FX defaults; daemon injects XAU-scaled
+        # values via config so these don't degenerate on gold). See daemon config.
+        self._exhaustion_min_move = float(self._config.get("displacement_exhaustion_min_move_pips", 3.0))
+        self._trend_net_pips = float(self._config.get("displacement_trend_net_pips", 2.0))
+
         # Dynamic threshold engine
         self._buffer_engine = DisplacementBufferEngine(config=config)
         self._last_regime: Optional[object] = None  # RegimeState, but avoid circular import
@@ -230,9 +235,9 @@ class DisplacementEngine:
             return "mixed"
         recent = list(self._displacement_history)[-lookback:]
         net = sum(recent)
-        if net > 2.0:
+        if net > self._trend_net_pips:
             return "bullish"
-        elif net < -2.0:
+        elif net < -self._trend_net_pips:
             return "bearish"
         return "mixed"
 
@@ -271,7 +276,7 @@ class DisplacementEngine:
         is_decaying = velocity.is_decaying
 
         # Priority 1: Exhaustion (velocity was high, now decaying)
-        if is_decaying and total_move > 3.0:
+        if is_decaying and total_move > self._exhaustion_min_move:
             return DISPLACEMENT_EXHAUSTION
 
         # Priority 2: Impulse (high velocity + unusual displacement)
