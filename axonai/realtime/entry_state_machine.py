@@ -124,6 +124,8 @@ class EntryStateMachine:
         regime: "RegimeState",
         mtf: MTFState,
         spread: float = 0.0,
+        candle_setup_active: bool = False,
+        candle_setup_direction: Optional[str] = None,
     ) -> EntryDecision:
         """Evaluate conditions and transition states."""
         # Smooth spread over 3-5 ticks
@@ -151,13 +153,17 @@ class EntryStateMachine:
                 
         # 2. State Machine Transitions
         if self._current_state in (STATE_IDLE, STATE_INVALIDATED):
-            self._evaluate_idle(price, ts, velocity, displacement, liquidity, regime)
+            self._evaluate_idle(
+                price, ts, velocity, displacement, liquidity, regime,
+                candle_setup_active=candle_setup_active,
+                candle_setup_direction=candle_setup_direction,
+            )
             
         elif self._current_state == STATE_ANOMALY:
             self._evaluate_anomaly(price, ts, velocity, displacement)
             
         elif self._current_state == STATE_ARMING:
-            self._evaluate_arming(price, ts, displacement, mtf)
+            self._evaluate_arming(price, ts, displacement, mtf, velocity)
             
         elif self._current_state == STATE_RETEST_WAIT:
             self._evaluate_retest_wait(price, ts, velocity)
@@ -299,9 +305,28 @@ class EntryStateMachine:
 
     def _evaluate_idle(
         self, price: float, ts: float, vel: NormalizedVelocity,
-        disp: DisplacementState, liq: LiquidityState, regime: RegimeState
+        disp: DisplacementState, liq: LiquidityState, regime: RegimeState,
+        candle_setup_active: bool = False,
+        candle_setup_direction: Optional[str] = None,
     ) -> None:
-        """Look for the initial anomaly (Microstructure Peak)."""
+        """Look for the initial anomaly (Microstructure Peak).
+
+        With the candle setup gate enabled (default), the machine only arms when
+        a candle-close confirmed setup is active. This prevents entries on raw
+        tick noise between M15 candle closes.
+        """
+        # ── Candle Setup Gate ─────────────────────────────────────────────────
+        # If the gate is configured and no candle setup is active, stay IDLE.
+        # This is the key integration point: candle_close → CandleSetupTracker
+        # → setup_active before the tick-level machine can arm.
+        gate_enabled = self._config.get("candle_setup_gate", True)
+        if gate_enabled and not candle_setup_active:
+            logger.debug(
+                "EntryIDLE: Candle setup gate BLOCKED — no active M15 setup. Tick-level signals ignored."
+            )
+            return
+
+        # ── Standard anomaly detection (unchanged) ───────────────────────────
         # Anomaly criteria: High velocity + low tick efficiency (Climax)
         is_climax = vel.is_unusual and vel.tick_efficiency < self._climax_efficiency_max
 
@@ -331,7 +356,21 @@ class EntryStateMachine:
             # Bearish climax (net displacement negative) -> expect BUY reversal
             elif disp.net_displacement_pips < 0:
                 direction = "BUY"
-            
+
+        # ── Direction agreement with candle setup ─────────────────────────────
+        # If a candle setup is active and the tick-level direction disagrees,
+        # override with candle_setup_direction (higher structural authority).
+        if candle_setup_active and candle_setup_direction:
+            if direction and direction != candle_setup_direction:
+                logger.info(
+                    "EntryIDLE: Tick direction=%s disagrees with candle setup direction=%s — using candle setup.",
+                    direction, candle_setup_direction
+                )
+            direction = candle_setup_direction
+            # Allow the anomaly even without a tick-level spike when candle setup is strong
+            if not (is_climax or is_sweep):
+                is_climax = True  # treat confirmed candle setup as a synthetic climax
+
         if (is_climax or is_sweep) and direction:
             self._anomaly_time = ts
             self._anomaly_price = price
@@ -345,6 +384,7 @@ class EntryStateMachine:
                 price, direction, self._anomaly_type, vel.is_unusual, vel.tick_efficiency
             )
             self._transition(STATE_ANOMALY, f"{reason}. Expected reversal: {direction}")
+
 
     def _evaluate_anomaly(
         self, price: float, ts: float, vel: NormalizedVelocity, disp: DisplacementState
@@ -370,18 +410,36 @@ class EntryStateMachine:
             self._transition(STATE_ARMING, "Velocity decayed. Arming trigger.")
 
     def _evaluate_arming(
-        self, price: float, ts: float, disp: DisplacementState, mtf: MTFState
+        self, price: float, ts: float, disp: DisplacementState, mtf: MTFState,
+        vel: Optional[NormalizedVelocity] = None,
     ) -> None:
         """Wait for the price to break away from the trap in our direction."""
         dist = (price - self._anomaly_price) / self._pip
 
-        # Beyond-extreme fast-kill: new extreme in anomaly direction -> invalidate breakout
-        if self._anomaly_direction == "SELL" and dist > 0.0:
-            self._transition(STATE_INVALIDATED, f"New high extreme detected ({dist:+.2f} pips). Breakout.")
+        # ── LOOSENED fast-kill: allow a small buffer before invalidating ──────
+        # Old: ANY price beyond extreme = immediate invalidation (too sensitive)
+        # New: allow up to max(2.0, 0.2*ATR/pip) pips before invalidating
+        fast_kill_buffer = float(self._config.get("entry_fast_kill_buffer_pips", 2.0))
+        if self._anomaly_direction == "SELL" and dist > fast_kill_buffer:
+            self._transition(STATE_INVALIDATED, f"New high extreme ({dist:+.2f} pips, buffer={fast_kill_buffer:.1f}). Breakout.")
             return
-        elif self._anomaly_direction == "BUY" and dist < 0.0:
-            self._transition(STATE_INVALIDATED, f"New low extreme detected ({dist:+.2f} pips). Breakout.")
+        elif self._anomaly_direction == "BUY" and dist < -fast_kill_buffer:
+            self._transition(STATE_INVALIDATED, f"New low extreme ({dist:+.2f} pips, buffer={fast_kill_buffer:.1f}). Breakout.")
             return
+
+        # ── OPTIMISTIC VELOCITY DECAY TRIGGER ────────────────────────────────
+        # If tick velocity is clearly decaying (momentum exhaustion at the peak),
+        # trigger immediately at the wick extreme — don't wait for a full breakaway.
+        # This is the "sniper entry" — entering right at the inflection point.
+        if vel is not None:
+            decay = getattr(vel, "decay_ratio", 1.0) or 1.0
+            is_decaying = getattr(vel, "is_decaying", False)
+            if is_decaying and decay < 0.5:
+                self._transition(
+                    STATE_TRIGGERED,
+                    f"Optimistic velocity decay entry (decay={decay:.2f} < 0.5, at wick extreme)."
+                )
+                return
 
         # Trigger criteria: Impulse, or high displacement ratio, or exhaustion (velocity decay = momentum shift)
         is_impulse = (
@@ -454,17 +512,17 @@ class EntryStateMachine:
 
         if in_zone:
             decay = getattr(velocity, "decay_ratio", 1.0) or 1.0
-            tr_10 = getattr(velocity, "tick_rate_10s", 0.0) or 0.0
-            tr_300 = getattr(velocity, "tick_rate_300s", 0.0) or 0.0
 
             # Trigger invalidate: high momentum on retest (breaking through)
             if decay > 0.8:
                 self._transition(STATE_INVALIDATED, f"High momentum on retest (decay={decay:.2f}). Breakout threat.")
                 return
 
-            # Trigger confirm: low momentum (opposing flow dead)
-            if decay < 0.4 and tr_10 < tr_300 * 0.6:
-                self._transition(STATE_TRIGGERED, f"Retest confirmed (decay={decay:.2f}, ticks={tr_10:.1f}/{tr_300:.1f}). Reversal trigger.")
+            # Trigger confirm: relaxed to just decay < 0.6 (candle setup already filtered noise)
+            # Old: decay < 0.4 AND tr_10 < tr_300 * 0.6 (dual condition — too strict)
+            if decay < 0.6:
+                self._transition(STATE_TRIGGERED, f"Retest confirmed (decay={decay:.2f}). Reversal trigger.")
+
 
     def _calculate_quality(self, regime: "RegimeState", mtf: MTFState) -> float:
         """Calculate a 0.0 to 1.0 confidence score for the entry."""

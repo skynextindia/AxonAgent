@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Tuple
 
 from axonai.realtime.live_state import PriceLevel
 from axonai.realtime.event_types import LiveCandle
+from axonai.realtime.candle_setup_tracker import CandleSetupTracker
 
 # Tier 1: Data
 from axonai.realtime.velocity_normalizer import VelocityNormalizer, NormalizedVelocity
@@ -59,16 +60,7 @@ class EngineSnapshot:
     atr: float = 0.0
 
 
-# ── Reversal-Confluence Gate constants (fail-closed MTF + level veto) ─────
-# Big-TF = daily/weekly/H4 structural levels. Micro intraday = session / M15 / H1
-# structure. Used to require a MAJOR + MICRO confluence at the reversal price.
-MAJOR_TFS = {"D1", "W1", "H4"}
-MAJOR_TYPES = {"PDH", "PDL", "PWH", "PWL", "H4_SWING", "ASH", "ASL", "LDH", "LDL", "LNDH", "LNDL", "NYH", "NYL"}
-MICRO_TFS = {"SESSION", "M15", "H1"}
-MICRO_TYPES = {"ASH", "ASL", "LDH", "LDL", "ROUND", "LNDH", "LNDL", "NYH", "NYL", "TODAY_H", "TODAY_L"}
-
-
-def _reversal_confluence_grade(
+def _unified_confluence_score(
     direction: Optional[str],
     price: float,
     pip: float,
@@ -78,102 +70,103 @@ def _reversal_confluence_grade(
     vel: NormalizedVelocity,
     disp: DisplacementState,
     price_levels: Optional[List[PriceLevel]],
+    candle_setup_score: float = 0.0,
     config: Optional[dict] = None,
 ):
-    """Graded, FAIL-OPEN reversal filter. Returns (allow, score, reason).
+    """Unified confluence gate replacing _reversal_confluence_grade.
 
-    Intraday design (replaces the old fail-closed AND-veto that blocked all
-    entries): only a few unambiguous conditions HARD-REJECT; everything else
-    contributes to a 0..1 confluence score compared against min_confluence_score.
-    Missing levels / unwarmed MTF LOWER the score, they never veto — so the
-    machine keeps trading instead of freezing when data is thin.
+    Weights:
+        0.30  Candle Setup Score    (CandleSetupTracker — M15 confirmed pattern)
+        0.25  Tick Velocity Exhaust (VelocityEngine — climax + decay at extreme)
+        0.25  S/R Level Proximity  (distance to nearest active level)
+        0.20  H4/H1 Trend Align    (MTF EMA bias direction)
+
+    Threshold: >= 0.65 to allow entry.  Hard-rejects kept for structural breaks
+    and velocity-void spikes (same as old gate) to stay fail-safe.
     """
     cfg = config or {}
     if direction not in ("BUY", "SELL"):
         return (False, 0.0, "indeterminate direction")
     want = 1.0 if direction == "BUY" else -1.0
-
-    # Weights (config-tunable) and threshold.
-    w_mtf = float(cfg.get("gate_w_mtf", 0.25))
-    w_major = float(cfg.get("gate_w_major", 0.20))
-    w_micro = float(cfg.get("gate_w_micro", 0.15))
-    w_confirm = float(cfg.get("gate_w_confirm", 0.30))
-    w_revp = float(cfg.get("gate_w_reversal_pressure", 0.25))
-    w_struct = float(cfg.get("gate_w_structure_break", 0.15))
-    min_score = float(cfg.get("min_confluence_score", 0.35))
-    revp_thresh = float(cfg.get("gate_reversal_pressure_min", 0.5))
+    min_score = float(cfg.get("min_confluence_score", 0.65))
 
     score = 0.0
 
-    # --- HARD REJECT: falling knife (structural break in progress) ---
+    # --- HARD REJECTS (same as before — fail-safe) ---
     if len(getattr(liq, "active_breaks", []) or []) > 0:
         return (False, 0.0, "structural break in progress (falling knife)")
-    # --- HARD REJECT: raw velocity spike into a liquidity void ---
     if getattr(vel, "is_unusual", False) and getattr(liq, "liquidity_void_active", False):
         return (False, 0.0, "velocity spike in liquidity void")
-
-    # --- MTF (graded; fail-open on unwarmed) ---
-    h4b, h1b, m15b = mtf.h4_bias, mtf.h1_bias, mtf.m15_bias
-    mtf_warm = not (h4b == 0.0 and h1b == 0.0 and m15b == 0.0)
+    # Hard reject: counter-trend without any exhaustion (unchanged from old gate)
+    h4b = mtf.h4_bias
+    h1b = mtf.h1_bias
+    mtf_warm = not (h4b == 0.0 and h1b == 0.0 and mtf.m15_bias == 0.0)
     revp = float(getattr(mtf, "reversal_pressure", 0.0) or 0.0)
-    struct_ok = bool(getattr(mtf, "structure_break", False)) and (getattr(mtf, "structure_break_dir", 0) == (1 if direction == "BUY" else -1))
-    if mtf_warm:
-        big_lean = h4b + h1b
-        exhausted = mtf.is_exhaustion_zone or mtf.is_pullback or revp >= revp_thresh or struct_ok
-        if big_lean * want < 0:
-            # Counter-trend: allowed ONLY with a real reversal signal; else HARD REJECT.
-            if not exhausted:
-                return (False, 0.0, f"against big-TF trend w/o exhaustion (H4={h4b:.2f},H1={h1b:.2f})")
-            score += w_mtf  # counter-trend but exhaustion-confirmed
-        else:
-            score += w_mtf  # with-trend
-    # unwarmed MTF: no contribution, no veto (fail-open)
+    is_exhausting = (
+        mtf.is_exhaustion_zone or mtf.is_pullback or revp >= 0.5
+        or getattr(disp, "is_exhausting", False)
+        or getattr(disp, "classification", "") in ("EXHAUSTION", "TRAP", "ABSORPTION")
+    )
+    if mtf_warm and (h4b + h1b) * want < 0 and not is_exhausting:
+        return (False, 0.0, f"counter-trend without exhaustion (H4={h4b:.2f},H1={h1b:.2f})")
 
-    # reversal_pressure contribution (scaled) + structure break
-    score += w_revp * min(1.0, revp)
-    if struct_ok:
-        score += w_struct
+    # --- COMPONENT 1 (30%): Candle Setup Score ---
+    score += 0.30 * min(1.0, candle_setup_score)
 
-    # --- LEVELS (graded; single strong level is enough, fail-open if none) ---
-    if price_levels:
+    # --- COMPONENT 2 (25%): Tick Velocity Exhaustion ---
+    # Decay + climax efficiency (lower eff at extreme = more exhausted)
+    vel_score = 0.0
+    decay = getattr(vel, "decay_ratio", 1.0) or 1.0
+    eff = getattr(vel, "tick_efficiency", 0.5) or 0.5
+    is_decaying = getattr(vel, "is_decaying", False)
+    if is_decaying:
+        vel_score += 0.5
+    if decay < 0.5:
+        vel_score += min(0.5, (0.5 - decay))
+    if eff < 0.2:
+        vel_score += 0.3
+    score += 0.25 * min(1.0, vel_score)
+
+    # --- COMPONENT 3 (25%): S/R Level Proximity ---
+    if price_levels and pip:
+        max_prox_pips = max(5.0, 0.3 * (h1_atr / pip)) if h1_atr else 15.0
         side = "resistance" if direction == "SELL" else "support"
-        conf_pips = max(3.0, 0.3 * (h1_atr / pip)) if pip else 3.0
-        has_major = False
-        has_micro = False
+        best_prox = 0.0
         for lvl in price_levels:
             if not getattr(lvl, "is_active", False):
                 continue
             lvl_dir = getattr(lvl, "direction", "")
-            if lvl_dir != side and lvl_dir != "current":
+            if lvl_dir not in (side, "current", ""):
                 continue
-            if pip and abs(price - lvl.price) / pip > conf_pips:
-                continue
-            tf = getattr(lvl, "timeframe", "")
-            lt = getattr(lvl, "level_type", "")
-            if tf in MAJOR_TFS or lt in MAJOR_TYPES:
-                has_major = True
-            if tf in MICRO_TFS or lt in MICRO_TYPES:
-                has_micro = True
-        if has_major:
-            score += w_major
-        if has_micro:
-            score += w_micro
-    # no levels synced: fail-open (score just doesn't get the level bonus)
+            dist_pips = abs(price - lvl.price) / pip
+            if dist_pips <= max_prox_pips:
+                # Closer = higher score (1.0 at 0 pips, 0.0 at max_prox_pips)
+                prox_score = 1.0 - (dist_pips / max_prox_pips)
+                # Boost for high-strength levels (major TF or multi-touch)
+                strength = getattr(lvl, "strength", 0.5)
+                prox_score = min(1.0, prox_score * (0.7 + 0.3 * strength))
+                best_prox = max(best_prox, prox_score)
+        score += 0.25 * best_prox
 
-    # --- REVERSAL CONFIRMATION (graded) ---
-    sharp = len(getattr(liq, "active_sweeps", []) or []) > 0 and (
-        disp.is_exhausting or disp.classification in ("EXHAUSTION", "TRAP", "ABSORPTION")
-    )
-    decayed = getattr(vel, "is_decaying", False) and (
-        disp.is_exhausting or disp.classification == "EXHAUSTION" or getattr(disp, "displacement_ratio", 1.0) < 0.3
-    )
-    if sharp or decayed:
-        score += w_confirm
+    # --- COMPONENT 4 (20%): H4/H1 Trend Alignment ---
+    if mtf_warm:
+        h4_align = (h4b + h1b) * want
+        if h4_align > 0.3:
+            score += 0.20  # with-trend entry = full credit
+        elif h4_align > -0.1:
+            score += 0.10  # neutral
+        # counter-trend: 0 (but not rejected here if exhaustion confirmed above)
+    else:
+        score += 0.10   # unwarmed MTF: partial credit (fail-open)
 
     score = min(1.0, score)
     if score >= min_score:
-        return (True, score, f"graded allow score={score:.2f}")
-    return (False, score, f"below confluence threshold ({score:.2f}<{min_score:.2f})")
+        return (True, score, f"unified allow score={score:.2f}")
+    return (False, score, f"below unified threshold ({score:.2f}<{min_score:.2f})")
+
+
+# Keep old function name as alias so any external callers still work
+_reversal_confluence_grade = _unified_confluence_score
 
 
 class ReversalModel:
@@ -205,6 +198,12 @@ class ReversalModel:
         self.trade_state_engine = TradeStateEngine(pip_mult=self._pip, config=self._config)
         self.exit_engine = ExitEngine(legacy_exit_manager=self.exit, pip_mult=self._pip, config=self._config)
         
+        # NEW: CandleSetupTracker — gates the EntryStateMachine on M15 confirmed setups
+        self.candle_setup = CandleSetupTracker(
+            config=self._config,
+            pip=self._pip,
+        )
+
         # Latest cached states to avoid recalculating unnecessarily
         self._last_regime_state = RegimeState()
         self._last_mtf_state = MTFState()
@@ -247,6 +246,17 @@ class ReversalModel:
         # 3. Update Regime engine (M15 only to reduce noise)
         if candle.timeframe.upper() == "M15":
             self._last_regime_state = self.regime.update(candle, self._last_vel_state, self._last_disp_state)
+
+        # 4. Feed CandleSetupTracker (M15 + H1 for engulfing detection)
+        self.candle_setup.on_candle_close(
+            candle=candle,
+            price_levels=self._price_levels,
+            h4_bias=self._last_mtf_state.h4_bias,
+            h1_atr=self._h1_atr,
+            pip=self._pip,
+        )
+        # Expire stale setups
+        self.candle_setup.expire_if_stale()
 
     def on_tick(
         self,
@@ -315,24 +325,27 @@ class ReversalModel:
 
         # --- TIER 3: EXECUTION PIPELINE ---
 
-        # 1. Evaluate Entry
+        # 1. Evaluate Entry (pass candle setup state to gate the machine)
         spread = (ask - bid) if (bid is not None and ask is not None) else 0.0001
         entry_decision = self.entry.evaluate(
-            price, timestamp, vel_state, disp_state, self._last_liquidity_state, self._last_regime_state, self._last_mtf_state,
-            spread=spread
+            price, timestamp, vel_state, disp_state, self._last_liquidity_state,
+            self._last_regime_state, self._last_mtf_state,
+            spread=spread,
+            candle_setup_active=self.candle_setup.setup_active,
+            candle_setup_direction=self.candle_setup.setup_direction,
         )
 
-        # 1b. GRADED, FAIL-OPEN reversal-confluence gate (ENABLED). Hard-rejects
-        # only falling knives / open-space spikes / counter-trend-without-exhaustion;
-        # otherwise scores confluence (MTF + levels + confirmation + reversal_pressure
-        # + structure break) and allows when score >= min_confluence_score. Missing
-        # levels/MTF lower the score, never veto. Can be disabled via config
-        # `enable_reversal_gate=False` for shadow comparison.
+        # 1b. UNIFIED CONFLUENCE GATE (replaces old _reversal_confluence_grade).
+        # Uses 4-component weighted score: candle setup (30%) + velocity (25%)
+        # + S/R proximity (25%) + H4/H1 alignment (20%). Threshold: 0.65.
+        # Hard-rejects (falling knife, void spike, counter-trend) preserved.
         if entry_decision.is_valid_entry and self._config.get("enable_reversal_gate", True):
-            allow, score, reason = _reversal_confluence_grade(
+            allow, score, reason = _unified_confluence_score(
                 entry_decision.direction, price, self._pip, self._h1_atr,
                 self._last_mtf_state, self._last_liquidity_state,
-                vel_state, disp_state, self._price_levels, self._config,
+                vel_state, disp_state, self._price_levels,
+                candle_setup_score=self.candle_setup.setup_score,
+                config=self._config,
             )
             # Carry the confluence score for sizing/observability regardless.
             entry_decision.signal_quality = max(entry_decision.signal_quality, round(score, 2))

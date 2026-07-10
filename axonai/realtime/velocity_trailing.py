@@ -102,6 +102,7 @@ class VelocityTrailingManager:
         is_htf_aligned: bool = False,
         pip: float = 0.0001,
         symbol: str = "EURUSD",
+        h1_atr: float = 0.0,
     ) -> Optional[dict]:
         """
         Real-time velocity trailing with retest detection and dynamic market buffer.
@@ -208,6 +209,7 @@ class VelocityTrailingManager:
 
         # Scale pip thresholds dynamically for JPY, GBP and Gold to prevent stop-choking
         scale = 1.0
+        is_gold = (pip == 0.01 and entry_price > 1000.0)
         if pip == 0.01:
             if entry_price > 1000.0:
                 scale = 15.0  # Gold (e.g. 15x scaling on EURUSD values)
@@ -244,16 +246,24 @@ class VelocityTrailingManager:
         # favor, tight as momentum exhausts. Replaces the proximity-driven collapse.
         raw_width_mult = self._momentum_width_mult(velocity, position_type)
         
-        # Smooth the multiplier to prevent instant collapse on a single low-velocity tick
+        # Smooth the multiplier to prevent instant collapse on a single low-velocity tick.
+        # Gold uses a much slower EMA (alpha=0.02, ~50-tick window) to absorb momentary
+        # tick pauses that would otherwise collapse width_mult to 0.4 and choke the stop.
         if state.get("smoothed_width_mult") is None:
             state["smoothed_width_mult"] = raw_width_mult
         else:
-            # Using an EMA with alpha = 0.1 (approx 10-tick smoothing window)
-            alpha = 0.1
+            alpha = 0.02 if is_gold else 0.1  # Gold: ~50-tick window; FX: ~10-tick
             state["smoothed_width_mult"] = (alpha * raw_width_mult) + ((1.0 - alpha) * state["smoothed_width_mult"])
-            
+
         width_mult = state["smoothed_width_mult"]
-        trail_distance = self._calculate_trail_distance(current_profit, width_mult, vol_scale, scale)
+        # Gold: enforce a minimum width_mult so a single quiet tick cannot collapse
+        # the stop (decay=0 → raw=0.4 was the choking culprit).
+        if is_gold:
+            width_mult = max(width_mult, 1.2)
+            state["smoothed_width_mult"] = max(state["smoothed_width_mult"], 1.2)
+        trail_distance = self._calculate_trail_distance(
+            current_profit, width_mult, vol_scale, scale, h1_atr=h1_atr, pip=pip, is_gold=is_gold
+        )
 
         # Include dynamic buffer info in log
         buffer_info = f" [buffer={dyn_buffer.threshold:.3f} regime={dyn_buffer.regime_name}]" if dyn_buffer else ""
@@ -392,18 +402,34 @@ class VelocityTrailingManager:
         return max(0.4, min(mult, 2.5))
 
     def _calculate_trail_distance(
-        self, current_profit: float, width_mult: float, vol_scale: float = 1.0, scale: float = 1.0
+        self,
+        current_profit: float,
+        width_mult: float,
+        vol_scale: float = 1.0,
+        scale: float = 1.0,
+        h1_atr: float = 0.0,
+        pip: float = 0.0001,
+        is_gold: bool = False,
     ) -> float:
         """Pips to keep behind price, driven by momentum state.
 
         width_mult (from momentum) sets the base width; profit allows a mild
         extra tighten. Floored at min_trail_floor_pips so proximity to SL can
         never collapse the stop (the old retest death-spiral).
+
+        Gold ATR floor: for XAUUSD the trailing distance can never be less than
+        1.0 × H1 ATR in pips, preventing a $6 stop on a $2000+ instrument.
         """
         profit_factor = min(current_profit / (20.0 * scale), 1.0)  # scale profit lock targets too
         trail_distance = self.base_trail_buffer * scale * vol_scale * width_mult * (1.0 - profit_factor * 0.2)
         trail_distance = max(trail_distance, self.min_trail_floor_pips * scale)
         trail_distance = min(trail_distance, self.max_trail_distance * scale * vol_scale)
+
+        # Gold ATR hard floor: 1.0 × H1 ATR converted to pips (never trail tighter than this)
+        if is_gold and h1_atr > 0.0 and pip > 0.0:
+            atr_floor_pips = h1_atr / pip
+            trail_distance = max(trail_distance, atr_floor_pips)
+
         return trail_distance
 
     def reset(self, ticket: Optional[int] = None):

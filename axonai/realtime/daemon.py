@@ -1823,6 +1823,8 @@ class AxonDaemon:
                                 trade_result.get("sl"), trade_result.get("tp"),
                                 reason=snapshot.entry_decision.reason
                             )
+                            # Clear the candle setup so the next trade requires a fresh M15 confirmation
+                            self.reversal_model.candle_setup.clear()
                             self.trade_analytics.record_entry(
                                 ticket, self.mt5_symbol, direction,
                                 snapshot.price, trade_result.get("sl"), trade_result.get("tp"), snapshot
@@ -2375,6 +2377,7 @@ class AxonDaemon:
                 is_htf_aligned=is_htf_aligned,
                 pip=self._pip_mult,
                 symbol=self.mt5_symbol,
+                h1_atr=getattr(self.reversal_model, "_h1_atr", 0.0),
             )
 
             # Apply SL modification if velocity trailing suggests it
