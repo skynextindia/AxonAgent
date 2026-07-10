@@ -29,6 +29,7 @@ from axonai.realtime.graph_executor import GraphExecutor
 from axonai.realtime.trade_executor import MT5TradeExecutor
 from axonai.realtime.api_server import get_dashboard
 from cli.stats_handler import StatsCallbackHandler
+from axonai.realtime.news_guard import NewsGuard
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +47,13 @@ class AxonDaemon:
     """
 
     def __init__(self, symbol: str, config: dict):
+        # Initialize MT5 early so symbol resolution can query active terminal info
+        mt5_initialize(
+            terminal_path=config.get("mt5_terminal_path"),
+            login=config.get("mt5_login"),
+            password=config.get("mt5_password"),
+            server=config.get("mt5_server")
+        )
         clean_sym = symbol.replace("=X", "").replace("=x", "").strip()
         self.yf_symbol = clean_sym + "=X"  # e.g. "EURUSD=X"
         self.mt5_symbol = _to_mt5_symbol(symbol, config)
@@ -71,10 +79,6 @@ class AxonDaemon:
         self.graph_executor = GraphExecutor(symbol, config, callbacks=[self.stats_handler])
 
         # Layer 4: Trade Executor
-        config_base = config.copy()
-        config_base["realtime_magic_number"] = 123456
-        self.trade_executor_base = MT5TradeExecutor(config_base)
-
         config_opt = config.copy()
         config_opt["realtime_magic_number"] = 123457
         self.trade_executor_opt = MT5TradeExecutor(config_opt)
@@ -87,6 +91,10 @@ class AxonDaemon:
         self._active_trade_system: dict[int, str] = {}
         self._active_trade_atr: dict[int, float] = {}
         self._active_trade_peak_price: dict[int, float] = {}
+
+        # Layer 5: Economic news calendar guard
+        self.news_guard = NewsGuard(config)
+        self._last_session: Optional[str] = None
 
         # Stats
         self._events_detected: int = 0
@@ -481,6 +489,10 @@ class AxonDaemon:
         except Exception as e:
             logger.error("AxonDaemon: failed to backfill historical events: %s", e)
             
+        # Initialize news guard and session tracking state
+        self.news_guard.refresh()
+        self._last_session = self.live_state._state.session if self.live_state._state else None
+
         logger.info("Step 2/4: Live state initialized")
 
         # 3. Compile graph
@@ -541,29 +553,16 @@ class AxonDaemon:
                     self.config.get("realtime_suppress_asian", True))
         logger.info("="*60)
 
-        # 6. Enter main event loop
-        # TEST TRIGGER: Queue a mock event immediately to show the user how the debate works in real-time
-        from axonai.realtime.event_types import MarketEvent, EventType, EventPriority
-        self.event_queue.put(MarketEvent(
-            event_type=EventType.LEVEL_BREACH,
-            priority=EventPriority.HIGH,
-            timestamp=datetime.now(),
-            symbol=self.yf_symbol,
-            price=1.16282,
-            details={
-                "level_type": "PDH",
-                "level_price": 1.16282,
-                "strength": 0.7,
-                "touches": 2,
-                "direction": "resistance",
-                "distance_pips": 0.0
-            }
-        ))
-
         self._event_loop()
 
     def _on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Called by TickEngine on every new tick."""
+        # EOD force-close check on session transition
+        try:
+            self._check_eod_close(bid, ask)
+        except Exception as e:
+            logger.error("Error in EOD close check: %s", e, exc_info=True)
+
         self.event_detector.is_in_trade = len(self._tracked_positions) > 0
         self.event_detector.on_tick(bid, ask, timestamp)
 
@@ -672,6 +671,12 @@ class AxonDaemon:
                 dashboard.broadcast(self._get_candles_payload(candle.timeframe))
                 dashboard.broadcast(self._get_levels_payload())
                 dashboard.broadcast(self._get_regime_payload())
+                
+                # Periodically refresh news calendar cache in the background
+                try:
+                    self.news_guard.refresh()
+                except Exception as ne:
+                    logger.warning("Failed to refresh NewsGuard on candle close: %s", ne)
 
     def _event_loop(self):
         """Main thread: blocks on event queue, fires graph on valid events."""
@@ -757,6 +762,28 @@ class AxonDaemon:
             logger.info("="*50)
             if hasattr(self, '_log_dry_run_event'):
                 self._log_dry_run_event('event_detected', {'event_type': event.event_type.value, 'price': event.price, 'details': event.details})
+
+            # Dynamic News Guard econ calendar check
+            blocked, news_reason = self.news_guard.should_block_entry(self.mt5_symbol)
+            if blocked:
+                self._events_skipped += 1
+                logger.info("ENTRY BLOCKED by News Guard: %s", news_reason)
+                if dashboard:
+                    dashboard.broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": f"News Block: {news_reason}",
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
 
             dashboard = get_dashboard()
             if dashboard:
@@ -1081,6 +1108,83 @@ class AxonDaemon:
                 )
         except Exception as e:
             logger.error("Failed to append to signals.log: %s", e)
+
+    def _check_eod_close(self, bid: float, ask: float) -> None:
+        """Flatten all positions on the active → wind-down session transition if they are in profit."""
+        if not self.config.get("eod_close_enabled", True):
+            return
+        state = getattr(self.live_state, "_state", None)
+        current = getattr(state, "session", None) if state is not None else None
+        if current is None:
+            return
+        prev = self._last_session
+        self._last_session = current
+
+        # Guard: only check for transitions if we have a previous known session
+        if prev is None or prev == current:
+            return
+
+        active = set(self.config.get("eod_close_active_sessions", ["london", "overlap", "newyork"]))
+        trigger = set(self.config.get("eod_close_trigger_sessions", ["rollover", "asian"]))
+
+        if prev in active and current in trigger:
+            logger.info("AxonDaemon: EOD transition %s → %s; flattening profitable positions", prev, current)
+            self._close_all_profitable_positions(bid, ask, "End of Day (Session Close)")
+
+    def _close_all_profitable_positions(self, bid: float, ask: float, reason: str) -> int:
+        """Close open positions for this symbol/magic ONLY if they are currently in profit."""
+        if not mt5 or not mt5.terminal_info():
+            logger.warning("EOD Close: MT5 not connected, cannot close positions.")
+            return 0
+
+        positions = mt5.positions_get(symbol=self.mt5_symbol)
+        if not positions:
+            return 0
+
+        closed_count = 0
+        pip = 0.01 if "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() else 0.0001
+
+        for pos in positions:
+            # Verify magic number matches our optimized strategy executor
+            if pos.magic != self.trade_executor_opt.magic:
+                continue
+
+            # Calculate profit pips
+            if pos.type == mt5.POSITION_TYPE_BUY:
+                profit_pips = (bid - pos.price_open) / pip
+                close_price = bid
+            else:
+                profit_pips = (pos.price_open - ask) / pip
+                close_price = ask
+
+            # ONLY close if in profit!
+            if profit_pips > 0:
+                logger.info("EOD: Position %d is in profit (+%.1f pips). Force closing...", pos.ticket, profit_pips)
+                
+                request = {
+                    "action": mt5.TRADE_ACTION_DEAL,
+                    "symbol": pos.symbol,
+                    "volume": pos.volume,
+                    "type": mt5.POSITION_TYPE_SELL if pos.type == mt5.POSITION_TYPE_BUY else mt5.POSITION_TYPE_BUY,
+                    "position": pos.ticket,
+                    "price": close_price,
+                    "deviation": 20,
+                    "magic": pos.magic,
+                    "comment": f"EOD profit close"[:31],
+                    "type_time": mt5.ORDER_TIME_GTC,
+                    "type_filling": mt5.ORDER_FILLING_IOC,
+                }
+                
+                res = mt5.order_send(request)
+                if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                    logger.info("EOD: Successfully closed profitable position %d (+%.2f profit)", pos.ticket, pos.profit)
+                    closed_count += 1
+                else:
+                    logger.warning("EOD: Failed to close position %d: %s", pos.ticket, getattr(res, "comment", "Unknown"))
+            else:
+                logger.info("EOD: Position %d is in loss (%.1f pips). Leaving open.", pos.ticket, profit_pips)
+
+        return closed_count
 
     def _log_stats(self):
         """Log daemon statistics."""

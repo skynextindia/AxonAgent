@@ -76,15 +76,8 @@ class EventDetector:
         self._test_mode = config.get("test_mode", False) or not self._log_events
         self._pip_mult = 0.0001  # Updated on init
 
-        # Microstructure Peak & Climax Exhaustion Detector for Base and Optimized systems
+        # Microstructure Peak & Climax Exhaustion Detector for Optimized system
         from axonai.realtime.peak_detector import PeakDetector
-        self.peak_detector_base = PeakDetector(
-            pip_mult=self._pip_mult,
-            rule_c_enabled=config.get("peak_detector_rule_c_enabled", False),
-            use_pinpoint_price=False,
-            correct_rule_a_direction=False,
-            cooldown_bypass_better_peak=False,
-        )
         self.peak_detector_opt = PeakDetector(
             pip_mult=self._pip_mult,
             rule_c_enabled=config.get("peak_detector_rule_c_enabled", False),
@@ -141,7 +134,6 @@ class EventDetector:
     def set_pip_multiplier(self, is_jpy: bool):
         """Set pip multiplier based on pair type."""
         self._pip_mult = 0.01 if is_jpy else 0.0001
-        self.peak_detector_base.pip_mult = self._pip_mult
         self.peak_detector_opt.pip_mult = self._pip_mult
         self.peak_detector.pip_mult = self._pip_mult
 
@@ -200,20 +192,7 @@ class EventDetector:
         self._check_peak_detection(mid, timestamp)
 
     def _check_peak_detection(self, mid: float, timestamp: datetime):
-        """Invoke microstructure peak and climax exhaustion detector for both systems."""
-        # 1. Base Peak Detector
-        peak_res_base = self.peak_detector_base.update(mid, timestamp)
-        if peak_res_base:
-            details = peak_res_base.to_dict()
-            details["system"] = "base"
-            self._emit(MarketEvent(
-                event_type=EventType.PEAK_DETECTION,
-                priority=EventPriority.HIGH if peak_res_base.intensity == "HIGH" else EventPriority.MEDIUM,
-                timestamp=timestamp,
-                symbol=self.live_state.symbol,
-                price=peak_res_base.peak_price,
-                details=details
-            ))
+        """Invoke microstructure peak and climax exhaustion detector."""
 
         # 2. Optimized Peak Detector
         peak_res_opt = self.peak_detector_opt.update(mid, timestamp)

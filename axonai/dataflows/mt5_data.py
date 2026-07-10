@@ -144,7 +144,7 @@ def _to_mt5_symbol(yf_symbol: str, config: Optional[dict] = None) -> str:
             if info is not None:
                 return base
 
-            suffixes_to_try = [config_suffix, "", "m", "_i", ".pro", "_ecn"]
+            suffixes_to_try = [config_suffix, "", "m", "_i", ".pro", "_ecn", ".i"]
             # Filter duplicates but keep order
             seen = set()
             suffixes_to_try = [x for x in suffixes_to_try if not (x in seen or seen.add(x))]
