@@ -135,3 +135,6 @@ Resume this session with:
 claude --resume 0d4e5331-a40c-471f-85e8-20257edf3261
 
 Pushed to origin/veloxity — commit 9a9f6a7. You're good to restart the daemon now.
+ ❯ 1. Yes, I trust this folder ✔
+Resume this session with:
+claude --resume 0d4e5331-a40c-471f-85e8-20257edf3261

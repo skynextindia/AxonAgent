@@ -1,0 +1,1454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AXON.AI // Velocity Engine Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script>tailwind.config={theme:{extend:{fontFamily:{mono:['"JetBrains Mono"','monospace']}}}}</script>
+<script src="/lightweight-charts.min.js?v=2"></script>
+<style>
+:root{--bg-0:#000;--bg-1:#0a0a0a;--bg-2:#111;--border:#2a2a2a;--border-dim:#1a1a1a;--text-primary:#e0e0e0;--text-secondary:#888;--text-dim:#444;--green:#00c853;--red:#ff3d3d;--cyan:#00b8d4;--amber:#ffab00;--purple:#9c27b0}
+*{box-sizing:border-box}
+body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mono',monospace;overflow:hidden;height:100vh;font-size:11px;margin:0;padding:6px 8px;display:flex;flex-direction:column;gap:4px}
+.cyber-panel{background:var(--bg-1);border:1px solid var(--border);transition:border-color .15s}
+.cyber-panel:hover{border-color:#3a3a3a}
+#pair-navigator{display:flex;gap:4px;overflow-x:auto;scrollbar-width:none;flex-shrink:0}
+#pair-navigator::-webkit-scrollbar{display:none}
+.pair-btn{flex-shrink:0;padding:4px 10px;border:1px solid var(--border);background:var(--bg-1);color:var(--text-secondary);font-size:10px;font-weight:700;cursor:pointer;letter-spacing:.05em;transition:all .12s;font-family:'JetBrains Mono',monospace}
+.pair-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+.pair-btn.active{border-color:var(--cyan);background:rgba(0,184,212,.08);color:var(--cyan)}
+@keyframes pulse-dot{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes blink{from,to{opacity:0}50%{opacity:1}}
+@keyframes ping{0%{transform:scale(1);opacity:1}75%,100%{transform:scale(2);opacity:0}}
+::-webkit-scrollbar{width:3px;height:3px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:#2a2a2a}
+.tab-btn{border:1px solid var(--border);background:transparent;color:var(--text-secondary);font-size:9px;font-weight:700;padding:4px 12px;cursor:pointer;letter-spacing:.08em;transition:all .15s;font-family:'JetBrains Mono',monospace}
+.tab-btn:hover{border-color:var(--cyan);color:var(--cyan)}
+.tab-btn.active{border-color:var(--cyan);background:rgba(0,184,212,.08);color:var(--cyan)}
+.btn-override{border:1px solid transparent;color:var(--text-secondary);font-family:'JetBrains Mono',monospace;font-size:7px;font-weight:700;padding:3px 6px;cursor:pointer;letter-spacing:.06em;transition:all .12s}
+.btn-override:hover{filter:brightness(1.3)}
+.hazard-bg-buy{background:repeating-linear-gradient(-45deg,rgba(0,200,83,.04),rgba(0,200,83,.04) 10px,transparent 10px,transparent 20px)}
+.hazard-bg-sell{background:repeating-linear-gradient(-45deg,rgba(255,61,61,.04),rgba(255,61,61,.04) 10px,transparent 10px,transparent 20px)}
+</style>
+</head>
+<body>
+<!-- ═══ HEADER ═══ -->
+<header style="display:flex;align-items:center;gap:16px;height:44px;flex-shrink:0;border-bottom:1px solid var(--border);padding:0 12px;margin-bottom:6px;">
+  <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><span style="color:var(--cyan);font-size:16px;font-weight:900;letter-spacing:.05em;">AXON<span style="color:var(--text-secondary);">.AI</span></span><div style="display:flex;align-items:center;gap:5px;"><span id="socket-light" style="width:7px;height:7px;border-radius:50%;background:var(--red);flex-shrink:0;"></span><span id="socket-status" style="font-size:9px;color:var(--red);font-weight:700;letter-spacing:.1em;">OFFLINE</span></div><span id="mode-badge" title="Execution mode" style="font-size:9px;font-weight:900;letter-spacing:.08em;padding:2px 8px;border-radius:3px;border:1px solid var(--text-dim);color:var(--text-dim);text-transform:uppercase;display:none;white-space:nowrap;">—</span></div>
+  <div style="width:1px;height:28px;background:var(--border);flex-shrink:0;"></div>
+  <div style="display:flex;gap:20px;align-items:center;">
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">BALANCE</span><span id="broker-balance-val" style="font-size:13px;font-weight:700;color:var(--text-primary);">$0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">EQUITY</span><span id="broker-equity-val" style="font-size:13px;font-weight:700;color:var(--text-primary);">$0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">PROFIT</span><span id="broker-profit-val" style="font-size:13px;font-weight:700;color:var(--green);">+$0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">FREE MARGIN</span><span id="broker-margin-val" style="font-size:13px;font-weight:700;color:var(--text-primary);">$0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">MARGIN LVL</span><span id="broker-marginlevel-val" style="font-size:13px;font-weight:700;color:var(--cyan);">0%</span></div>
+  </div>
+  <div style="display:flex;gap:20px;align-items:center;border-left:1px solid var(--border);padding-left:20px;margin-left:20px;">
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">RULE A (MAX VEL)</span><span id="vel-max-val" style="font-size:13px;font-weight:700;color:var(--purple);">0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">RULE B (DIV)</span><span id="vel-div-val" style="font-size:11px;font-weight:600;color:var(--cyan);">0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">TICK EFFICIENCY</span><span id="vel-eff-val" style="font-size:11px;font-weight:600;color:var(--amber);">0.00</span></div>
+    <div><span style="font-size:9px;color:var(--text-dim);letter-spacing:.08em;">ENGINE TRIGGER</span><span id="vel-trigger-val" style="font-size:11px;font-weight:600;color:var(--text-primary);">MONITOR</span></div>
+  </div>
+  <div style="flex:1;"></div>
+  <div style="display:flex;align-items:center;gap:16px;">
+    <div style="display:flex;flex-direction:column;align-items:flex-end;"><span style="font-size:9px;color:var(--text-dim);">UPTIME</span><span id="header-uptime" style="font-size:12px;font-weight:600;color:var(--text-primary);">00:00:00</span></div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;"><span style="font-size:9px;color:var(--text-dim);">LATENCY</span><span id="header-latency" style="font-size:12px;font-weight:600;color:var(--cyan);">--ms</span></div>
+    <button id="settings-trigger-btn" style="border:1px solid var(--border);background:var(--bg-1);color:var(--text-secondary);font-family:inherit;font-size:10px;font-weight:700;padding:4px 10px;cursor:pointer;letter-spacing:.08em;">&#9881; SETTINGS</button>
+  </div>
+</header>
+<!-- ═══ PAIR NAVIGATOR ═══ -->
+<div style="display:flex;align-items:center;gap:8px;flex-shrink:0;border-bottom:1px solid var(--border);padding:5px 4px;margin-bottom:6px;">
+  <span style="font-size:9px;color:var(--text-dim);font-weight:700;letter-spacing:.1em;white-space:nowrap;flex-shrink:0;">PAIRS &#8250;</span>
+  <div id="pair-navigator">
+    <button class="pair-btn active" data-pair="EURUSD=X" data-mt5="EURUSD">EUR/USD</button>
+    <button class="pair-btn" data-pair="GBPUSD=X" data-mt5="GBPUSD">GBP/USD</button>
+    <button class="pair-btn" data-pair="USDJPY=X" data-mt5="USDJPY">USD/JPY</button>
+    <button class="pair-btn" data-pair="USDCHF=X" data-mt5="USDCHF">USD/CHF</button>
+    <button class="pair-btn" data-pair="AUDUSD=X" data-mt5="AUDUSD">AUD/USD</button>
+    <button class="pair-btn" data-pair="NZDUSD=X" data-mt5="NZDUSD">NZD/USD</button>
+    <button class="pair-btn" data-pair="USDCAD=X" data-mt5="USDCAD">USD/CAD</button>
+    <button class="pair-btn" data-pair="EURGBP=X" data-mt5="EURGBP">EUR/GBP</button>
+    <button class="pair-btn" data-pair="EURJPY=X" data-mt5="EURJPY">EUR/JPY</button>
+    <button class="pair-btn" data-pair="GBPJPY=X" data-mt5="GBPJPY">GBP/JPY</button>
+    <button class="pair-btn" data-pair="XAUUSD=X" data-mt5="XAUUSD">XAU/USD</button>
+  </div>
+  <div style="flex:1;"></div>
+  <div style="display:flex;align-items:center;gap:8px;flex-shrink:0;"><span style="font-size:9px;color:var(--text-dim);">ACTIVE</span><span id="header-ticker" style="font-size:13px;font-weight:700;color:var(--cyan);letter-spacing:.05em;">EURUSD</span></div>
+</div>
+<!-- ═══ TAB BUTTONS ═══ -->
+<nav style="display:flex;gap:4px;flex-shrink:0;margin-bottom:2px;">
+  <button id="tab-cockpit-btn" class="tab-btn active">&#9654; COCKPIT</button>
+  <button id="tab-intel-btn" class="tab-btn">&#9674; INTELLIGENCE</button>
+  <button id="tab-journal-btn" class="tab-btn">&#128203; JOURNAL</button>
+  <button id="tab-system-btn" class="tab-btn">&#9881; SYSTEM</button>
+</nav>
+<!-- ═══ MAIN VIEWPORT ═══ -->
+<main style="flex:1;min-height:0;position:relative;overflow:hidden;">
+<!-- ─── PANEL: COCKPIT ─── -->
+<div id="panel-cockpit" style="position:absolute;inset:0;display:flex;gap:3px;min-height:0;overflow:hidden;">
+<!-- LEFT SIDEBAR -->
+<div style="width:260px;flex-shrink:0;display:flex;flex-direction:column;gap:3px;min-height:0;overflow-y:auto;padding-right:2px;">
+  <!-- Core Diagnostics -->
+  <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;justify-content:space-between;flex-shrink:0;border-left:3px solid #00f0ff;background:#040406;">
+    <div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-size:8px;color:var(--text-secondary);letter-spacing:.12em;text-transform:uppercase;font-weight:700;">CORE_FEED</span><div id="tick-activity-strip" style="display:flex;gap:1px;align-items:center;"><span style="width:6px;height:10px;background:#0d0d0f;border:1px solid #1a1a1a;"></span><span style="width:6px;height:10px;background:#0d0d0f;border:1px solid #1a1a1a;"></span><span style="width:6px;height:10px;background:#0d0d0f;border:1px solid #1a1a1a;"></span><span style="width:6px;height:10px;background:#0d0d0f;border:1px solid #1a1a1a;"></span><span style="width:6px;height:10px;background:#0d0d0f;border:1px solid #1a1a1a;"></span><span style="width:6px;height:10px;background:#0d0d0f;border:1px solid #1a1a1a;"></span></div></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin:4px 0;"><div style="background:#000;border:1px solid #1f1f2e;padding:3px 8px;text-align:center;"><span style="font-size:6.5px;color:var(--text-dim);display:block;font-weight:700;letter-spacing:.08em;">BID</span><span id="price-bid" style="font-size:11px;font-weight:900;color:#fff;">0.00000</span></div><div style="background:#000;border:1px solid #1f1f2e;padding:3px 8px;text-align:center;"><span style="font-size:6.5px;color:var(--text-dim);display:block;font-weight:700;letter-spacing:.08em;">ASK</span><span id="price-ask" style="font-size:11px;font-weight:900;color:#fff;">0.00000</span></div></div>
+    <div style="display:flex;flex-direction:column;gap:2px;font-size:7.5px;border-top:1px solid rgba(31,31,46,.5);padding-top:3px;">
+      <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);font-weight:700;letter-spacing:.02em;">COOLDOWN</span><span id="ctrl-cooldown" style="color:var(--green);font-weight:700;">READY</span></div>
+      <div style="width:100%;background:#0d0d0f;border:1px solid #1f1f2e;height:3px;overflow:hidden;"><div id="cooldown-bar" style="height:100%;background:var(--amber);width:0%;transition:width 1s linear;"></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:2px;text-align:center;font-size:7.5px;"><div style="background:#000;border:1px solid #1a1a1a;padding:2px;"><span style="font-size:5.5px;color:var(--text-dim);display:block;font-weight:700;">DETECTED</span><span id="stats-detected" style="color:#fff;font-weight:700;">0</span></div><div style="background:#000;border:1px solid #1a1a1a;padding:2px;"><span style="font-size:5.5px;color:var(--text-dim);display:block;font-weight:700;">FIRED</span><span id="stats-fired" style="color:var(--green);font-weight:700;">0</span></div><div style="background:#000;border:1px solid #1a1a1a;padding:2px;"><span style="font-size:5.5px;color:var(--text-dim);display:block;font-weight:700;">GATED</span><span id="stats-skipped" style="color:var(--amber);font-weight:700;">0</span></div></div>
+    </div>
+  </div>
+  <!-- Sidebar Technical Metrics -->
+  <div class="cyber-panel" style="flex:1;overflow-y:auto;padding:8px;background:#040406;display:flex;flex-direction:column;gap:10px;font-size:9.5px;">
+    <div><span style="font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px;">TICK_MICROSTRUCTURE</span>
+      <div style="display:flex;flex-direction:column;gap:3px;">
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;font-size:8.5px;">VELOCITY <span id="tick-velocity" style="font-weight:700;color:#fff;">0.00</span></div>
+        <div style="border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:4px;">
+          <div style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.04em;margin-bottom:2px;">IMBALANCE</div>
+          <div style="display:flex;flex-direction:column;gap:1px;font-size:8px;"><div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">10s</span><span id="tick-imbalance-10s"></span></div><div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">60s</span><span id="tick-imbalance-60s"></span></div><div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">5m</span><span id="tick-imbalance-300s"></span></div></div>
+          <div id="tick-imbalance-confluence" style="font-size:7px;font-weight:700;color:var(--text-dim);margin-top:3px;padding-top:2px;border-top:1px solid rgba(31,31,46,.3);text-align:center;letter-spacing:.02em;">CONFLUENCE: MIXED</div>
+        </div>
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;font-size:8.5px;">SPREAD DELTA <span id="tick-spread-delta" style="font-weight:700;color:#fff;">0.00</span></div>
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;font-size:8.5px;">COLLAPSE <span id="tick-collapse" style="font-weight:700;color:var(--text-dim);">FALSE</span></div>
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;font-size:8.5px;">AGGR SHIFT <span id="tick-agg-shift" style="font-weight:700;color:var(--text-dim);">FALSE</span></div>
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;font-size:8.5px;">ABSORPTION <span id="tick-absorption" style="font-weight:700;color:var(--text-dim);">FALSE</span></div>
+        <div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;font-size:8.5px;">RULE A (VEL) <span id="tick-rule-a" style="font-weight:700;color:var(--text-dim);">IDLE</span></div>
+        <div style="display:flex;justify-content:space-between;font-size:8.5px;">RULE B (DIV) <span id="tick-rule-b" style="font-weight:700;color:var(--text-dim);">IDLE</span></div>
+      </div>
+    </div>
+    <div><span style="font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px;">MTF_BIAS</span>
+      <div style="display:flex;flex-direction:column;gap:3px;font-size:8.5px;"><div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;">H4 <span id="mtf-h4" style="font-weight:700;">--</span></div><div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;">H1 <span id="mtf-h1" style="font-weight:700;">--</span></div><div style="display:flex;justify-content:space-between;">M15 <span id="mtf-m15" style="font-weight:700;">--</span></div></div>
+    </div>
+    <div style="border-top:1px solid rgba(31,31,46,.5);padding-top:6px;"><span style="font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px;">CURRENCY_STRENGTH</span>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:9px;"><div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--text-secondary);font-weight:700;">EUR</span><div style="display:flex;align-items:center;gap:4px;"><span id="eur-bar" style="font-size:10px;letter-spacing:.02em;"></span><span id="eur-val" style="font-weight:700;color:#fff;font-size:9px;width:28px;text-align:right;">--</span></div></div><div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--text-secondary);font-weight:700;">USD</span><div style="display:flex;align-items:center;gap:4px;"><span id="usd-bar" style="font-size:10px;letter-spacing:.02em;"></span><span id="usd-val" style="font-weight:700;color:#fff;font-size:9px;width:28px;text-align:right;">--</span></div></div></div>
+    </div>
+    <div style="border-top:1px solid rgba(31,31,46,.5);padding-top:6px;"><span style="font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px;">REGIME_SCORES</span><div id="regime-scores" style="font-size:8.5px;"><div style="color:var(--text-dim);font-style:italic;">Awaiting regime scores...</div></div></div>
+    <div style="border-top:1px solid rgba(31,31,46,.5);padding-top:6px;"><span style="font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px;">TODAY_SESSION</span>
+      <div style="display:flex;flex-direction:column;gap:3px;font-size:8.5px;"><div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;">BIAS <span id="london-bias" style="font-weight:700;">--</span></div><div style="display:flex;justify-content:space-between;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:2px;">HIGH <span id="london-high-val" style="font-weight:700;color:#fff;">--</span></div><div style="display:flex;justify-content:space-between;">LOW <span id="london-low-val" style="font-weight:700;color:#fff;">--</span></div></div>
+    </div>
+    <div style="border-top:1px solid rgba(31,31,46,.5);padding-top:6px;"><span style="font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:4px;">DYNAMIC_LEVELS</span><div id="dynamic-levels" style="display:flex;flex-direction:column;gap:2px;font-size:8px;"><div style="color:var(--text-dim);font-style:italic;">Awaiting levels...</div></div></div>
+  </div>
+</div>
+<!-- RIGHT COLUMN -->
+<div style="flex:1;display:flex;flex-direction:column;gap:3px;min-height:0;overflow:hidden;">
+  <!-- TOP STATS ROW -->
+  <div style="display:grid;grid-template-columns:2fr 2fr 2fr 4fr 2fr;gap:3px;flex-shrink:0;">
+    <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;border-top:3px solid var(--purple);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">BELIEF</span><div style="display:flex;align-items:flex-end;gap:6px;margin-top:2px;"><span id="belief-val" style="font-size:16px;font-weight:900;color:#fff;line-height:1;">0.00</span><div style="flex:1;height:4px;background:#0d0d0f;border:1px solid #1a1a1a;overflow:hidden;"><div id="belief-bar" style="height:100%;background:linear-gradient(90deg,var(--purple),var(--cyan),var(--green));width:0%;"></div></div></div></div>
+    <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;border-top:3px solid var(--cyan);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">REGIME</span><span id="regime-type" style="font-size:13px;font-weight:900;color:var(--cyan);text-transform:uppercase;letter-spacing:.04em;">UNKNOWN</span><span id="regime-vol" style="font-size:6.5px;color:var(--text-dim);margin-top:1px;font-weight:700;">VOL: MED | ATR: 0.0</span></div>
+    <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;border-top:3px solid var(--green);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">MACRO</span><span id="macro-bias" style="font-size:13px;font-weight:900;color:var(--text-dim);text-transform:uppercase;letter-spacing:.04em;">WAIT</span><span id="macro-lvl" style="font-size:6.5px;color:var(--text-dim);margin-top:1px;font-weight:700;">LVL: 0.00000</span><span id="macro-conf" style="font-size:6.5px;color:var(--text-dim);font-weight:700;">--%</span></div>
+    <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;border-top:3px solid var(--purple);background:#040406;"><div style="display:flex;justify-content:space-between;align-items:center;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">SESSIONS</span><span id="market-status-badge" style="font-size:6.5px;color:var(--green);background:rgba(0,255,102,.1);border:1px solid rgba(0,255,102,.2);padding:1px 6px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;">OPEN</span></div><div id="session-stack" style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4px;margin-top:2px;">
+      <div data-sess="Sydney" style="display:flex;flex-direction:column;"><span style="font-size:6.5px;font-weight:700;color:#555;letter-spacing:.04em;">SYD</span><span class="sess-time" style="font-size:5.5px;color:#333;">22-07</span><div style="height:2px;background:#111;border:1px solid #222;margin-top:1px;"><div class="sess-bar" style="height:100%;width:0%;transition:width 1s linear;background:#222;"></div></div></div>
+      <div data-sess="Tokyo" style="display:flex;flex-direction:column;"><span style="font-size:6.5px;font-weight:700;color:#555;letter-spacing:.04em;">TYO</span><span class="sess-time" style="font-size:5.5px;color:#333;">00-09</span><div style="height:2px;background:#111;border:1px solid #222;margin-top:1px;"><div class="sess-bar" style="height:100%;width:0%;transition:width 1s linear;background:#222;"></div></div></div>
+      <div data-sess="London" style="display:flex;flex-direction:column;"><span style="font-size:6.5px;font-weight:700;color:#555;letter-spacing:.04em;">LDN</span><span class="sess-time" style="font-size:5.5px;color:#333;">08-16</span><div style="height:2px;background:#111;border:1px solid #222;margin-top:1px;"><div class="sess-bar" style="height:100%;width:0%;transition:width 1s linear;background:#222;"></div></div></div>
+      <div data-sess="New York" style="display:flex;flex-direction:column;"><span style="font-size:6.5px;font-weight:700;color:#555;letter-spacing:.04em;">NYC</span><span class="sess-time" style="font-size:5.5px;color:#333;">13-22</span><div style="height:2px;background:#111;border:1px solid #222;margin-top:1px;"><div class="sess-bar" style="height:100%;width:0%;transition:width 1s linear;background:#222;"></div></div></div>
+    </div></div>
+    <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;border-top:3px solid var(--green);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">SPREAD</span><div style="display:flex;align-items:baseline;gap:2px;margin-top:2px;"><span id="spread-val" style="font-size:16px;font-weight:900;color:var(--green);line-height:1;">0.0</span><span style="font-size:6.5px;color:var(--text-dim);font-weight:700;text-transform:uppercase;">Pips</span></div></div>
+  </div>
+  <!-- SWING CHANNELS + DECISION HUD -->
+  <div style="display:grid;grid-template-columns:5fr 7fr;gap:3px;flex-shrink:0;">
+    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;background:#040406;overflow:hidden;">
+      <span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">SWING_CHANNELS</span>
+      <div style="flex:1;display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:2px;font-size:8px;">
+        <div style="background:rgba(0,0,0,.4);border-left:3px solid var(--green);padding:3px 6px;display:flex;flex-direction:column;justify-content:space-between;"><div style="display:flex;justify-content:space-between;font-weight:700;color:var(--green);font-size:8px;"><span style="color:var(--text-secondary);letter-spacing:.04em;">SUPPORT</span><span id="level-sup-val">--.-----</span></div><div style="display:flex;justify-content:space-between;font-size:6.5px;color:var(--text-dim);"><span id="level-sup-time" style="max-width:65px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">NO SL BAR</span><span id="level-sup-dist" style="color:var(--green);font-weight:700;">-- Pips</span></div></div>
+        <div style="background:rgba(0,0,0,.4);border-right:3px solid var(--red);padding:3px 6px;display:flex;flex-direction:column;justify-content:space-between;"><div style="display:flex;justify-content:space-between;font-weight:700;color:var(--red);font-size:8px;"><span style="color:var(--text-secondary);letter-spacing:.04em;">RESISTANCE</span><span id="level-res-val">--.-----</span></div><div style="display:flex;justify-content:space-between;font-size:6.5px;color:var(--text-dim);"><span id="level-res-time" style="max-width:65px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">NO SH BAR</span><span id="level-res-dist" style="color:var(--red);font-weight:700;">-- Pips</span></div></div>
+      </div>
+      <div style="margin-top:4px;height:4px;background:linear-gradient(90deg,var(--green) 0%,#222 50%,var(--red) 100%);border:1px solid #1a1a24;border-radius:2px;position:relative;overflow:visible;">
+        <div id="swing-push-indicator" style="position:absolute;top:-2px;left:50%;width:2px;height:6px;background:#fff;box-shadow:0 0 4px #fff;transition:left 0.1s ease-out;"></div>
+      </div>
+    </div>
+    <div class="cyber-panel" id="decision-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-left:3px solid var(--purple);background:#040406;overflow:hidden;">
+      <span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">DECISION_HUD</span>
+      <div style="flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;">
+        <span id="decision-status" style="color:var(--purple);font-size:7.5px;font-weight:700;letter-spacing:.08em;">Awaiting trigger...</span>
+        <div id="decision-action" style="font-size:16px;font-weight:900;letter-spacing:.2em;color:var(--cyan);text-transform:uppercase;border-top:1px solid rgba(31,31,46,.5);border-bottom:1px solid rgba(31,31,46,.5);padding:2px 0;margin:2px 0;width:100%;text-align:center;">MONITOR</div>
+        <span id="decision-time" style="font-size:6.5px;color:var(--text-dim);letter-spacing:.04em;">SYS_HELM: HEADLESS</span>
+      </div>
+    </div>
+  </div>
+  <!-- TRIGGER METRICS PANEL -->
+  <div style="display:grid;grid-template-columns:12fr;gap:3px;flex-shrink:0;">
+    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-left:3px solid var(--green);background:#040406;">
+      <span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">TRIGGER_METRICS</span>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:2px;font-size:6.5px;">
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">STATE</span>
+          <span id="trigger-state" style="color:var(--cyan);font-weight:900;font-size:7px;">IDLE</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">DIRECTION</span>
+          <span id="trigger-direction" style="color:var(--amber);font-weight:900;font-size:7px;">--</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">QUALITY</span>
+          <span id="trigger-quality" style="color:var(--text-dim);font-weight:700;font-size:7px;">0.00</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">DISPLACEMENT</span>
+          <span id="trigger-disp-class" style="color:var(--text-dim);font-weight:700;font-size:7px;">--</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">RATIO</span>
+          <span id="trigger-disp-ratio" style="color:var(--text-dim);font-weight:700;font-size:7px;">0.00</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">VELOCITY_Z</span>
+          <span id="trigger-vel-z" style="color:var(--text-dim);font-weight:700;font-size:7px;">0.00</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">REGIME</span>
+          <span id="trigger-regime" style="color:var(--text-dim);font-weight:700;font-size:7px;">--</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">H1_BIAS</span>
+          <span id="trigger-h1-bias" style="color:var(--text-dim);font-weight:700;font-size:7px;">0.00</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:1px;">
+          <span style="color:var(--text-dim);font-weight:700;">H4_BIAS</span>
+          <span id="trigger-h4-bias" style="color:var(--text-dim);font-weight:700;font-size:7px;">0.00</span>
+        </div>
+      </div>
+      <div style="margin-top:2px;padding-top:2px;border-top:1px solid rgba(31,31,46,.4);">
+        <span id="trigger-reason" style="font-size:6px;color:var(--text-dim);font-style:italic;">Awaiting trigger metrics...</span>
+      </div>
+    </div>
+  </div>
+  <!-- TRADE STATE + LOCATION CONTEXT -->
+  <div style="display:grid;grid-template-columns:6fr 6fr;gap:3px;flex-shrink:0;">
+    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-left:3px solid var(--purple);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">TRADE_STATE</span><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-top:2px;font-size:6.5px;"><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">PHASE</span><span id="ts-phase" style="color:var(--cyan);font-weight:900;font-size:7px;">--</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">HEALTH%</span><span id="ts-health" style="color:var(--green);font-weight:900;font-size:7px;">0.0</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">THESIS</span><span id="ts-thesis" style="color:var(--text-dim);font-weight:700;font-size:7px;">--</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">MFE (pips)</span><span id="ts-mfe" style="color:var(--green);font-weight:900;font-size:7px;">0.0</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">MAE (pips)</span><span id="ts-mae" style="color:var(--red);font-weight:900;font-size:7px;">0.0</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">PROFIT (pips)</span><span id="ts-profit" style="color:var(--cyan);font-weight:900;font-size:7px;">0.0</span></div></div></div>
+    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-left:3px solid var(--green);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">LOCATION_CONTEXT</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-top:2px;font-size:6.5px;"><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">AT_STRUCTURE</span><span id="lc-at-struct" style="color:var(--amber);font-weight:900;font-size:7px;">FALSE</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">DIST_TO_SR (ATR)</span><span id="lc-dist-sr" style="color:#fff;font-weight:900;font-size:7px;">0.0</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">DIST_TO_LIQ (ATR)</span><span id="lc-dist-liq" style="color:#fff;font-weight:900;font-size:7px;">0.0</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">ROOM (pips)</span><span id="lc-room" style="color:#fff;font-weight:900;font-size:7px;">0.0</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">LEVEL</span><span id="lc-level-type" style="color:var(--text-secondary);font-weight:700;font-size:7px;">--</span></div><div style="display:flex;flex-direction:column;gap:1px;"><span style="color:var(--text-dim);font-weight:700;">LEVEL_PRICE</span><span id="lc-level-price" style="color:#fff;font-weight:700;font-size:7px;">--</span></div></div></div>
+  </div>
+  <!-- LEVEL BEHAVIOR + TACTICAL OVERRIDES -->
+  <div style="display:grid;grid-template-columns:12fr;gap:3px;flex-shrink:0;">
+    <div class="cyber-panel" style="padding:3px 8px;display:flex;align-items:center;gap:8px;border-left:3px solid var(--amber);background:#040406;"><span style="font-size:7px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">BEHAVIOR</span><span id="bhv-placeholder" style="font-size:7px;color:var(--text-dim);font-style:italic;">Awaiting tick-level interaction data...</span></div>
+  </div>
+  <!-- OVERRIDES + GATES -->
+  <div style="display:grid;grid-template-columns:6fr 6fr;gap:3px;flex-shrink:0;">
+    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-top:3px solid var(--red);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">TACTICAL_OVERRIDES</span><div style="display:flex;gap:4px;margin-top:2px;"><button onclick="fetch('/api/emergency_stop',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(255,0,85,.15);color:var(--red);border-color:rgba(255,0,85,.5);">HALT</button><button onclick="fetch('/api/close_all',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(255,171,0,.15);color:var(--amber);border-color:rgba(255,171,0,.5);">CLOSE ALL</button><button id="pause-trading-btn" onclick="fetch('/api/pause_trading',{method:'POST'})" class="btn-override" style="flex:1;background:rgba(0,240,255,.1);color:var(--cyan);border-color:rgba(0,240,255,.5);">PAUSE</button></div></div>
+    <div class="cyber-panel" style="padding:4px 8px;display:flex;flex-direction:column;border-top:3px solid var(--cyan);background:#040406;"><span style="font-size:7.5px;color:var(--text-secondary);font-weight:700;letter-spacing:.12em;text-transform:uppercase;">SECURITY_GATES</span><div style="display:flex;gap:4px;font-size:7px;font-weight:700;color:var(--text-dim);letter-spacing:.02em;"><div style="display:flex;align-items:center;gap:2px;"><span id="gate-state" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>STATE</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-spread" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>SPREAD</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-convict" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>CONV</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-rate" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>RATE</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-context" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>CTX</div><div style="display:flex;align-items:center;gap:2px;"><span id="gate-paused" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;"></span>HALTED</div></div></div>
+  </div>
+  <!-- PRICE CHART -->
+  <div class="cyber-panel" style="flex:1;display:flex;flex-direction:column;padding:6px;background:#040406;min-height:150px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;flex-shrink:0;">
+      <div style="display:flex;align-items:center;gap:6px;"><span style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">CHART</span><span id="live-tick-dot" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;transition:all .1s;"></span><span id="chart-status" style="font-size:6px;color:var(--text-dim);font-weight:700;">WAITING</span><span id="chart-debug" style="font-size:6px;color:var(--amber);font-weight:700;display:none;"></span></div>
+      <div style="display:flex;gap:4px;"><button id="tf-m15-btn" style="border:1px solid var(--cyan);background:rgba(0,184,212,.1);color:var(--cyan);font-size:7px;padding:2px 6px;font-weight:700;font-family:inherit;text-transform:uppercase;cursor:pointer;">M15</button><button id="tf-h1-btn" style="border:1px solid #1f1f2e;color:var(--text-dim);font-size:7px;padding:2px 6px;font-weight:700;font-family:inherit;text-transform:uppercase;cursor:pointer;">H1</button><button id="tf-h4-btn" style="border:1px solid #1f1f2e;color:var(--text-dim);font-size:7px;padding:2px 6px;font-weight:700;font-family:inherit;text-transform:uppercase;cursor:pointer;">H4</button></div>
+    </div>
+    <div id="price-chart" style="flex:1;background:#000;min-height:0;"></div>
+  </div>
+  <!-- POSITIONS TABLE -->
+  <div class="cyber-panel" style="flex-shrink:0;display:flex;flex-direction:column;padding:6px;background:#040406;">
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(31,31,46,.6);padding-bottom:4px;margin-bottom:2px;"><span style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">POSITIONS</span><span style="font-size:7px;color:var(--text-dim);font-weight:700;letter-spacing:.04em;">MT5 REAL-TIME</span></div>
+    <div style="max-height:80px;overflow-y:auto;">
+      <div style="display:grid;grid-template-columns:2.5fr 1.5fr 1fr 1fr 1.5fr 1.5fr 3fr 1.5fr;gap:2px;padding:3px 4px;font-size:7.5px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid rgba(31,31,46,.6);">
+        <span>TICKET</span>
+        <span>SYM</span>
+        <span>TYPE</span>
+        <span>VOL</span>
+        <span>OPEN</span>
+        <span>CURRENT</span>
+        <span>SL/TP</span>
+        <span>PNL</span>
+      </div>
+      <div id="positions-table-body" style="font-size:7px;"><div style="color:var(--text-dim);text-align:center;padding:8px;font-style:italic;">No active positions.</div></div>
+    </div>
+  </div>
+</div>
+</div><!-- end panel-cockpit -->
+<!-- ─── PANEL: INTELLIGENCE ─── -->
+<div id="panel-intel" style="position:absolute;inset:0;display:none;grid-template-columns:3fr 3fr 3fr;gap:3px;min-height:0;overflow:hidden;">
+  <!-- Col 1: Pipeline -->
+  <div style="display:flex;flex-direction:column;gap:3px;min-height:0;overflow:hidden;">
+    <div class="cyber-panel" style="padding:6px;display:flex;flex-direction:column;gap:4px;flex-shrink:0;border-top:3px solid var(--cyan);background:#040406;">
+      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #1f1f2e;padding-bottom:4px;"><span style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">ENGINE_PIPELINE</span><div style="display:flex;align-items:center;gap:4px;"><span id="pipeline-led" style="width:5px;height:5px;border-radius:50%;background:#00ff66;box-shadow:0 0 6px #00ff66;display:inline-block;"></span><span id="pipeline-status" style="font-size:6.5px;color:var(--green);font-weight:900;letter-spacing:.04em;text-transform:uppercase;">ACTIVE</span></div></div>
+      <div style="font-size:6.5px;display:flex;flex-direction:column;gap:6px;">
+        <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 1: DATA NORMALIZATION</span><div style="display:grid;grid-template-columns:1fr 1fr;gap:3px;margin-top:2px;">
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-velocity-normalizer"><span id="led-velocity-normalizer" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">VELOCITY NORMALIZER</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-displacement-engine"><span id="led-displacement-engine" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">DISPLACEMENT ENGINE</span></div>
+        </div></div>
+        <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 2: STATE ANALYSIS</span><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-top:2px;">
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-regime-engine"><span id="led-regime-engine" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">REGIME ENGINE</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-mtf-bias"><span id="led-mtf-bias" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">MTF BIAS</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-liquidity-sweep"><span id="led-liquidity-sweep" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">LIQUIDITY SWEEP</span></div>
+        </div></div>
+        <div><span style="color:var(--text-dim);font-weight:900;letter-spacing:.08em;text-transform:uppercase;font-size:6px;">LAYER 3: EXECUTION & HEALTH</span><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:3px;margin-top:2px;">
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-entry-sm"><span id="led-entry-sm" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">ENTRY SM</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-health-monitor"><span id="led-health-monitor" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">HEALTH MONITOR</span></div>
+          <div class="flex items-center gap-1 p-1 bg-black/50 border border-zinc-900 rounded" id="card-adaptive-exit-manager"><span id="led-adaptive-exit-manager" style="width:5px;height:5px;border-radius:50%;background:var(--text-dim);display:inline-block;flex-shrink:0;transition:all .3s;"></span><span style="color:var(--text-secondary);font-weight:900;font-size:6.5px;">ADAPTIVE EXIT MGR</span></div>
+        </div></div>
+      </div>
+    </div>
+    <div class="cyber-panel" style="flex:1;display:flex;flex-direction:column;padding:6px;background:#040406;min-height:0;position:relative;">
+      <div style="display:flex;justify-content:space-between;border-bottom:1px solid #1f1f2e;padding-bottom:4px;flex-shrink:0;"><span style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">REASON_STREAM</span><button id="clear-console-btn-intel" style="border:1px solid #1a1a1a;background:#000;color:var(--text-dim);font-size:6.5px;padding:1px 6px;font-family:inherit;font-weight:700;cursor:pointer;text-transform:uppercase;">CLEAR</button></div>
+      <div id="console-body" style="flex:1;overflow-y:auto;padding:4px;font-size:8px;display:flex;flex-direction:column;gap:4px;"><div style="color:rgba(0,240,255,.6);border-bottom:1px solid #1a1a24;padding-bottom:4px;font-weight:700;text-transform:uppercase;font-size:7px;">[SYSTEM] Connected.</div></div>
+      <div id="active-trade-hud" style="display:none;position:absolute;top:0;left:0;right:0;bottom:0;background:rgba(4,4,6,0.95);backdrop-filter:blur(4px);z-index:10;flex-direction:column;padding:12px;border:1px solid var(--purple);"></div>
+    </div>
+  </div>
+  <!-- Col 2: Session Baselines (replaces obsolete News Feed) -->
+  <div class="cyber-panel" style="display:flex;flex-direction:column;padding:8px;background:#040406;min-height:0;overflow:hidden;">
+    <div style="border-bottom:1px solid #1f1f2e;padding-bottom:4px;flex-shrink:0;display:flex;justify-content:space-between;align-items:center;"><span style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">SESSION_BASELINES</span><span id="baselines-active-session" style="font-size:6.5px;color:var(--amber);font-weight:700;letter-spacing:.06em;">--</span></div>
+    <div id="session-baselines-container" style="flex:1;overflow-y:auto;padding:4px;display:flex;flex-direction:column;gap:6px;font-size:8px;">
+      <!-- Economic Calendar section (retained from backend) -->
+      <div>
+        <div style="font-size:7px;color:var(--amber);font-weight:900;letter-spacing:.1em;text-transform:uppercase;border-bottom:1px solid #1f1f2e;padding-bottom:3px;margin-bottom:4px;">&#128197; ECONOMIC CALENDAR</div>
+        <div id="econ-calendar-container"><div style="color:var(--text-dim);text-align:center;padding:8px;font-style:italic;font-size:7px;">Awaiting calendar data...</div></div>
+      </div>
+      <!-- Per-session velocity baseline stats -->
+      <div>
+        <div style="font-size:7px;color:var(--cyan);font-weight:900;letter-spacing:.1em;text-transform:uppercase;border-bottom:1px solid #1f1f2e;padding-bottom:3px;margin-bottom:4px;">&#9656; SESSION VELOCITY BASELINES</div>
+        <div id="vel-baselines-body" style="display:flex;flex-direction:column;gap:3px;">
+          <div style="color:var(--text-dim);text-align:center;padding:8px;font-style:italic;font-size:7px;">Warm-up in progress...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Col 3: Events -->
+  <div class="cyber-panel" style="display:flex;flex-direction:column;padding:8px;background:#020203;min-height:0;overflow:hidden;">
+    <div style="border-bottom:1px solid #1f1f2e;padding-bottom:4px;flex-shrink:0;"><span style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">EVENTS_LOG</span></div>
+    <div id="events-log-container" style="flex:1;overflow-y:auto;padding:4px;font-size:8px;display:flex;flex-direction:column;gap:4px;"><div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">Awaiting triggers...</div></div>
+  </div>
+</div>
+<!-- ─── PANEL: SYSTEM ─── -->
+<div id="panel-system" style="position:absolute;inset:0;display:none;flex-direction:column;gap:3px;min-height:0;overflow:hidden;padding:8px;">
+  <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;flex-shrink:0;">
+    <div class="cyber-panel" style="padding:12px;background:#040406;border-top:3px solid var(--cyan);">
+      <span style="font-size:8px;color:var(--cyan);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:8px;">CONNECTIONS</span>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--text-secondary);">WebSocket</span><span id="health-ws" style="color:var(--red);font-weight:700;">DISCONNECTED</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--text-secondary);">Daemon</span><span id="health-daemon" style="color:var(--text-dim);font-weight:700;">--</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;"><span style="color:var(--text-secondary);">MT5 Terminal</span><span id="health-mt5" style="color:var(--text-dim);font-weight:700;">--</span></div>
+      </div>
+    </div>
+    <div class="cyber-panel" style="padding:12px;background:#040406;border-top:3px solid var(--green);">
+      <span style="font-size:8px;color:var(--green);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:8px;">DATA FEED</span>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:8px;">
+        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Last Tick</span><span id="health-last-tick" style="color:var(--text-dim);font-weight:700;">--</span></div>
+        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Active Pair</span><span id="health-pair" style="color:var(--cyan);font-weight:700;">EURUSD</span></div>
+        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Candles</span><span id="health-candles" style="color:var(--text-dim);font-weight:700;">--</span></div>
+      </div>
+    </div>
+    <div class="cyber-panel" style="padding:12px;background:#040406;border-top:3px solid var(--purple);">
+      <span style="font-size:8px;color:var(--purple);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:8px;">PERFORMANCE</span>
+      <div style="display:flex;flex-direction:column;gap:6px;font-size:8px;">
+        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Uptime</span><span id="sys-uptime" style="color:#fff;font-weight:700;">00:00:00</span></div>
+        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Active Timeframe</span><span id="sys-timeframe" style="color:var(--cyan);font-weight:700;">M15</span></div>
+        <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-secondary);">Tick Count</span><span id="sys-tick-count" style="color:#fff;font-weight:700;">0</span></div>
+      </div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;flex:1;min-height:0;">
+    <div style="display:flex;flex-direction:column;gap:8px;min-height:0;">
+      <div class="cyber-panel" style="padding:12px;background:#040406;display:flex;flex-direction:column;">
+        <span style="font-size:8px;color:var(--text-secondary);font-weight:900;letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;">CACHE STATE</span>
+        <div style="display:flex;flex-direction:column;gap:4px;font-size:8px;">
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">M15 Candles</span><span id="sys-candles-M15" style="color:#fff;font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">H1 Candles</span><span id="sys-candles-H1" style="color:#fff;font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">H4 Candles</span><span id="sys-candles-H4" style="color:#fff;font-weight:700;">0</span></div>
+        </div>
+      </div>
+      <div class="cyber-panel" style="padding:12px;background:#040406;display:flex;flex-direction:column;">
+        <span style="font-size:8px;color:var(--text-secondary);font-weight:900;letter-spacing:.12em;text-transform:uppercase;margin-bottom:6px;">PURE MATH TELEMETRY</span>
+        <div style="display:flex;flex-direction:column;gap:4px;font-size:8px;">
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Rule B Divergence</span><span id="sys-tokens-input" style="color:var(--cyan);font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Tick Efficiency</span><span id="sys-tokens-output" style="color:var(--amber);font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Rule A Max Velocity</span><span id="sys-tokens-total" style="color:var(--purple);font-weight:700;">0</span></div>
+          <div style="display:flex;justify-content:space-between;"><span style="color:var(--text-dim);">Engine State / Dir</span><span id="sys-token-calls" style="color:#fff;font-weight:700;">0 / 0</span></div>
+        </div>
+      </div>
+    </div>
+    <div class="cyber-panel" style="flex:1;min-height:0;display:flex;flex-direction:column;background:#040406;border-top:3px solid var(--orange);">
+      <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 12px 4px 12px;">
+        <span style="font-size:8px;color:var(--orange);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">MICROSTRUCTURE EVENTS</span>
+        <span id="sys-total-events" style="font-size:8px;color:var(--text-secondary);font-weight:700;">TOTAL: 0</span>
+      </div>
+      <div id="sys-events-log" style="flex:1;overflow-y:auto;padding:8px 12px;font-size:8px;display:flex;flex-direction:column;gap:4px;">
+        <div style="color:var(--text-dim);font-style:italic;text-align:center;padding:12px;">Awaiting microstructure events...</div>
+      </div>
+    </div>
+  </div>
+  <div class="cyber-panel" style="padding:12px;background:#040406;flex-shrink:0;">
+    <span style="font-size:8px;color:var(--text-secondary);font-weight:900;letter-spacing:.12em;text-transform:uppercase;display:block;margin-bottom:6px;">BACKTEST RESULTS</span>
+    <div id="backtest-results" style="font-size:8px;color:var(--text-dim);font-style:italic;">No results yet. Run <code style="color:var(--cyan);">python run_intraday_backtest.py</code> first.</div>
+  </div>
+</div>
+
+<!-- ─── PANEL: JOURNAL ─── -->
+<div id="panel-journal" style="position:absolute;inset:0;display:none;flex-direction:column;gap:3px;min-height:0;overflow:hidden;padding:8px;">
+  <!-- Log Sub-Tabs -->
+  <div style="display:flex;gap:4px;flex-shrink:0;margin-bottom:4px;border-bottom:1px solid var(--border);padding-bottom:4px;">
+    <button id="jtab-trades-btn" class="pair-btn active" style="font-size:8px;padding:3px 8px;">TRADE HISTORY</button>
+    <button id="jtab-system-btn" class="pair-btn" style="font-size:8px;padding:3px 8px;">SYSTEM CONSOLE</button>
+    <div style="flex:1;"></div>
+    <button id="refresh-journal-btn" style="border:1px solid var(--border);background:#000;color:var(--cyan);font-size:8px;padding:2px 8px;font-family:inherit;font-weight:700;cursor:pointer;letter-spacing:.05em;">REFRESH</button>
+  </div>
+  
+  <!-- Log Views -->
+  <div class="cyber-panel" style="flex:1;min-height:0;display:flex;flex-direction:column;background:#040406;overflow:hidden;padding:8px;">
+    <!-- Trade History View -->
+    <div id="jview-trades" style="flex:1;display:flex;flex-direction:column;min-height:0;overflow:hidden;max-width:1200px;margin:0 auto;width:100%;">
+      <div style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.2fr 1.2fr 1.2fr 0.4fr;gap:4px;padding:6px 12px;font-size:8px;color:var(--text-dim);font-weight:700;text-align:center;border-bottom:1px solid var(--border);flex-shrink:0;text-transform:uppercase;letter-spacing:.08em;">
+        <span>Timestamp</span>
+        <span>Symbol</span>
+        <span>Type</span>
+        <span>Vol</span>
+        <span>Entry</span>
+        <span>Exit</span>
+        <span>Pips</span>
+        <span>Profit</span>
+        <span>Reason</span>
+        <span>Exit Strategy</span>
+        <span>Outcome</span>
+        <span></span>
+      </div>
+      <div id="jview-trades-scroll" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;">
+        <div id="jview-trades-live" style="font-size:7.5px;padding:0;display:flex;flex-direction:column;gap:4px;"></div>
+        <div id="jview-trades-body" style="font-size:7.5px;padding:4px 0;display:flex;flex-direction:column;gap:4px;">
+          <div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No trades in history yet.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- System Console View -->
+    <div id="jview-system" style="flex:1;display:none;flex-direction:column;min-height:0;overflow:hidden;max-width:1200px;margin:0 auto;width:100%;">
+      <pre id="jview-system-body" style="flex:1;overflow-y:auto;background:#000;color:var(--text-primary);padding:8px;font-size:7.5px;font-family:'JetBrains Mono',monospace;white-space:pre-wrap;margin:0;border:1px solid var(--border-dim);"></pre>
+    </div>
+  </div>
+</div>
+</main>
+<!-- ═══ SETTINGS MODAL ═══ -->
+<div id="settings-modal" style="position:fixed;inset:0;z-index:50;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.75);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);opacity:0;pointer-events:none;transition:all .3s;">
+  <div class="cyber-panel" style="padding:16px;width:420px;background:rgba(0,0,0,.95);border-color:var(--purple);position:relative;display:flex;flex-direction:column;gap:12px;">
+    <div style="position:absolute;top:0;left:0;right:0;height:1.5px;background:var(--purple);"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1f1f2e;padding-bottom:6px;">
+      <span style="font-size:9px;color:var(--purple);font-weight:900;letter-spacing:.12em;text-transform:uppercase;">DAEMON CONFIG</span>
+      <button id="close-settings-btn" style="color:var(--text-dim);background:none;border:none;font-size:14px;font-weight:900;cursor:pointer;font-family:inherit;">&times;</button>
+    </div>
+    <form id="settings-form" style="display:flex;flex-direction:column;gap:8px;font-size:8.5px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Tick Poll (ms)</label><input type="number" name="tick_poll_interval_ms" min="50" max="5000" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">S/R Reset ATR</label><input type="number" name="realtime_level_reset_atr_multiple" step="0.1" min="0.5" max="5.0" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">RSI Period</label><input type="number" name="indicator_rsi_length" min="5" max="50" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Min Signal Quality</label><input type="number" name="realtime_min_signal_quality" step="0.05" min="0.10" max="1.00" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">EMA Fast</label><input type="number" name="indicator_ema_fast" min="5" max="100" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">EMA Slow</label><input type="number" name="indicator_ema_slow" min="10" max="200" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Cooldown (sec)</label><input type="number" name="cooldown_seconds" min="10" max="3600" step="10" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Loss Cooldown (min)</label><input type="number" name="loss_cooldown_minutes" min="5" max="1440" step="5" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">SL ATR Multiple</label><input type="number" name="sl_atr_multiple" step="0.1" min="0.1" max="5.0" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">TP ATR Multiple</label><input type="number" name="tp_atr_multiple" step="0.1" min="0.1" max="10.0" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Decay Profit Factor</label><input type="number" name="realtime_velocity_decay_profit_factor" step="0.05" min="0.1" max="2.0" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Stagnation (sec)</label><input type="number" name="stagnation_limit" min="100" max="86400" step="100" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Drawdown Trend (sec)</label><input type="number" name="drawdown_limit_trending" min="100" max="86400" step="100" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+        <div><label style="color:var(--text-dim);font-weight:700;text-transform:uppercase;font-size:7px;display:block;margin-bottom:2px;">Drawdown Range (sec)</label><input type="number" name="drawdown_limit_ranging" min="100" max="86400" step="100" required style="width:100%;background:#000;border:1px solid #1f1f2e;padding:4px 6px;color:#fff;font-weight:700;font-family:inherit;font-size:8.5px;"></div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-top:4px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:4px 6px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:6px;">Suppress Asian</span><input type="checkbox" name="realtime_suppress_asian" style="accent-color:var(--purple);"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:4px 6px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:6px;">Pinpoint Price</span><input type="checkbox" name="realtime_use_pinpoint_price" style="accent-color:var(--purple);"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:4px 6px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:6px;">Correct Rule A</span><input type="checkbox" name="realtime_correct_rule_a_direction" style="accent-color:var(--purple);"></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;background:rgba(0,0,0,.4);padding:4px 6px;border:1px solid #1f1f2e;"><span style="color:var(--text-secondary);font-weight:700;text-transform:uppercase;font-size:6px;">Bypass Cooldown</span><input type="checkbox" name="realtime_cooldown_bypass_better_peak" style="accent-color:var(--purple);"></div>
+      </div>
+      <button type="submit" style="width:100%;background:rgba(157,0,255,.2);color:var(--purple);border:1px solid var(--purple);font-weight:900;text-transform:uppercase;padding:6px;font-size:8px;font-family:inherit;cursor:pointer;letter-spacing:.08em;margin-top:4px;">APPLY CHANGES</button>
+    </form>
+  </div>
+</div>
+<script>
+// ---- LightweightCharts diagnostic test ----
+// (function(){
+//   const testDiv = document.getElementById("price-chart");
+//   if(!testDiv) { console.error("price-chart div not found"); return; }
+//   try {
+//     const testChart = LightweightCharts.createChart(testDiv, {
+//       layout: {attributionLogo:false, background:{color:"#000"}, textColor:"#00f0ff"},
+//       height: 100, width: 200
+//     });
+//     const testSeries = testChart.addCandlestickSeries();
+//     testSeries.setData([
+//       {time: 100000, open: 1.05, high: 1.07, low: 1.04, close: 1.06},
+//       {time: 200000, open: 1.06, high: 1.08, low: 1.05, close: 1.07},
+//       {time: 300000, open: 1.07, high: 1.09, low: 1.06, close: 1.08},
+//     ]);
+//     testChart.timeScale().fitContent();
+//     console.log("[DIAG] LightweightCharts test chart created OK, canvas:", testDiv.querySelector("canvas") !== null);
+//   } catch(e) {
+//     console.error("[DIAG] LightweightCharts test FAILED:", e);
+//   }
+// })();
+
+class DashboardController {
+  constructor() {
+    window.dashboardController = this;
+    this.ws = null;
+    this.reconnectInterval = 2000;
+    this.startTime = Date.now();
+    this.activeMt5Symbol = "EURUSD";
+    this.currentBid = 0; this.currentAsk = 0; this.currentRes = 0; this.currentSup = 0;
+    this.pipMult = 0.0001;
+    this.tickHistory = [];
+    this.activeTab = "cockpit";
+    this.activeJournalTab = "trades";
+    this.mockPositions = [];
+    this.latestAccountData = null;
+    this.m15Candles = []; this.h1Candles = []; this.h4Candles = [];
+    this.currentTimeframe = 'M15';
+    this.priceLines = []; this.chartMarkers = []; this.slTpLines = [];
+    this.timeframeLoaded = {M15:false,H1:false,H4:false};
+    this.sessionsCache = {M15:[],H1:[],H4:[]};
+    this.audioCtx = null;
+    this.marketClosed = false;
+    this.marketResumeTimestamp = 0;
+    this._debug("LightweightCharts global:", typeof LightweightCharts);
+    this.bindDOM();
+    try { this.initChart(); this._debug("Chart init OK, chart:", !!this.chart, "series:", !!this.candleSeries); } catch(e) { console.error("Chart init failed:", e); this._debug("Chart init FAILED:", e.message); }
+    this.connect();
+    this.startClock();
+    fetch('/status').then(r=>r.json()).then(d=>{if(d.uptime_seconds)this.startTime=Date.now()-(d.uptime_seconds*1000);}).catch(e=>{});
+    document.addEventListener("visibilitychange",()=>{if(document.visibilityState==="visible"){this._debug("Visibility change: visible. Checking socket.");if(!this.ws||this.ws.readyState!==WebSocket.OPEN){this._debug("Socket closed/missing on visibility restoration. Reconnecting...");this.connect()}}});
+    window.addEventListener("focus",()=>{this._debug("Window focus. Checking socket.");if(!this.ws||this.ws.readyState!==WebSocket.OPEN){this._debug("Socket closed/missing on focus. Reconnecting...");this.connect()}});
+    this.updateSessionTimers();
+    setInterval(() => this.updateSessionTimers(), 1000);
+  }
+  _debug(...args) {
+    const el = document.getElementById("chart-debug");
+    if(!el) return;
+    el.style.display = "inline";
+    el.textContent = args.map(a=>typeof a==="object"?JSON.stringify(a):String(a)).join(" ");
+    console.log("[DBG]", ...args);
+  }
+  updateSessionTimers() {
+    const now=new Date(),h=now.getUTCHours(),m=now.getUTCMinutes(),s=now.getUTCSeconds(),t=h+m/60+s/3600;
+    const sess=[
+      {id:"Sydney",nm:"SYD",s:22,e:7,el:document.querySelector('[data-sess="Sydney"]')},
+      {id:"Tokyo",nm:"TYO",s:0,e:9,el:document.querySelector('[data-sess="Tokyo"]')},
+      {id:"London",nm:"LDN",s:8,e:16,el:document.querySelector('[data-sess="London"]')},
+      {id:"New York",nm:"NYC",s:13,e:22,el:document.querySelector('[data-sess="New York"]')}
+    ];
+    let anyOpen=false;
+    sess.forEach(x=>{
+      if(!x.el)return;
+      let o=false,p=0,r=0;
+      if(x.s>x.e){
+        o=(t>=x.s||t<x.e);
+        if(o){anyOpen=true;let e=t>=x.s?(t-x.s):(24-x.s+t);let d=24-x.s+x.e;p=(e/d)*100;r=d-e;}
+        else{r=x.s-t;if(r<0)r+=24;}
+      }else{
+        o=(t>=x.s&&t<x.e);
+        if(o){anyOpen=true;p=((t-x.s)/(x.e-x.s))*100;r=x.e-t;}
+        else{r=x.s-t;if(r<0)r+=24;}
+      }
+      const tel=x.el.querySelector("span"),tmel=x.el.querySelector(".sess-time"),bel=x.el.querySelector(".sess-bar");
+      const hrs=Math.floor(r),mins=Math.floor((r-hrs)*60);
+      const fs=hrs+"H "+String(mins).padStart(2,"0")+"M";
+      if(!this.sessionHeatmaps) this.sessionHeatmaps={};
+      if(!this.sessionHeatmaps[x.id]) this.sessionHeatmaps[x.id]=[];
+      let sm=this.sessionHeatmaps[x.id];
+      if(o){
+        const velVal=this.latestVelocity||0;const vr=Math.min(1,velVal/5);
+        const cr=Math.round(0+vr*(255-0)),cg=Math.round(240+vr*(0-240)),cb=Math.round(255+vr*(85-255));
+        const gradColor=`rgb(${cr},${cg},${cb})`;
+        if(p<0.1||(sm.length>0&&p<sm[sm.length-1].p))sm.length=0;
+        if(sm.length===0){sm.push({p:p,c:"rgba(0,240,255,0.05)"});}
+        if((p-sm[sm.length-1].p)>=0.05)sm.push({p:p,c:gradColor});
+        let gs=[];
+        if(sm.length>0) gs.push(`${sm[0].c} 0%`);
+        for(let i=0;i<sm.length;i++){
+          let sp=Math.min(100,Math.max(0,(sm[i].p/p)*100));
+          gs.push(`${sm[i].c} ${sp}%`);
+        }
+        gs.push(`${gradColor} 100%`);
+        tel.style.color=gradColor;bel.style.width=Math.min(100,Math.max(0,p))+"%";
+        bel.style.background=`linear-gradient(to right, ${gs.join(", ")})`;
+        bel.style.position="relative";
+        bel.innerHTML=`<div style="position:absolute;right:0;top:-1px;bottom:-1px;width:2px;background:#fff;box-shadow:0 0 8px ${gradColor};border-radius:1px;"></div>`;
+        tmel.textContent="CLOSES IN "+fs;tmel.style.color="var(--text-secondary)";
+      }else{
+        sm.length=0;
+        tel.style.color="#555";bel.style.width="0%";bel.style.background="#222";bel.style.boxShadow="none";
+        bel.innerHTML="";
+        tmel.textContent="OPENS IN "+fs;tmel.style.color="#444";
+      }
+    });
+    const b=document.getElementById("market-status-badge");
+    if(b){
+      if(anyOpen){b.textContent="OPEN";b.style.color="var(--cyan)";b.style.background="rgba(0,240,255,.1)";b.style.borderColor="rgba(0,240,255,.2)";}
+      else{b.textContent="CLOSED";b.style.color="var(--text-dim)";b.style.background="rgba(255,255,255,.05)";b.style.borderColor="rgba(255,255,255,.1)";}
+    }
+  }
+  sf(v, d=5, f="--") { return (v===undefined||v===null||isNaN(Number(v))) ? f : Number(v).toFixed(d); }
+  bindDOM() {
+    const g = id => document.getElementById(id);
+    this.ticker = g("header-ticker"); this.uptime = g("header-uptime"); this.latency = g("header-latency");
+    this.socketLight = g("socket-light"); this.socketStatus = g("socket-status");
+    this.priceBid = g("price-bid"); this.priceAsk = g("price-ask");
+    this.beliefVal = g("belief-val"); this.beliefBar = g("belief-bar");
+    this.regimeType = g("regime-type"); this.regimeVol = g("regime-vol");
+    this.spreadVal = g("spread-val");
+    this.statsDetected = g("stats-detected"); this.statsFired = g("stats-fired"); this.statsSkipped = g("stats-skipped");
+    this.cooldownVal = g("ctrl-cooldown"); this.cooldownBar = g("cooldown-bar");
+    this.levelResVal = g("level-res-val"); this.levelResTime = g("level-res-time"); this.levelResDist = g("level-res-dist");
+    this.levelSupVal = g("level-sup-val"); this.levelSupTime = g("level-sup-time"); this.levelSupDist = g("level-sup-dist");
+    this.decisionPanel = g("decision-panel"); this.decisionStatus = g("decision-status");
+    this.decisionAction = g("decision-action"); this.decisionTime = g("decision-time");
+    this.consoleBody = g("console-body"); this.eventsLog = g("events-log-container");
+    this.tickActivityStrip = g("tick-activity-strip");
+    const clearBtn = g("clear-console-btn-intel");
+    if(clearBtn) clearBtn.onclick = ()=>{ this.consoleBody.innerHTML = '<div style="color:rgba(0,240,255,.6);border-bottom:1px solid #1a1a24;padding-bottom:4px;font-weight:700;text-transform:uppercase;font-size:7px;">[STREAM CLEARED]</div>'; };
+    // Pair buttons
+    document.querySelectorAll(".pair-btn").forEach(b=>{b.onclick=()=>{
+      document.querySelectorAll(".pair-btn").forEach(x=>x.classList.remove("active"));
+      b.classList.add("active"); this.activeMt5Symbol = b.dataset.mt5;
+      const ticker = g("header-ticker"); if(ticker) ticker.textContent = b.textContent.replace("/","");
+      this.pipMult = (b.dataset.pair.includes("JPY")||b.dataset.pair.includes("XAU")) ? 0.01 : 0.0001;
+      this.m15Candles = []; this.h1Candles = []; this.h4Candles = [];
+      this.timeframeLoaded = {M15:false,H1:false,H4:false};
+      this.currentBid = 0; this.currentAsk = 0;
+      if(this.chart) this.candleSeries.setData([]);
+      if(this.ws&&this.ws.readyState===WebSocket.OPEN) this.ws.send(JSON.stringify({type:"switch_pair",pair:b.dataset.pair,mt5:b.dataset.mt5}));
+    }});
+    // Timeframe buttons
+    ["M15","H1","H4"].forEach(tf=>{const btn=g("tf-"+tf.toLowerCase()+"-btn");if(btn)btn.onclick=()=>this.selectTimeframe(tf);});
+    // Settings modal
+    const modal = g("settings-modal"), sBtn = g("settings-trigger-btn"), csBtn = g("close-settings-btn");
+    if(sBtn&&modal) sBtn.onclick = ()=>{modal.style.opacity="1";modal.style.pointerEvents="auto";};
+    if(csBtn&&modal) csBtn.onclick = ()=>{modal.style.opacity="0";modal.style.pointerEvents="none";};
+    // Settings form
+    const form = g("settings-form");
+    if(form){
+      form.onsubmit = async e=>{
+        e.preventDefault(); const fd = new FormData(form);
+        const data = {};
+        for(let [k,v] of fd.entries()) {
+          const inp = form.querySelector(`[name="${k}"]`);
+          if (inp) {
+            if (inp.type === "checkbox") data[k] = v === "on";
+            else if (inp.type === "number") data[k] = inp.getAttribute("step") ? parseFloat(v) : parseInt(v);
+            else data[k] = v;
+          }
+        }
+        form.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+          if (!data.hasOwnProperty(cb.name)) data[cb.name] = false;
+        });
+        try{const r=await fetch("/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(data)});const j=await r.json();if(j.status==="success"){modal.style.opacity="0";modal.style.pointerEvents="none";Object.keys(j.config).forEach(k=>{const inp=form.querySelector(`[name="${k}"]`);if(inp){inp.type==="checkbox"?inp.checked=!!j.config[k]:inp.value=j.config[k]}})}}catch(err){console.log(err)}
+      };
+      (async()=>{try{const r=await fetch("/config");const j=await r.json();if(j.status==="success"&&j.config){const c=j.config;Object.keys(c).forEach(k=>{const inp=form.querySelector(`[name="${k}"]`);if(inp){if(inp.type==="checkbox")inp.checked=!!c[k];else inp.value=c[k]}})}}catch(e){}})();
+    }
+    // Tab buttons
+    ["cockpit","intel","journal","system"].forEach(t=>{const btn=g("tab-"+t+"-btn");if(btn)btn.onclick=()=>this.switchTab(t);});
+    
+    // Journal tab listeners
+    ["trades","system"].forEach(sub=>{
+      const btn = g("jtab-"+sub+"-btn");
+      if(btn) btn.onclick = () => this.switchJournalTab(sub);
+    });
+    const refBtn = g("refresh-journal-btn");
+    if(refBtn) refBtn.onclick = () => this.loadJournalData();
+
+    // Keyboard
+    window.addEventListener("keydown",e=>{const inp=e.target.tagName==="INPUT"||e.target.tagName==="TEXTAREA";if(!inp&&(e.key==="1"||e.key==="2"||e.key==="3"||e.key==="4")){e.preventDefault();this.switchTab({1:"cockpit",2:"intel",3:"journal",4:"system"}[e.key])}if(!inp&&(e.key==="ArrowLeft"||e.key==="ArrowRight")){e.preventDefault();const tabs=["cockpit","intel","journal","system"];let i=tabs.indexOf(this.activeTab);if(i===-1)i=0;i=(i+(e.key==="ArrowLeft"?-1:1)+tabs.length)%tabs.length;this.switchTab(tabs[i])}});
+  }
+  selectTimeframe(tf) {
+    this.currentTimeframe = tf;
+    ["m15","h1","h4"].forEach(k=>{const btn=document.getElementById("tf-"+k+"-btn");if(btn)btn.style.cssText=((k==="m15"&&tf==="M15")||(k==="h1"&&tf==="H1")||(k==="h4"&&tf==="H4"))?"border:1px solid var(--cyan);background:rgba(0,184,212,.1);color:var(--cyan);font-size:7px;padding:2px 6px;font-weight:700;font-family:inherit;text-transform:uppercase;cursor:pointer;":"border:1px solid #1f1f2e;color:var(--text-dim);font-size:7px;padding:2px 6px;font-weight:700;font-family:inherit;text-transform:uppercase;cursor:pointer;"});
+    this.renderActiveCandles();
+  }
+  connect() {
+    const proto = window.location.protocol==="https:"?"wss:":"ws:";
+    const uri = proto+"//"+window.location.host+"/ws";
+    this.socketLight.style.background = "var(--amber)"; this.socketStatus.textContent = "CONNECTING"; this.socketStatus.style.color = "var(--amber)";
+    this.ws = new WebSocket(uri);
+    this.ws.onopen = ()=>{this.socketLight.style.background="var(--green)";this.socketStatus.textContent="ONLINE";this.socketStatus.style.color="var(--green)";if(this.pingInterval)clearInterval(this.pingInterval);this.pingInterval=setInterval(()=>{if(this.ws&&this.ws.readyState===WebSocket.OPEN)this.ws.send(JSON.stringify({type:"ping",timestamp:Date.now()}))},2000);};
+    this.ws.onclose = ()=>{this.socketLight.style.background="var(--red)";this.socketStatus.textContent="OFFLINE";this.socketStatus.style.color="var(--red)";if(this.latency)this.latency.textContent="--ms";if(this.pingInterval){clearInterval(this.pingInterval);this.pingInterval=null}setTimeout(()=>this.connect(),this.reconnectInterval);};
+    this.ws.onmessage = e=>{try{const d=JSON.parse(e.data);if(!this._msgQueue)this._msgQueue=[];this._msgQueue.push(d);if(this._msgQueue.length>150){let lt=null;const p=[];for(const m of this._msgQueue){m.type==="tick"?lt=m:p.push(m)}if(lt)p.push(lt);this._msgQueue=p}if(!this._rafPending){this._rafPending=true;requestAnimationFrame(()=>{this._rafPending=false;const msgs=this._msgQueue;this._msgQueue=[];for(const msg of msgs){try{this.handleMessage(msg)}catch(e){console.error(e)}}})}}catch(e){console.log(e)}};
+  }
+  handleMessage(d) {
+    if(d.type==="pong"){if(this.latency)this.latency.textContent=(Date.now()-d.timestamp)+"ms";return}
+    if(d.symbol&&d.symbol!==this.activeMt5Symbol){this.activeMt5Symbol=d.symbol;if(this.ticker)this.ticker.textContent=d.symbol.replace("m","")}
+    switch(d.type){
+      case"tick":this.handleTick(d);break;case"regime":this.handleRegime(d);break;case"levels":this.handleLevels(d);break;
+      case"account":this.handleAccount(d);break;case"candle":this.handleSingleCandle(d);break;case"candles":this.handleCandles(d);break;
+      case"event":this.handleEvent(d);break;case"agent":this.handleAgent(d);break;case"decision":this.handleDecision(d);break;
+      case"news_data":this.handleNewsData(d);break;
+      case"mode":this.handleMode(d);break;
+      case"trigger_metrics":this.handleTriggerMetrics(d);break;
+      case"trade_state":this.handleTradeState(d);break;
+      case"location_context":this.handleLocationContext(d);break;
+    }
+    // Real-time journal: when a trade closes, refresh the journal live (no manual reload needed)
+    if(d.type==="event"&&d.event_type==="TRADE_CLOSED"){this.onTradeClosed(d);}
+  }
+  onTradeClosed(d){
+    // Always re-fetch trades on a close so the journal reflects it immediately, using the
+    // server's complete merged record (direction, entry/exit, P&L, pips, duration, peak).
+    // Safe even when the journal tab is hidden (it writes to the DOM element which always exists).
+    try{this.loadJournalData();}catch(_){}
+    // Visible confirmation so the user sees the live close even from another tab.
+    try{
+      const det=d.details||{};
+      const pl=det.profit!==undefined?((det.profit>0?'+':'')+parseFloat(det.profit).toFixed(2)):'';
+      console.log(`[LIVE TRADE CLOSED] #${det.ticket||''} ${det.direction||''} ${pl} (${det.outcome||''})`);
+    }catch(_){}
+  }
+  handleTradeState(d) {
+    const upd = (id,val) => {const el=g(id);if(el)el.textContent=val};
+    upd("ts-phase", d.current_phase || "--");
+    upd("ts-health", (d.health_score || 0).toFixed(1) + "%");
+    upd("ts-thesis", d.thesis_status || "--");
+    upd("ts-mfe", (d.mfe || 0).toFixed(1));
+    upd("ts-mae", (d.mae || 0).toFixed(1));
+    upd("ts-profit", (d.current_profit_pips || 0).toFixed(1));
+  }
+  handleLocationContext(d) {
+    const upd = (id,val) => {const el=g(id);if(el)el.textContent=val};
+    upd("lc-at-struct", d.at_structure ? "TRUE" : "FALSE");
+    upd("lc-dist-sr", (d.distance_to_sr || 0).toFixed(2));
+    upd("lc-dist-liq", (d.distance_to_liquidity || 0).toFixed(2));
+    upd("lc-room", (d.room_available || 0).toFixed(1));
+    upd("lc-level-type", d.nearest_level_type || "--");
+    upd("lc-level-price", d.nearest_level_price ? parseFloat(d.nearest_level_price).toFixed(5) : "--");
+  }
+  handleTriggerMetrics(d) {
+    console.log('handleTriggerMetrics called with:', d);
+    const updateEl = (id, value, color) => {
+      const el = document.getElementById(id);
+      if(!el) {console.log('Element not found:', id); return;}
+      el.textContent = value;
+      if(color) el.style.color = color;
+    };
+
+    // Color coding based on state (hardcoded colors)
+    let stateColor = "#888888";
+    if(d.state === "IDLE") stateColor = "#888888";
+    else if(d.state === "ANOMALY") stateColor = "#ffab00";
+    else if(d.state === "ARMING") stateColor = "#cc00ff";
+    else if(d.state === "RETEST_WAIT") stateColor = "#00b8d4";
+    else if(d.state === "TRIGGERED") stateColor = "#00ff66";
+
+    updateEl("trigger-state", d.state || "IDLE", stateColor);
+    updateEl("trigger-direction", d.direction || "--", d.direction === "BUY" ? "#00ff66" : d.direction === "SELL" ? "#ff0055" : "#ffab00");
+    updateEl("trigger-quality", (d.signal_quality || 0).toFixed(2), "#888888");
+    updateEl("trigger-disp-class", d.displacement_class || "--", "#888888");
+    updateEl("trigger-disp-ratio", (d.displacement_ratio || 0).toFixed(3), "#888888");
+    updateEl("trigger-vel-z", (d.velocity_z_score || 0).toFixed(2), "#888888");
+    updateEl("trigger-regime", d.regime || "--", "#888888");
+    updateEl("trigger-h1-bias", (d.mtf_h1_bias || 0).toFixed(2), "#888888");
+    updateEl("trigger-h4-bias", (d.mtf_h4_bias || 0).toFixed(2), "#888888");
+
+    const reasonEl = document.getElementById("trigger-reason");
+    if(reasonEl) {
+      reasonEl.textContent = d.reason || "Awaiting conditions...";
+      reasonEl.style.color = d.is_valid ? "#00c853" : "#444";
+      reasonEl.style.fontWeight = d.is_valid ? "900" : "700";
+    }
+  }
+  handleMode(d) {
+    const el = document.getElementById("mode-badge");
+    if(!el) return;
+    const c = "var(--" + (d.color||"text-dim") + ")";
+    el.textContent = d.label || "—";
+    el.style.color = c;
+    el.style.borderColor = c;
+    el.style.display = "inline-block";
+    el.title = (d.label||"") + " — engine: " + (d.engine||"") +
+               (d.paper ? " (simulated fills, no orders sent)"
+                : d.dry_run ? " (real demo orders sent to MT5)"
+                : " (REAL account orders)");
+    this._mode = d;
+  }
+  initChart() {
+    const el = document.getElementById("price-chart");
+    if(!el) return;
+    this.chart = LightweightCharts.createChart(el,{layout:{attributionLogo:false,background:{color:"#000"},textColor:"#00f0ff",fontFamily:'"JetBrains Mono",monospace'},grid:{vertLines:{color:"rgba(255,255,255,.03)"},horzLines:{color:"rgba(255,255,255,.03)"}},crosshair:{vertLine:{color:"rgba(255,255,255,.12)",width:1,style:LightweightCharts.LineStyle.Dashed},horzLine:{color:"rgba(255,255,255,.12)",width:1,style:LightweightCharts.LineStyle.Dashed}},rightPriceScale:{borderColor:"#1f1f2e",scaleMargins:{top:.05,bottom:.05}},timeScale:{borderColor:"#1f1f2e",timeVisible:true,secondsVisible:false,barSpacing:8,minBarSpacing:3,rightOffset:15}});
+    this.candleSeries = this.chart.addSeries(LightweightCharts.CandlestickSeries, {upColor:"#00ff66",downColor:"#ff0055",borderUpColor:"#00ff66",borderDownColor:"#ff0055",wickUpColor:"#00ff66",wickDownColor:"#ff0055",priceFormat:{type:"custom",minMove:.00001,formatter:p=>{if(typeof p!=="number")return"";if(p>200)return p.toFixed(2);if(p>50)return p.toFixed(3);return p.toFixed(5)}}});
+    this.chart.timeScale().subscribeVisibleLogicalRangeChange(() => this.drawSessions());
+    const ro = new ResizeObserver(entries=>{if(entries[0]&&entries[0].contentRect){const {width,height}=entries[0].contentRect;if(width>0&&height>0){this.chart.resize(width,height);setTimeout(()=>this.drawSessions(),50)}}});ro.observe(el);
+  }
+  handleCandles(d) {
+    const candles = d.candles || [];
+    if(d.timeframe==="M15") this.m15Candles = candles;
+    else if(d.timeframe==="H1") this.h1Candles = candles;
+    else this.h4Candles = candles;
+    this.sessionsCache[d.timeframe]=this.getSessions(candles);
+    this._debug("Candles rcvd:", d.timeframe, "count:", candles.length);
+    if(d.timeframe===this.currentTimeframe) this.renderActiveCandles();
+  }
+  renderActiveCandles() {
+    if(!this.candleSeries) { this._debug("renderActiveCandles: no series"); return; }
+    let target = this.currentTimeframe==="M15"?this.m15Candles:this.currentTimeframe==="H1"?this.h1Candles:this.h4Candles;
+    if(!target||!Array.isArray(target)) target=[];
+    const seen={},fmt=[];
+    [...target].sort((a,b)=>Number(a.time)-Number(b.time)).forEach(c=>{if(c&&Number(c.open)>0&&Number(c.high)>0&&Number(c.low)>0&&Number(c.close)>0){const t=Number(c.time);if(!seen[t]){seen[t]=true;fmt.push({time:t,open:Number(c.open),high:Number(c.high),low:Number(c.low),close:Number(c.close)})}}});
+    this._debug("Rendering candles:", fmt.length, "chart div:", document.getElementById("price-chart")?.offsetWidth+"x"+document.getElementById("price-chart")?.offsetHeight);
+    try { this.candleSeries.setData(fmt); this._debug("setData OK"); } catch(e) { console.error("setData error:", e); this._debug("setData ERROR:", e.message); }
+    this.updateMarkers(this.getMarkersForTimeframe(this.currentTimeframe));
+    if(this.chart){if(!this.timeframeLoaded[this.currentTimeframe]){this.chart.timeScale().fitContent();this.timeframeLoaded[this.currentTimeframe]=true;this._debug("fitContent done");}}
+    this.drawSessions();
+  }
+  updateMarkers(m) {if(typeof this.candleSeries.setMarkers==="function")this.candleSeries.setMarkers(m);}
+  getMarkersForTimeframe(tf){const target=tf==="M15"?this.m15Candles:tf==="H1"?this.h1Candles:this.h4Candles;const active=new Set((target||[]).map(c=>Number(c.time)));const f=this.chartMarkers.filter(m=>(m.details&&m.details.timeframe||"M15")===tf).sort((a,b)=>a.time-b.time).slice(-100);const g={};for(const m of f){let t=m.time;if(tf==="M15")t=Math.floor(t/900)*900;else if(tf==="H1")t=Math.floor(t/3600)*3600;else if(tf==="H4")t=Math.floor(t/14400)*14400;if(!active.has(t))continue;const k=t+"_"+m.position;if(!g[k])g[k]={time:t,position:m.position,color:m.color,shape:m.shape,text:m.shortText||""}}return Object.values(g);}
+  handleTick(d) {
+    if(d.symbol&&this.ticker)this.ticker.textContent=d.symbol;
+    const prevBid=this.currentBid;this.currentBid=d.bid;this.currentAsk=d.ask;
+    const e=(id)=>document.getElementById(id);
+    const vel=e("tick-velocity");if(vel&&d.tick_velocity!==undefined){vel.textContent=this.sf(d.tick_velocity,2);this.latestVelocity=Number(d.tick_velocity);}
+    const imb=(id,v)=>{const el=e(id);if(!el||v===undefined||v===null)return;const val=Math.max(-1,Math.min(1,v));let c="#888";if(val>=.5)c="#00ff66";else if(val<=-.5)c="#ff0055";else if(val>=.25)c="#66ff99";else if(val<=-.25)c="#ff6666";let l="NEUTRAL";if(val>=.5)l="STR BUY";else if(val<=-.5)l="STR SELL";else if(val>=.25)l="MOD BUY";else if(val<=-.25)l="MOD SELL";const f=(val>=0?"+":"")+this.sf(val,2);el.innerHTML='<span style="color:'+c+';font-weight:700;">'+f+'</span><span style="color:'+c+';font-size:7px;margin-left:4px;">'+l+'</span>';};
+    imb("tick-imbalance-10s",d.tick_imbalance_10s);imb("tick-imbalance-60s",d.tick_imbalance_60s);imb("tick-imbalance-300s",d.tick_imbalance_300s);
+    const con=e("tick-imbalance-confluence");if(con&&d.tick_imbalance_10s!==undefined){const v10=d.tick_imbalance_10s,v60=d.tick_imbalance_60s,v300=d.tick_imbalance_300s;if(v10>=.25&&v60>=.25&&v300>=.25){con.textContent="CONFLUENCE: SUSTAINED BUY";con.style.color="#00ff66"}else if(v10<=-.25&&v60<=-.25&&v300<=-.25){con.textContent="CONFLUENCE: SUSTAINED SELL";con.style.color="#ff0055"}else{con.textContent="CONFLUENCE: MIXED — WAIT";con.style.color="var(--text-dim)"}}
+    const sd=e("tick-spread-delta");if(sd&&d.tick_spread_delta!==undefined)sd.textContent=this.sf(d.tick_spread_delta,5);
+    [["tick-collapse","tick_collapse"],["tick-agg-shift","tick_agg_shift"],["tick-absorption","tick_absorption"]].forEach(([id,key])=>{const el=e(id);if(el&&d[key]!==undefined)el.textContent=d[key]?"TRUE":"FALSE";});
+    const ra=e("tick-rule-a");if(ra&&d.rule_a_max_vel!==undefined){const maxV=Number(d.rule_a_max_vel),avgV=Number(d.rule_a_avg_vel);if(maxV>5*avgV&&maxV>5.0){ra.textContent="CLIMAX "+this.sf(maxV,1);ra.style.color="#ff0055"}else{ra.textContent="IDLE";ra.style.color="var(--text-dim)"}}
+    const rb=e("tick-rule-b");if(rb&&d.rule_b_divergence!==undefined){
+      const divg=Number(d.rule_b_divergence);
+      if(d.rule_b_confirmed){
+        rb.innerHTML='<span style="color:#00ff66;font-weight:900;">CONFIRMED</span> <span style="color:var(--text-dim);font-size:7px;">'+this.sf(divg,2)+'</span>';
+        this._ruleBLatch = Date.now();
+      } else if (this._ruleBLatch && (Date.now() - this._ruleBLatch < 2000)) {
+        // Keep confirmed lit for 2 seconds so it doesn't flicker
+      } else if(divg>0.6){
+        rb.innerHTML='<span style="color:#ffab00;">WARN</span> <span style="color:var(--text-dim);font-size:7px;">'+this.sf(divg,2)+'</span>';
+      } else {
+        rb.textContent="DIV: "+this.sf(divg,2);
+        rb.style.color="var(--text-dim)";
+      }
+    }
+    if(this.priceBid)this.priceBid.textContent=this.sf(d.bid,5);if(this.priceAsk)this.priceAsk.textContent=this.sf(d.ask,5);
+    if(this.spreadVal)this.spreadVal.textContent=this.sf(d.spread,1);
+    this.updatePipDistances();
+    // Tick activity strip — raw tick bars
+    if(prevBid!==0&&this.tickActivityStrip){const col=d.bid>prevBid?"#00ff66":d.bid<prevBid?"#ff0055":"#252538";const b=document.createElement("span");b.style.cssText="width:6px;height:10px;flex-shrink:0;background:"+col+";border:1px solid rgba(255,255,255,.08);transition:background .15s;";this.tickActivityStrip.appendChild(b);if(this.tickActivityStrip.children.length>8)this.tickActivityStrip.removeChild(this.tickActivityStrip.firstChild)}
+    // Live tick dot
+    const dot=e("live-tick-dot");if(dot){dot.style.background="#00ff66";dot.style.boxShadow="0 0 8px #00ff66";setTimeout(()=>{dot.style.background="var(--text-dim)";dot.style.boxShadow="none"},80)}
+    // Live candle update
+    if(this.candleSeries){const tfs=[{name:"M15",target:this.m15Candles,ps:900},{name:"H1",target:this.h1Candles,ps:3600},{name:"H4",target:this.h4Candles,ps:14400}];const now=Math.floor(Date.now()/1000);const tt=d.time?Math.floor(d.time):now;tfs.forEach(tf=>{const t=tf.target;if(!t||t.length===0)return;const ps=Math.floor(tt/tf.ps)*tf.ps;const lc=t[t.length-1];const p=d.bid;if(ps===Number(lc.time)){lc.close=p;lc.high=Math.max(Number(lc.high),p);lc.low=Math.min(Number(lc.low),p);if(tf.name===this.currentTimeframe)this.candleSeries.update({time:Number(lc.time),open:Number(lc.open),high:Number(lc.high),low:Number(lc.low),close:Number(lc.close)})}else if(ps>Number(lc.time)){const nc={time:ps,open:p,high:p,low:p,close:p};t.push(nc);this.sessionsCache[tf.name]=this.getSessions(t);if(tf.name===this.currentTimeframe){this.candleSeries.update(nc);}}})}
+    
+    // Process Microstructure Events for the SYSTEM tab log
+    if (d.tick_collapse || d.tick_agg_shift || d.tick_absorption) {
+      this.totalMicroEvents = (this.totalMicroEvents || 0) + 1;
+      const sTel = document.getElementById("sys-total-events");
+      if (sTel) sTel.textContent = "TOTAL: " + this.totalMicroEvents;
+      
+      const log = document.getElementById("sys-events-log");
+      if (log) {
+         if (this.totalMicroEvents === 1) log.innerHTML = "";
+         let type = d.tick_collapse ? "COLLAPSE" : (d.tick_agg_shift ? "AGGR SHIFT" : "ABSORPTION");
+         let color = d.tick_collapse ? "var(--red)" : (d.tick_agg_shift ? "var(--cyan)" : "var(--purple)");
+         let strength = d.tick_collapse ? `Eff:${this.sf(d.rule_b_efficiency,3)}` : (d.tick_agg_shift ? `I60:${this.sf(d.tick_imbalance_60s,2)} I10:${this.sf(d.tick_imbalance_10s,2)}` : `Vel:${this.sf(d.tick_velocity,1)}`);
+         
+         const entry = document.createElement("div");
+         entry.style.cssText = "display:flex;align-items:center;gap:8px;padding:4px;background:rgba(255,255,255,.02);border-left:2px solid "+color;
+         entry.innerHTML = `<span style="color:var(--text-dim);width:40px;">${(d.timestamp||"").split(' ')[1] ? (d.timestamp||"").split(' ')[1].substring(0,8) : ""}</span>
+         <span style="color:${color};font-weight:700;width:70px;">${type}</span>
+         <span style="color:#fff;">Strength: ${strength}</span>`;
+         log.prepend(entry);
+         if (log.children.length > 50) log.removeChild(log.lastChild);
+      }
+    }
+    this.updatePipelineLeds(d);
+  }
+  updatePipelineLeds(d) {
+    if(!d) return;
+    const updateLed = (id, state) => {
+      const led = document.getElementById(id);
+      if (!led) return;
+      if (state === "active" || state === "pass" || state === true) {
+        led.style.background = "#00ff66";
+        led.style.boxShadow = "0 0 6px #00ff66";
+      } else if (state === "warning" || state === "amber") {
+        led.style.background = "#ffab00";
+        led.style.boxShadow = "0 0 6px #ffab00";
+      } else if (state === "error" || state === "fail" || state === "blocked") {
+        led.style.background = "#ff3d3d";
+        led.style.boxShadow = "0 0 6px #ff3d3d";
+      } else if (state === "process" || state === "cyan") {
+        led.style.background = "#00b8d4";
+        led.style.boxShadow = "0 0 6px #00b8d4";
+      } else if (state === "purple") {
+        led.style.background = "#9c27b0";
+        led.style.boxShadow = "0 0 6px #9c27b0";
+      } else {
+        led.style.background = "var(--text-dim)";
+        led.style.boxShadow = "none";
+      }
+    };
+
+    if (d.tick_velocity !== undefined) {
+      const v = Number(d.tick_velocity);
+      if (v > 2.0) updateLed("led-velocity-normalizer", "active");
+      else if (v > 1.0) updateLed("led-velocity-normalizer", "cyan");
+      else updateLed("led-velocity-normalizer", "idle");
+    }
+
+    if (d.rule_b_divergence !== undefined) {
+      const div = Number(d.rule_b_divergence);
+      if (div > 0.8) updateLed("led-displacement-engine", "active");
+      else if (div > 0.6) updateLed("led-displacement-engine", "amber");
+      else updateLed("led-displacement-engine", "idle");
+    }
+
+    if (d.dominant !== undefined) {
+      const conf = Number(d.confidence) || 0;
+      if (conf > 0.65) updateLed("led-regime-engine", "active");
+      else if (conf > 0.3) updateLed("led-regime-engine", "cyan");
+      else updateLed("led-regime-engine", "idle");
+    }
+
+    if (d.trend_h4 !== undefined && d.trend_h1 !== undefined) {
+      const h4 = String(d.trend_h4).toLowerCase();
+      const h1 = String(d.trend_h1).toLowerCase();
+      if ((h4 === "up" || h4.includes("bull")) && (h1 === "up" || h1.includes("bull"))) {
+        updateLed("led-mtf-bias", "active");
+      } else if ((h4 === "down" || h4.includes("bear")) && (h1 === "down" || h1.includes("bear"))) {
+        updateLed("led-mtf-bias", "active");
+      } else if (h4 === "sideways" || h1 === "sideways") {
+        updateLed("led-mtf-bias", "amber");
+      } else {
+        updateLed("led-mtf-bias", "idle");
+      }
+    }
+
+    if (this.currentBid > 0 && this.currentRes > 0 && this.currentSup > 0) {
+      const distRes = (this.currentRes - this.currentBid) / this.pipMult;
+      const distSup = (this.currentBid - this.currentSup) / this.pipMult;
+      if (distRes <= 3.0 || distSup <= 3.0) {
+        updateLed("led-liquidity-sweep", "active");
+      } else if (distRes <= 7.0 || distSup <= 7.0) {
+        updateLed("led-liquidity-sweep", "cyan");
+      } else {
+        updateLed("led-liquidity-sweep", "idle");
+      }
+    }
+
+    if (d.entry_state !== undefined) {
+      const st = String(d.entry_state).toUpperCase();
+      if (st === "TRIGGERED") updateLed("led-entry-sm", "active");
+      else if (st === "ARMING") updateLed("led-entry-sm", "purple");
+      else if (st === "RETEST_WAIT") updateLed("led-entry-sm", "cyan");
+      else if (st === "ANOMALY") updateLed("led-entry-sm", "amber");
+      else if (st === "INVALIDATED") updateLed("led-entry-sm", "fail");
+      else updateLed("led-entry-sm", "idle");
+    }
+
+    if (d.health_active !== undefined) {
+      if (d.health_active) {
+        const sc = Number(d.health_score) || 0.0;
+        if (sc > 0.7) updateLed("led-health-monitor", "active");
+        else if (sc > 0.4) updateLed("led-health-monitor", "amber");
+        else updateLed("led-health-monitor", "fail");
+      } else {
+        updateLed("led-health-monitor", "idle");
+      }
+    }
+
+    if (d.health_active !== undefined) {
+      if (d.health_active) {
+        if (d.exit_should_exit) {
+          updateLed("led-adaptive-exit-manager", "fail");
+        } else {
+          const action = String(d.exit_action).toUpperCase();
+          if (action === "ADJUST_SL" || action === "ADJUST_TP") {
+            updateLed("led-adaptive-exit-manager", "amber");
+          } else {
+            updateLed("led-adaptive-exit-manager", "active");
+          }
+        }
+      } else {
+        updateLed("led-adaptive-exit-manager", "idle");
+      }
+    }
+  }
+  handleRegime(d) {
+    if(d.symbol&&this.ticker)this.ticker.textContent=d.symbol;
+    if(this.beliefVal){
+        this.beliefVal.textContent=this.sf(d.belief,2);
+        this.beliefVal.style.color=d.belief>=0?"var(--green)":"var(--red)";
+    }
+    if(this.beliefBar){
+        const val=Number(d.belief)||0;
+        this.beliefBar.style.width=Math.min(100,Math.abs(val)*100)+"%";
+        this.beliefBar.style.background=val>=0?"var(--green)":"var(--red)";
+    }
+    if(d.macro_bias){const mb=document.getElementById("macro-bias");if(mb){mb.textContent=d.macro_bias;mb.style.color=d.macro_bias==="BUY"?"var(--green)":d.macro_bias==="SELL"?"var(--red)":"var(--text-dim)";const ml=document.getElementById("macro-lvl");if(ml)ml.textContent="LVL: "+this.sf(d.macro_key_level,5);const mc=document.getElementById("macro-conf");if(mc)mc.textContent=this.sf((Number(d.macro_confidence)||0)*100,0)+"%"}}
+    if(d.gate_status){
+      const ug=(id,p)=>{const el=document.getElementById(id);if(el)el.style.background=p?"#00ff66":"#ff0055"};
+      ug("gate-state",d.gate_status.state_passed);
+      ug("gate-spread",d.gate_status.spread_passed);
+      ug("gate-convict",d.gate_status.conviction_passed);
+      ug("gate-rate",d.gate_status.rate_limit_passed);
+      ug("gate-context",d.gate_status.context_passed);
+      ug("gate-paused",d.gate_status.llm_paused);
+      
+      const pBtn = document.getElementById("pause-trading-btn");
+      if (pBtn) {
+        if (d.gate_status.llm_paused) {
+          pBtn.textContent = "RESUME";
+          pBtn.style.background = "rgba(0,200,83,.15)";
+          pBtn.style.color = "var(--green)";
+          pBtn.style.borderColor = "rgba(0,200,83,.5)";
+        } else {
+          pBtn.textContent = "PAUSE";
+          pBtn.style.background = "rgba(0,240,255,.1)";
+          pBtn.style.color = "var(--cyan)";
+          pBtn.style.borderColor = "rgba(0,240,255,.5)";
+        }
+      }
+    }
+    if(this.regimeType)this.regimeType.textContent=d.dominant||"UNKNOWN";
+    if(this.regimeVol)this.regimeVol.textContent="VOL: "+(d.volatility||"").toUpperCase()+" | ATR: "+this.sf(d.atr,5);
+    if(d.cooldown_remaining!==undefined&&this.cooldownVal){if(d.cooldown_remaining>0){this.cooldownVal.textContent=d.cooldown_remaining+"s";this.cooldownVal.style.color="var(--amber)";if(this.cooldownBar)this.cooldownBar.style.width=Math.min(100,(d.cooldown_remaining/300)*100)+"%"}else{this.cooldownVal.textContent="READY";this.cooldownVal.style.color="var(--green)";if(this.cooldownBar)this.cooldownBar.style.width="0%"}}
+    if(d.events_detected!==undefined){if(this.statsDetected)this.statsDetected.textContent=d.events_detected;if(this.statsFired)this.statsFired.textContent=d.events_fired;if(this.statsSkipped)this.statsSkipped.textContent=d.events_skipped}
+    // Header velocity metrics: rule_a_max_velocity, rule_b_divergence, tick_efficiency, engine trigger state
+    {const vm=document.getElementById("vel-max-val");if(vm&&d.rule_a_max_velocity!==undefined)vm.textContent=Number(d.rule_a_max_velocity).toFixed(2);
+     const vd=document.getElementById("vel-div-val");if(vd&&d.rule_b_divergence!==undefined)vd.textContent=Number(d.rule_b_divergence).toFixed(2);
+     const ve=document.getElementById("vel-eff-val");if(ve&&d.tick_efficiency!==undefined)ve.textContent=Number(d.tick_efficiency).toFixed(2);
+     const vt=document.getElementById("vel-trigger-val");if(vt&&d.engine_state!==undefined)vt.textContent=(d.engine_state||"").toUpperCase()+" "+(d.trigger_direction||"")}
+    if(this.latency&&d.processing_time!==undefined)this.latency.textContent=this.sf(d.processing_time,0)+"ms";
+    this.updateMTFPanel(d);
+    this.updatePipelineLeds(d);
+  }
+  updateMTFPanel(d) {
+    const cd=v=>{if(!v)return'<span style="color:var(--text-dim)">--</span>';const u=v.toUpperCase();return u.includes("BULL")||u==="UP"?'<span style="color:#00ff66">&#9650; '+u+'</span>':u.includes("BEAR")||u==="DOWN"?'<span style="color:#ff0055">&#9660; '+u+'</span>':'<span style="color:var(--text-secondary)">&#9654; '+u+'</span>'};
+    ["h4","h1","m15"].forEach(k=>{const el=document.getElementById("mtf-"+k);if(el)el.innerHTML=cd(d["trend_"+k])});
+    const bar=(v,min=-1,max=1,cl="text-[#00f0ff]")=>{const p=Math.max(0,Math.min(1,(v-min)/(max-min)));const f=Math.round(p*10);let h="";for(let i=0;i<10;i++)h+=i<f?'<span style="color:'+(cl==="text-[#00ff66]"?"#00ff66":"#00f0ff")+'">&#9608;</span>':'<span style="color:#0a0a0a">&#9608;</span>';return h};
+    const eb=document.getElementById("eur-bar"),ev=document.getElementById("eur-val");if(eb&&d.eur_strength!==undefined)eb.innerHTML=bar(d.eur_strength,-1,1,"text-[#00ff66]");if(ev&&d.eur_strength!==undefined)ev.textContent=this.sf(d.eur_strength,2);
+    const ub=document.getElementById("usd-bar"),uv=document.getElementById("usd-val");if(ub&&d.usd_strength!==undefined)ub.innerHTML=bar(d.usd_strength,-1,1,"text-[#00f0ff]");if(uv&&d.usd_strength!==undefined)uv.textContent=this.sf(d.usd_strength,2);
+    const rs=document.getElementById("regime-scores");if(rs&&d.regime_scores){rs.innerHTML=Object.entries(d.regime_scores).sort((a,b)=>b[1]-a[1]).map(([k,v])=>'<div style="display:flex;justify-content:space-between;padding:1px 0;"><span style="text-transform:uppercase;font-weight:700;color:var(--text-secondary);">'+k+'</span><span style="color:#fff;font-weight:700;">'+this.sf(v,2)+'</span></div>').join("")}
+    const lb=document.getElementById("london-bias");if(lb)lb.innerHTML=cd(d.today_bias);
+    const lh=document.getElementById("london-high-val");if(lh&&d.today_high>0)lh.textContent=this.sf(d.today_high,5);
+    const ll=document.getElementById("london-low-val");if(ll&&d.today_low>0)ll.textContent=this.sf(d.today_low,5);
+  }
+  handleLevels(d) {
+    if(!d.price_levels||d.price_levels.length===0)return;
+    if(!this.candleSeries||typeof LightweightCharts==="undefined")return;
+    const sorted=[...d.price_levels].sort((a,b)=>(b.strength||0)-(a.strength||0));
+    const filtered=[];const sampleP=sorted[0].price;this.pipMult=sampleP>200?.01:.0001;const minD=this.pipMult*1.0;
+    for(const z of sorted){const p=Number(z.price);if(!filtered.some(x=>Math.abs(Number(x.price)-p)<minD))filtered.push(z);if(filtered.length>=40)break}
+    this.latestZones=filtered;
+    if(this.priceLines){this.priceLines.forEach(l=>{try{this.candleSeries.removePriceLine(l)}catch(e){}});this.priceLines=[]}
+    filtered.forEach(z=>{
+      const p=Number(z.price);
+      let c=z.direction==="resistance"?"#ff3d3d":"#00c853";
+      let ls=LightweightCharts.LineStyle.Dashed;
+      let lw=1;
+      const type=z.level_type;
+      if(type==="H4_SWING"){
+        ls=LightweightCharts.LineStyle.Solid;
+        lw=2;
+      }else if(type==="PDH"||type==="PDL"){
+        ls=LightweightCharts.LineStyle.Solid;
+        c=type==="PDH"?"#ff7f00":"#ffab00";
+      }else if(type==="PWH"||type==="PWL"){
+        ls=LightweightCharts.LineStyle.Solid;
+        lw=2;
+        c="#9c27b0";
+      }else if(type==="LNDH"||type==="LNDL"){
+        ls=LightweightCharts.LineStyle.Dashed;
+        c="#00b8d4";
+      }else if(type==="NYH"||type==="NYL"){
+        ls=LightweightCharts.LineStyle.Dashed;
+        c="#e040fb";
+      }else if(type==="TODAY_H"||type==="TODAY_L"){
+        ls=LightweightCharts.LineStyle.Dotted;
+        lw=2;
+        c="#00f0ff";
+      }
+      try{this.priceLines.push(this.candleSeries.createPriceLine({price:p,color:c,lineWidth:lw,lineStyle:ls,axisLabelVisible:true,title:z.level_type+" ("+z.direction.substring(0,3).toUpperCase()+")"}))}catch(e){}
+    });
+    const res=filtered.filter(z=>z.direction==="resistance");const sup=filtered.filter(z=>z.direction==="support");
+    if(res.length>0){const r=res[0];this.currentRes=r.price;if(this.levelResVal)this.levelResVal.textContent=this.sf(r.price,5);if(this.levelResTime)this.levelResTime.textContent=r.level_type+" AT "+this.sf(r.price,5)}
+    if(sup.length>0){const s=sup[0];this.currentSup=s.price;if(this.levelSupVal)this.levelSupVal.textContent=this.sf(s.price,5);if(this.levelSupTime)this.levelSupTime.textContent=s.level_type+" AT "+this.sf(s.price,5)}
+    // Full dynamic-levels list in the left sidebar (all active levels, not just top S/R)
+    const dlEl=document.getElementById("dynamic-levels");
+    if(dlEl){
+      const bid=this.currentBid||0;const pm=this.pipMult||0.0001;let html="";
+      filtered.forEach(z=>{
+        const p=Number(z.price);const isRes=z.direction==="resistance";const col=isRes?"#ff3d3d":"#00c853";
+        const dist=bid>0?Math.abs(p-bid)/pm:0;
+        html+='<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid rgba(31,31,46,.4);padding-bottom:1px;"><span style="color:'+col+';font-weight:700;min-width:52px;">'+z.level_type+'</span><span style="color:#fff;">'+this.sf(p,5)+'</span><span style="color:var(--text-dim);width:32px;text-align:right;">'+dist.toFixed(1)+'p</span></div>';
+      });
+      dlEl.innerHTML=html||'<div style="color:var(--text-dim);font-style:italic;">No active levels</div>';
+    }
+    this.updatePipDistances();
+  }
+  updatePipDistances() {
+    if(this.currentBid===0)return;
+    let nearRes = false, nearSup = false;
+    let distRes = 0, distSup = 0;
+    if(this.currentRes>0&&this.levelResDist){distRes=(this.currentRes-this.currentBid)/this.pipMult;this.levelResDist.textContent=this.sf(distRes,1)+" Pips"; if(distRes <= 3.0) nearRes = true;}
+    if(this.currentSup>0&&this.levelSupDist){distSup=(this.currentBid-this.currentSup)/this.pipMult;this.levelSupDist.textContent=this.sf(distSup,1)+" Pips"; if(distSup <= 3.0) nearSup = true;}
+    
+    if(this.currentRes>0&&this.currentSup>0&&this.currentRes>this.currentSup){
+      const range = this.currentRes - this.currentSup;
+      const pct = Math.max(0, Math.min(1, (this.currentBid - this.currentSup) / range));
+      const ind = document.getElementById("swing-push-indicator");
+      if(ind) ind.style.left = (pct * 100) + "%";
+    }
+    
+    const el = document.getElementById("bhv-placeholder");
+    if(el){
+        if(nearRes){
+            el.innerHTML = '<span style="color:var(--red);font-weight:bold;">TESTING RESISTANCE</span>: Attacking key level at ' + this.sf(this.currentRes,5) + ' (' + this.sf(distRes,1) + ' pips away). Checking absorption...';
+        } else if(nearSup){
+            el.innerHTML = '<span style="color:var(--green);font-weight:bold;">TESTING SUPPORT</span>: Attacking key level at ' + this.sf(this.currentSup,5) + ' (' + this.sf(distSup,1) + ' pips away). Checking rejection...';
+        } else {
+            el.innerHTML = '<span style="color:var(--text-secondary)">CONSOLIDATING</span>: Stable in open space. Next resistance: ' + this.sf(this.currentRes,5) + ' (' + this.sf(distRes,1) + ' pips), Next support: ' + this.sf(this.currentSup,5) + ' (' + this.sf(distSup,1) + ' pips)';
+        }
+    }
+  }
+  handleAccount(d) {
+    this.latestAccountData=d;
+    let mockPnl=0;this.mockPositions.forEach(p=>mockPnl+=p.profit);
+    const tb=Number(d.balance||0),tp=Number(d.profit||0)+mockPnl,te=Number(d.equity||0)+mockPnl,tm=Number(d.margin||0),tf=Number(d.free_margin||0)+mockPnl,tml=tm>0?(te/tm*100):0;
+    const fmt=v=>"$"+v.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+    const fmtP=v=>(v>=0?"+":"")+fmt(v);
+    ["broker-balance-val","broker-equity-val","broker-profit-val","broker-margin-val","broker-marginlevel-val"].forEach((id,i)=>{const el=document.getElementById(id);if(el){const vals=[fmt(tb),fmt(te),fmtP(tp),fmt(tf),tml?this.sf(tml,2)+"%":"0.00%"];el.textContent=vals[i];if(i===2)el.style.color=tp>0?"var(--green)":tp<0?"var(--red)":"var(--text-primary)"}});
+    const tb2=document.getElementById("positions-table-body");const all=[...(d.positions||[]),...this.mockPositions];if(tb2){if(all.length>0){tb2.innerHTML="";all.forEach(p=>{const div=document.createElement("div");div.style.cssText="display:grid;grid-template-columns:2.5fr 1.5fr 1fr 1fr 1.5fr 1.5fr 3fr 1.5fr;gap:2px;padding:3px 4px;border-bottom:1px solid rgba(31,31,46,.5);font-size:7.5px;text-align:center;align-items:center;";div.innerHTML='<span style="color:var(--text-secondary);font-weight:700;">'+p.ticket+'</span><span style="color:#fff;">'+p.symbol+'</span><span style="color:'+(p.type==="BUY"?"var(--green)":"var(--red)")+';font-weight:700;">'+p.type+'</span><span style="color:var(--text-secondary);">'+this.sf(p.volume,2)+'</span><span style="color:var(--text-secondary);">'+this.sf(p.price_open,5)+'</span><span style="color:var(--text-secondary);">'+this.sf(p.price_current,5)+'</span><span style="color:var(--text-dim);">'+this.sf(p.sl,5)+'/'+this.sf(p.tp,5)+'</span><span style="color:'+(p.profit>0?"var(--green)":p.profit<0?"var(--red)":"#fff")+';font-weight:700;">'+(p.profit>=0?"+":"")+this.sf(p.profit,2)+'</span>';tb2.appendChild(div)})}else{tb2.innerHTML='<div style="color:var(--text-dim);text-align:center;padding:8px;font-style:italic;">No active positions.</div>'}}
+    this.livePositions=d.positions||[];this.renderLiveTrades();
+    const hud=document.getElementById("active-trade-hud");if(hud){if(all.length>0){hud.style.display="flex";const p=all[0],c=p.profit>=0?"var(--green)":"var(--red)",tc=p.type==="BUY"?"var(--green)":"var(--red)";hud.innerHTML='<div style="text-align:center;margin-bottom:16px;"><span style="color:var(--cyan);font-size:10px;font-weight:900;letter-spacing:.15em;background:rgba(0,240,255,0.1);padding:4px 12px;border-radius:2px;border:1px solid rgba(0,240,255,0.3);">ACTIVE POSITION HUD</span></div><div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #1a1a24;padding-bottom:12px;margin-bottom:12px;"><div style="display:flex;flex-direction:column;"><span style="color:'+tc+';font-size:16px;font-weight:900;letter-spacing:.05em;">'+p.type+' '+p.symbol+'</span><span style="color:var(--text-dim);font-size:9px;">VOL: '+this.sf(p.volume,2)+' | TICKET: '+p.ticket+'</span></div><div style="font-size:20px;font-weight:900;color:'+c+';text-shadow:0 0 10px '+c+'40;">'+(p.profit>=0?"+":"")+this.sf(p.profit,2)+'</div></div><div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;font-size:11px;color:var(--text-secondary);"><div style="background:#000;padding:8px;border:1px solid #1a1a24;border-left:2px solid #fff;"><div style="font-size:7.5px;color:var(--text-dim);margin-bottom:2px;">ENTRY</div><div style="color:#fff;font-weight:900;font-size:13px;">'+this.sf(p.price_open,5)+'</div></div><div style="background:#000;padding:8px;border:1px solid #1a1a24;border-left:2px solid var(--cyan);"><div style="font-size:7.5px;color:var(--text-dim);margin-bottom:2px;">CURRENT</div><div style="color:#fff;font-weight:900;font-size:13px;">'+this.sf(p.price_current,5)+'</div></div><div style="background:#000;padding:8px;border:1px solid #1a1a24;border-left:2px solid var(--red);"><div style="font-size:7.5px;color:var(--text-dim);margin-bottom:2px;">STOP LOSS</div><div style="color:var(--red);font-weight:900;font-size:13px;">'+this.sf(p.sl,5)+'</div></div><div style="background:#000;padding:8px;border:1px solid #1a1a24;border-left:2px solid var(--green);"><div style="font-size:7.5px;color:var(--text-dim);margin-bottom:2px;">TAKE PROFIT</div><div style="color:var(--green);font-weight:900;font-size:13px;">'+this.sf(p.tp,5)+'</div></div></div>';}else{hud.style.display="none";}}
+  }
+  renderLiveTrades() {
+    const live=document.getElementById("jview-trades-live");if(!live)return;
+    const pos=this.livePositions||[];
+    if(!this._expandedLive)this._expandedLive=new Set();
+    if(pos.length===0){live.innerHTML="";return;}
+    const header=`<div style="display:flex;align-items:center;gap:6px;padding:5px 12px;background:rgba(0,240,255,0.06);border-bottom:1px solid rgba(0,240,255,0.2);"><span style="color:var(--cyan);font-weight:900;font-size:7.5px;letter-spacing:.1em;text-transform:uppercase;">● Running Trades (Live)</span><span style="color:var(--text-dim);font-size:7px;">${pos.length} open · updating real-time</span></div>`;
+    live.innerHTML=header+pos.map(p=>{
+      const dir=(p.type===0||p.type==="BUY")?"BUY":"SELL";
+      const sym=p.symbol||"EURUSD";
+      const pip=sym.toUpperCase().includes("JPY")?0.01:0.0001;
+      const open=parseFloat(p.price_open||0),cur=parseFloat(p.price_current||0);
+      const pips=cur&&open?(dir==="BUY"?(cur-open):(open-cur))/pip:0;
+      const profit=parseFloat(p.profit||0);
+      const sl=parseFloat(p.sl||0),tp=parseFloat(p.tp||0);
+      const dirColor=dir==="BUY"?"var(--green)":"var(--red)";
+      const c=profit>0?"var(--green)":profit<0?"var(--red)":"var(--text-secondary)";
+      const profitDisplay=(profit>0?'+':'')+profit.toFixed(2);
+      const pipsDisplay=(pips>0?'+':'')+pips.toFixed(1);
+      const exp=this._expandedLive.has(String(p.ticket));
+      return `<div class="trade-row-container" style="border-bottom:1px solid var(--border-dim);display:flex;flex-direction:column;border-left:2px solid var(--cyan);">
+        <div onclick="window.dashboardController.toggleLiveTradeDetails('${p.ticket}')" style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.2fr 1.2fr 1.2fr 0.4fr;gap:4px;padding:8px 12px;cursor:pointer;align-items:center;background:rgba(0,240,255,0.04);transition:background 0.1s;" onmouseover="this.style.background='rgba(0,240,255,0.08)'" onmouseout="this.style.background='rgba(0,240,255,0.04)'">
+          <span style="color:var(--cyan);font-weight:700;">● LIVE</span>
+          <span style="color:#fff;font-weight:700;text-align:center;">${sym}</span>
+          <span style="color:${dirColor};font-weight:900;text-align:center;">${dir}</span>
+          <span style="color:#fff;text-align:center;">${this.sf(p.volume,2)}</span>
+          <span style="color:var(--text-secondary);text-align:center;">${this.sf(open,5)}</span>
+          <span style="color:#fff;text-align:center;font-weight:700;">${this.sf(cur,5)}</span>
+          <span style="color:${c};font-weight:700;text-align:center;">${pipsDisplay}</span>
+          <span style="color:${c};font-weight:700;text-align:center;">${profitDisplay}</span>
+          <span style="color:var(--text-secondary);text-align:left;padding-left:4px;">Running</span>
+          <span style="color:var(--text-dim);text-align:center;">--</span>
+          <span style="text-align:center;"><span style="background:rgba(0,240,255,0.1);color:var(--cyan);padding:2px 6px;font-weight:900;border-radius:2px;font-size:7px;">OPEN</span></span>
+          <span id="ltarrow-${p.ticket}" style="color:var(--text-dim);font-weight:700;text-align:center;font-size:8px;">${exp?'▲':'▼'}</span>
+        </div>
+        <div id="ltdetails-${p.ticket}" style="display:${exp?'block':'none'};background:#020203;border-top:1px solid #141419;padding:12px;font-size:8px;color:var(--text-secondary);">
+          <div style="display:grid;grid-template-columns:1.2fr 1fr 1fr 1fr;gap:16px;border-left:3px solid var(--cyan);padding-left:12px;">
+            <div style="display:flex;flex-direction:column;gap:5px;">
+              <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Position & Context</div>
+              <div style="display:flex;justify-content:space-between;"><span>Ticket</span><span style="color:#fff;font-weight:700;">#${p.ticket}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Reason</span><span style="color:var(--cyan);font-weight:700;max-width:80px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${p.entry_reason||''}">${p.entry_reason||'Rule A+B'}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Regime</span><span style="color:#fff;">${p.entry_regime||'UNKNOWN'}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Entry Vel %</span><span style="color:var(--text-dim);">${p.entry_velocity_percentile !== undefined ? p.entry_velocity_percentile + '%' : '--'}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Entry Disp</span><span style="color:var(--text-dim);">${p.entry_displacement_class||'--'}</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;">
+              <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Price & P&L (Live)</div>
+              <div style="display:flex;justify-content:space-between;"><span>Entry</span><span style="color:#fff;font-weight:700;">${this.sf(open,5)}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Current</span><span style="color:#fff;font-weight:700;">${this.sf(cur,5)}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Pips</span><span style="color:${c};font-weight:700;">${pipsDisplay}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Floating P&L</span><span style="color:${c};font-weight:700;">${profitDisplay}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Ticks in Trade</span><span style="color:var(--text-dim);">${p.ticks_in_trade||0}</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;">
+              <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Risk & Excursions</div>
+              <div style="display:flex;justify-content:space-between;"><span>Stop Loss</span><span style="color:var(--red);font-weight:700;">${sl>0?this.sf(sl,5):'--'}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Take Profit</span><span style="color:var(--green);font-weight:700;">${tp>0?this.sf(tp,5):'--'}</span></div>
+              <div style="display:flex;justify-content:space-between;border-top:1px solid rgba(255,255,255,0.05);padding-top:4px;margin-top:4px;"><span>MAX MAE</span><span style="color:var(--red);font-weight:700;">${p.mae !== undefined ? p.mae.toFixed(1) + ' pips' : '--'}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>MAX MFE</span><span style="color:var(--green);font-weight:700;">${p.mfe !== undefined ? p.mfe.toFixed(1) + ' pips' : '--'}</span></div>
+            </div>
+            <div style="display:flex;flex-direction:column;gap:5px;">
+              <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Trade Health Monitor</div>
+              <div style="display:flex;justify-content:space-between;"><span>Lifecycle Phase</span><span style="color:var(--cyan);font-weight:700;">${p.current_phase||'ENTRY'}</span></div>
+              <div style="display:flex;justify-content:space-between;"><span>Thesis Status</span><span style="color:#fff;font-weight:700;">${p.thesis_status||'CONFIRMED'}</span></div>
+              <div style="display:flex;justify-content:space-between;align-items:center;border-top:1px solid rgba(255,255,255,0.05);padding-top:4px;margin-top:4px;">
+                <span>Health Score</span>
+                <span style="background:${(p.health_score||100)>75?'rgba(0,255,102,0.1)':(p.health_score||100)>40?'rgba(255,171,0,0.1)':'rgba(255,0,85,0.1)'};color:${(p.health_score||100)>75?'var(--green)':(p.health_score||100)>40?'var(--amber)':'var(--red)'};padding:2px 5px;font-weight:900;border-radius:2px;font-size:8px;">${p.health_score||100}%</span>
+              </div>
+            </div>
+          </div>
+          <div style="border-top:1px solid rgba(255,255,255,0.05);margin-top:12px;padding-top:8px;padding-left:12px;">
+            <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:4px;">Live Trail History Timeline</div>
+            <div style="max-height:80px;overflow-y:auto;display:flex;flex-direction:column;gap:3px;background:rgba(0,0,0,0.3);padding:6px;border:1px solid #141419;border-radius:2px;font-family:monospace;">
+              ${(p.trail_history && p.trail_history.length > 0) ? p.trail_history.map(h => `
+                <div style="display:flex;justify-content:space-between;font-size:7.5px;color:var(--text-secondary);padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.02);">
+                  <span style="color:var(--text-dim);width:60px;">🕒 ${h.time}</span>
+                  <span style="width:100px;">Price: <span style="color:#fff;">${h.price.toFixed(5)}</span></span>
+                  <span style="color:var(--cyan);width:120px;">SL: ➜ <span style="font-weight:700;">${h.new_sl.toFixed(5)}</span></span>
+                  <span style="color:var(--text-dim);width:90px;">Buffer: ${h.distance} pips</span>
+                  <span style="color:var(--text-dim);flex-grow:1;text-align:right;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${h.reason}</span>
+                </div>
+              `).join("") : `<div style="color:var(--text-dim);font-style:italic;text-align:center;padding:4px 0;">No trailing adjustments made yet (waiting for acceleration/retest trigger).</div>`}
+            </div>
+          </div>
+        </div>
+      </div>`;
+    }).join("");
+  }
+  toggleLiveTradeDetails(ticket) {
+    if(!this._expandedLive)this._expandedLive=new Set();
+    const key=String(ticket);
+    const el=document.getElementById("ltdetails-"+ticket);
+    const arrow=document.getElementById("ltarrow-"+ticket);
+    if(el){
+      const isHidden=el.style.display==="none";
+      el.style.display=isHidden?"block":"none";
+      if(arrow)arrow.textContent=isHidden?"▲":"▼";
+      if(isHidden)this._expandedLive.add(key);else this._expandedLive.delete(key);
+    }
+  }
+  handleSingleCandle(d) {
+    const tf=d.timeframe||this.currentTimeframe;
+    const target=tf==="M15"?this.m15Candles:tf==="H1"?this.h1Candles:this.h4Candles;
+    if(target){const i=target.findIndex(c=>Number(c.time)===Number(d.time));i>=0?target[i]=d:target.push(d);this.sessionsCache[tf]=this.getSessions(target);if(tf===this.currentTimeframe)this.renderActiveCandles()}
+  }
+  handleEvent(d) {
+    const el=this.eventsLog;if(!el)return;
+    const isBackfill=d.historical===true||(d.id&&typeof d.id==="string"&&d.id.startsWith("h-"));
+    const div=document.createElement("div");div.style.cssText="display:flex;justify-content:space-between;align-items:flex-start;background:#07070b;border:1px solid #1a1a1a;padding:4px 6px;font-size:7.5px;font-family:monospace;gap:6px;"+(isBackfill?"opacity:.6;":"");
+    const t=new Date().toLocaleTimeString();const lvl=d.level||"INFO";const c=lvl==="ERROR"?"#ff0055":lvl==="WARN"?"#ffab00":"#888";
+    div.innerHTML='<div><span style="color:var(--text-dim);font-size:6.5px;">'+t+'</span><span style="color:'+c+';font-weight:700;font-size:7px;margin-left:4px;">['+lvl+']</span><span style="color:var(--text-secondary);margin-left:4px;">'+(d.message||d.event_type||"")+'</span></div>';
+    if(el.children.length===1&&el.firstElementChild&&el.firstElementChild.style.fontStyle==="italic")el.innerHTML="";
+    el.insertBefore(div,el.firstChild);if(el.children.length>50)el.removeChild(el.lastChild);
+    if(d.events_detected!==undefined&&this.statsDetected)this.statsDetected.textContent=d.events_detected;
+    if(d.events_fired!==undefined&&this.statsFired)this.statsFired.textContent=d.events_fired;
+    if(d.events_skipped!==undefined&&this.statsSkipped)this.statsSkipped.textContent=d.events_skipped;
+  }
+  handleAgent(d) {
+    const l=this.consoleBody;if(!l)return;
+    const e=document.createElement("div");e.style.cssText="border-bottom:1px solid #1a1a24;padding-bottom:4px;display:flex;flex-direction:column;gap:2px;";
+    const agent=d.agent||d.agent_name||"SYSTEM",msg=d.message||d.content||"";
+    e.innerHTML='<div style="display:flex;align-items:center;gap:4px;"><span style="font-size:6.5px;color:var(--text-dim);">'+new Date().toLocaleTimeString()+'</span><span style="font-size:7px;color:#00f0ff;font-weight:700;text-transform:uppercase;">['+agent+']</span></div><div style="color:var(--text-secondary);font-size:7.5px;padding-left:4px;">'+msg+'</div>';
+    l.appendChild(e);if(l.children.length>200)l.removeChild(l.firstChild);l.scrollTop=l.scrollHeight;
+    const led=document.getElementById("led-"+agent.toLowerCase());if(led){led.style.background="#00f0ff";led.style.boxShadow="0 0 6px #00f0ff";setTimeout(()=>{led.style.background="var(--text-dim)";led.style.boxShadow="none"},1500)}
+  }
+  handleDecision(d) {
+    if(!this.decisionPanel)return;
+    const a=(d.action||d.signal||"MONITOR").toUpperCase();
+    if(this.decisionStatus)this.decisionStatus.textContent=(d.status||d.state||"--")+(d.paper?" · PAPER":"");
+    if(this.decisionAction)this.decisionAction.textContent=a;
+    if(this.decisionTime)this.decisionTime.textContent=d.time||d.timestamp||new Date().toLocaleTimeString();
+    this.decisionPanel.style.borderLeftColor=a==="BUY"?"var(--green)":a==="SELL"?"var(--red)":"var(--purple)";
+    if(a==="BUY"){this.decisionPanel.style.background="rgba(0,255,102,.05)";this.decisionAction.style.color="var(--green)"}else if(a==="SELL"){this.decisionPanel.style.background="rgba(255,0,85,.05)";this.decisionAction.style.color="var(--red)"}else{this.decisionPanel.style.background="#040406";this.decisionAction.style.color="var(--cyan)"}
+    if(d.action&&d.price&&(a==="BUY"||a==="SELL")){const m={time:Math.floor(Date.now()/1000),position:a==="BUY"?"belowBar":"aboveBar",color:a==="BUY"?"#00c853":"#ff3d3d",shape:a==="BUY"?"arrowUp":"arrowDown",text:a,details:{timeframe:this.currentTimeframe}};this.chartMarkers.push(m);this.updateMarkers(this.getMarkersForTimeframe(this.currentTimeframe))}
+  }
+  handleNewsData(d) {
+    // Economic calendar only – no news/social feeds in the pure-math engine.
+    const esc=s=>String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+    const calContainer = document.getElementById("econ-calendar-container");
+    if(calContainer && d.calendar && Array.isArray(d.calendar) && d.calendar.length>0){
+      calContainer.innerHTML = d.calendar.map(ev=>{
+        const isBlocking=ev.is_blocking;
+        const impactColor=ev.impact==="High"?"#ff4444":ev.impact==="Medium"?"#ffaa00":"#888";
+        const minsAway=ev.mins_away;
+        const timeStr=minsAway<0?`${Math.abs(minsAway)}m ago`:(minsAway<60?`in ${minsAway}m`:`in ${Math.floor(minsAway/60)}h${Math.round(minsAway%60)}m`);
+        return `<div style="background:rgba(7,7,11,.9);border:1px solid ${isBlocking?"#ff4444":"#1f1f2e"};padding:4px 6px;font-size:7.5px;display:flex;justify-content:space-between;align-items:center;gap:6px;${isBlocking?"box-shadow:0 0 6px rgba(255,68,68,.3);":""}">
+          <span style="color:${impactColor};font-weight:bold;min-width:28px;">${esc(ev.currency)}</span>
+          <span style="flex:1;color:#e0e0e0;">${esc(ev.title)}</span>
+          <span style="color:var(--text-dim);min-width:50px;text-align:right;">${esc(ev.time)}</span>
+          <span style="color:#888;min-width:40px;text-align:right;font-size:7px;">${timeStr}</span>
+          ${isBlocking?'<span style="color:#ff4444;font-weight:bold;font-size:7px;">BLOCK</span>':''}
+        </div>`;
+      }).join("");
+    } else if(calContainer) {
+      calContainer.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:8px;font-style:italic;font-size:7px;">No calendar events.</div>';
+    }
+  }
+  startClock() {
+    setInterval(()=>{const s=Math.floor((Date.now()-this.startTime)/1000);const h=String(Math.floor(s/3600)).padStart(2,"0");const m=String(Math.floor((s%3600)/60)).padStart(2,"0");const sec=String(s%60).padStart(2,"0");const t=h+":"+m+":"+sec;if(this.uptime)this.uptime.textContent=t;if(document.getElementById("sys-uptime"))document.getElementById("sys-uptime").textContent=t;this.updateCooldownCountdown()},1000);
+  }
+  updateCooldownCountdown() {
+    if(!this.cooldownVal)return;const v=this.cooldownVal.textContent;
+    if(v!=="READY"&&!isNaN(parseInt(v))){let r=parseInt(v)-1;if(r<=0){this.cooldownVal.textContent="READY";this.cooldownVal.style.color="var(--green)";if(this.cooldownBar)this.cooldownBar.style.width="0%"}else{this.cooldownVal.textContent=r+"s";this.cooldownVal.style.color="var(--amber)";if(this.cooldownBar)this.cooldownBar.style.width=(r/300*100).toFixed(0)+"%"}}
+  }
+  getSessions(candles) {
+    if(!candles||candles.length===0)return[];
+    const sessions=[],days={};
+    for(let i=0;i<candles.length;i++){const c=candles[i],d=new Date(c.time*1000),key=d.getUTCFullYear()+"-"+d.getUTCMonth()+"-"+d.getUTCDate();if(!days[key])days[key]=[];days[key].push({c,hour:d.getUTCHours(),date:d})}
+    for(const dayKey in days){const items=days[dayKey];if(items.length===0)continue;const ref=items[0].date,y=ref.getUTCFullYear();
+      const dstStart=y=>{let d=new Date(Date.UTC(y,2,8,7));while(d.getUTCDay()!==0)d.setUTCDate(d.getUTCDate()+1);return d};
+      const dstEnd=y=>{let d=new Date(Date.UTC(y,10,1,7));while(d.getUTCDay()!==0)d.setUTCDate(d.getUTCDate()+1);return d};
+      const edstS=y=>{let d=new Date(Date.UTC(y,2,31,1));while(d.getUTCDay()!==0)d.setUTCDate(d.getUTCDate()-1);return d};
+      const edstE=y=>{let d=new Date(Date.UTC(y,9,31,1));while(d.getUTCDay()!==0)d.setUTCDate(d.getUTCDate()-1);return d};
+      const isUs=ref>=dstStart(y)&&ref<dstEnd(y);const isEu=ref>=edstS(y)&&ref<edstE(y);
+      const ldnS=isEu?7:8,ldnE=isEu?15:16,nyS=isUs?12:13,nyE=isUs?18:19;
+      [{nm:"Asian",sh:0,eh:8,c:"rgba(255,170,0,.04)",sc:"rgba(255,170,0,.18)"},{nm:"London",sh:ldnS,eh:ldnE,c:"rgba(157,0,255,.04)",sc:"rgba(157,0,255,.18)"},{nm:"NY",sh:nyS,eh:nyE,c:"rgba(0,240,255,.04)",sc:"rgba(0,240,255,.18)"}].forEach(cfg=>{const sc=items.filter(it=>it.hour>=cfg.sh&&it.hour<cfg.eh).map(it=>it.c);if(sc.length>0){let h=sc[0].high,l=sc[0].low;for(let k=1;k<sc.length;k++){if(sc[k].high>h)h=sc[k].high;if(sc[k].low<l)l=sc[k].low}sessions.push({name:cfg.nm,startTime:sc[0].time,endTime:sc[sc.length-1].time,high:h,low:l,open:sc[0].open,close:sc[sc.length-1].close,color:cfg.c,strokeColor:cfg.sc,lineColor:cfg.sc})}})}return sessions;
+  }
+  drawSessions() {
+    if(!this.chart||!this.candleSeries)return;
+    let svg=document.getElementById("chart-overlay-svg");const ce=document.getElementById("price-chart");if(!ce)return;
+    const pane = ce.querySelector("table tr td:nth-child(2)");
+    if(!pane) return;
+    if(!svg){svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.id="chart-overlay-svg";svg.style.cssText="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none;z-index:5;";pane.appendChild(svg)}svg.innerHTML="";
+    const gw=this.chart.timeScale().width();if(gw===null||isNaN(gw))return;
+    const sessions=this.sessionsCache[this.currentTimeframe];if(!sessions||sessions.length===0)return;
+    const vr=this.chart.timeScale().getVisibleRange(),from=vr?vr.from:null,to=vr?vr.to:null;
+    sessions.forEach(sess=>{if(from&&to&&(sess.endTime<from||sess.startTime>to))return;const xs=this.chart.timeScale().timeToCoordinate(sess.startTime),xe=this.chart.timeScale().timeToCoordinate(sess.endTime),yh=this.candleSeries.priceToCoordinate(sess.high),yl=this.candleSeries.priceToCoordinate(sess.low);if(xs===null||xe===null||yh===null||yl===null||isNaN(xs)||isNaN(xe)||isNaN(yh)||isNaN(yl))return;const bs=this.chart.timeScale().options().barSpacing||6,boxX=xs-bs/2,w=(xe-xs)+bs,h=yl-yh;if(w<=0||h<=0)return;const g=document.createElementNS("http://www.w3.org/2000/svg","g");const r=document.createElementNS("http://www.w3.org/2000/svg","rect");r.setAttribute("x",boxX);r.setAttribute("y",yh);r.setAttribute("width",w);r.setAttribute("height",h);r.setAttribute("fill",sess.color);r.setAttribute("stroke",sess.strokeColor);r.setAttribute("stroke-width","1");r.setAttribute("stroke-dasharray","2,2");g.appendChild(r);const t=document.createElementNS("http://www.w3.org/2000/svg","text");t.setAttribute("x",boxX+3);t.setAttribute("y",yh+8);t.setAttribute("fill",sess.lineColor);t.style.fontFamily='"JetBrains Mono",monospace';t.style.fontSize="7px";t.style.fontWeight="bold";t.textContent=sess.name.toUpperCase();g.appendChild(t);svg.appendChild(g)});
+  }
+  switchTab(tab) {
+    this.activeTab=tab;
+    ["cockpit","intel","journal","system"].forEach(t=>{const btn=document.getElementById("tab-"+t+"-btn");const p=document.getElementById("panel-"+t);if(btn)btn.className=t===tab?"tab-btn active":"tab-btn";if(p)p.style.display=t===tab?"flex":"none";if(t==="intel"&&p)p.style.display=t===tab?"grid":"none"});
+    // Update system panel
+    if(tab==="system"){const p=document.getElementById("health-ws");if(p&&this.socketStatus)p.textContent=this.socketStatus.textContent;const d=document.getElementById("health-daemon");if(d)d.textContent=this.uptime?this.uptime.textContent:"--";const m=document.getElementById("health-mt5");if(m&&this.latestAccountData)m.textContent="CONNECTED";const lt=document.getElementById("health-last-tick");if(lt&&this.currentBid)lt.textContent=this.sf(this.currentBid,5);const hp=document.getElementById("health-pair");if(hp&&this.ticker)hp.textContent=this.ticker.textContent;const hc=document.getElementById("health-candles");if(hc){const tf=this.currentTimeframe==="M15"?this.m15Candles:this.currentTimeframe==="H1"?this.h1Candles:this.h4Candles;hc.textContent=(tf||[]).length}
+      const su=document.getElementById("sys-uptime");if(su&&this.uptime)su.textContent=this.uptime.textContent;
+      const st=document.getElementById("sys-timeframe");if(st)st.textContent=this.currentTimeframe;
+      const stc=document.getElementById("sys-tick-count");if(stc)stc.textContent=this.tickHistory.length;
+      ["M15","H1","H4"].forEach(tf=>{const el=document.getElementById("sys-candles-"+tf);if(el){const arr=tf==="M15"?this.m15Candles:tf==="H1"?this.h1Candles:this.h4Candles;el.textContent=(arr||[]).length}});
+      // Sync velocity header metrics into system panel
+      [{src:"vel-div-val",dst:"sys-tokens-input"},{src:"vel-eff-val",dst:"sys-tokens-output"},{src:"vel-max-val",dst:"sys-tokens-total"},{src:"vel-trigger-val",dst:"sys-token-calls"}].forEach(({src,dst})=>{const s=document.getElementById(src);const d=document.getElementById(dst);if(s&&d)d.textContent=s.textContent});
+    }
+    if(tab==="journal"){
+      this.loadJournalData();
+    }
+  }
+  switchJournalTab(sub) {
+    ["trades","system"].forEach(k=>{
+      const btn = document.getElementById("jtab-"+k+"-btn");
+      const view = document.getElementById("jview-"+k);
+      if(btn) btn.className = k===sub ? "pair-btn active" : "pair-btn";
+      if(view) view.style.display = k===sub ? "flex" : "none";
+    });
+    this.activeJournalTab = sub;
+    this.loadJournalData();
+  }
+  async loadJournalData() {
+    const sub = this.activeJournalTab || "trades";
+    if (sub === "trades") {
+      try {
+        const r = await fetch("/api/logs/trades");
+        const j = await r.json();
+        const body = document.getElementById("jview-trades-body");
+        if (body && j.status === "success") {
+          // Exclude still-open trades (shown live in the Running section above) to avoid duplicates
+          const openTickets = new Set((this.livePositions||[]).map(p=>String(p.ticket)));
+          const closed = j.entries.filter(e => e.outcome !== "OPEN" && !openTickets.has(String(e.ticket)));
+          if (closed.length === 0) {
+            body.innerHTML = '<div style="color:var(--text-dim);text-align:center;padding:16px;font-style:italic;">No closed trades yet.</div>';
+          } else {
+            const histHeader = '<div style="display:flex;align-items:center;gap:6px;padding:5px 12px;background:#0a0a0f;border-bottom:1px solid var(--border);"><span style="color:var(--text-dim);font-weight:900;font-size:7.5px;letter-spacing:.1em;text-transform:uppercase;">Closed History</span><span style="color:var(--text-dim);font-size:7px;">'+closed.length+' trades</span></div>';
+            body.innerHTML = histHeader + closed.map(e => {
+              const color = e.outcome === "WIN" ? "var(--green)" : e.outcome === "LOSS" ? "var(--red)" : "var(--text-secondary)";
+              const dirColor = e.direction === "BUY" ? "var(--green)" : "var(--red)";
+              const exitPriceDisplay = e.exit_price ? parseFloat(e.exit_price).toFixed(5) : "--";
+              const profitDisplay = e.profit !== null && e.profit !== undefined ? (e.profit > 0 ? '+' : '') + parseFloat(e.profit).toFixed(2) : "--";
+              const pipsDisplay = e.pips !== null && e.pips !== undefined ? (e.pips > 0 ? '+' : '') + parseFloat(e.pips).toFixed(1) : "--";
+              
+              return `<div class="trade-row-container" style="border-bottom:1px solid var(--border-dim);display:flex;flex-direction:column;transition:all .15s;">
+                <!-- Main Grid Row -->
+                <div onclick="window.dashboardController.toggleTradeDetails('${e.ticket}')" style="display:grid;grid-template-columns:1.4fr 0.8fr 0.6fr 0.6fr 1fr 1fr 1fr 1fr 1.2fr 1.2fr 1.2fr 0.4fr;gap:4px;padding:8px 12px;cursor:pointer;align-items:center;background:#050507;transition:background 0.1s;" onmouseover="this.style.background='#0d0d14'" onmouseout="this.style.background='#050507'">
+                  <span style="color:var(--text-secondary);">${e.entry_time || '--'}</span>
+                  <span style="color:#fff;font-weight:700;text-align:center;">${e.symbol || '--'}</span>
+                  <span style="color:${dirColor};font-weight:900;text-align:center;">${e.direction || '--'}</span>
+                  <span style="color:#fff;text-align:center;">${e.volume || '--'}</span>
+                  <span style="color:var(--text-secondary);text-align:center;">${e.entry_price ? parseFloat(e.entry_price).toFixed(5) : '--'}</span>
+                  <span style="color:var(--text-secondary);text-align:center;">${exitPriceDisplay}</span>
+                  <span style="color:${color};font-weight:700;text-align:center;">${pipsDisplay}</span>
+                  <span style="color:${color};font-weight:700;text-align:center;">${profitDisplay}</span>
+                  <span style="color:var(--text-secondary);text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-left:4px;">${e.reason || '--'}</span>
+                  <span style="color:var(--amber);text-align:center;font-weight:700;text-transform:uppercase;font-size:7.5px;">${e.exit_strategy || 'manual'}</span>
+                  <span style="text-align:center;"><span style="background:${e.outcome === "WIN" ? 'rgba(0,200,83,0.1)' : e.outcome === "LOSS" ? 'rgba(255,61,61,0.1)' : 'rgba(156,39,176,0.1)'};color:${color};padding:2px 6px;font-weight:900;border-radius:2px;font-size:7px;">${e.outcome}</span></span>
+                  <span id="tarrow-${e.ticket}" style="color:var(--text-dim);font-weight:700;text-align:center;font-size:8px;">▼</span>
+                </div>
+                
+                <!-- Expanded Detail Section -->
+                <div id="tdetails-${e.ticket}" style="display:none;background:#020203;border-top:1px solid #141419;padding:12px;font-size:8px;color:var(--text-secondary);">
+                  <div style="display:grid;grid-template-columns:1fr 1.2fr 1fr;gap:16px;border-left:3px solid ${color};padding-left:12px;">
+                    <!-- Col 1: Trade Performance Metrics -->
+                    <div style="display:flex;flex-direction:column;gap:5px;">
+                      <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Trade Details</div>
+                      <div style="display:flex;justify-content:space-between;"><span>Ticket</span><span style="color:#fff;font-weight:700;">#${e.ticket}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Strategy System</span><span style="color:var(--purple);font-weight:700;text-transform:uppercase;">${e.system || 'optimized'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Duration</span><span style="color:#fff;font-weight:700;">${e.duration_str || '--'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Peak Reached</span><span style="color:var(--green);font-weight:700;">+${e.peak || 0.0} pips</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Max Drawdown</span><span style="color:var(--red);font-weight:700;">-${e.drawdown || 0.0} pips</span></div>
+                      <div style="display:flex;justify-content:space-between;border-top:1px solid rgba(200,200,200,0.1);padding-top:5px;margin-top:5px;"><span>Exit Strategy</span><span style="color:var(--amber);font-weight:700;text-transform:uppercase;font-size:7.5px;">${e.exit_strategy || 'manual'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Exit Urgency</span><span style="color:var(--orange);font-weight:700;">${e.exit_urgency ? (e.exit_urgency * 100).toFixed(0) + '%' : '0%'}</span></div>
+                    </div>
+                    
+                    <!-- Col 2: Rule A & B Detection Metrics -->
+                    <div style="display:flex;flex-direction:column;gap:5px;">
+                      <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Rule A/B Peak Metrics</div>
+                      <div style="display:flex;justify-content:space-between;"><span>Trigger Event</span><span style="color:#fff;font-weight:700;text-transform:uppercase;">${e.event_type || '--'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Priority</span><span style="color:${e.event_priority === "CRITICAL" ? 'var(--red)' : 'var(--amber)'};font-weight:700;">${e.event_priority || '--'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Velocity Divergence</span><span style="color:#fff;">${e.event_details && e.event_details.velocity_divergence !== undefined ? parseFloat(e.event_details.velocity_divergence).toFixed(2) : '--'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Tick Efficiency</span><span style="color:#fff;">${e.event_details && e.event_details.price_per_tick_efficiency !== undefined ? parseFloat(e.event_details.price_per_tick_efficiency).toFixed(4) : '--'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Peak Confidence</span><span style="color:#fff;">${e.event_details && e.event_details.peak_confidence !== undefined ? (e.event_details.peak_confidence * 100).toFixed(0) + '%' : '--'}</span></div>
+                    </div>
+                    
+                    <!-- Col 3: Market Context / Session -->
+                    <div style="display:flex;flex-direction:column;gap:5px;">
+                      <div style="font-size:7.5px;color:var(--cyan);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:3px;border-bottom:1px solid rgba(0,240,255,0.15);padding-bottom:3px;">Market Regime & Context</div>
+                      <div style="display:flex;justify-content:space-between;"><span>Regime</span><span style="color:#fff;text-transform:uppercase;">${e.dominant_regime || '--'} (${e.regime_confidence ? (e.regime_confidence * 100).toFixed(0) : 0}%)</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Volatility</span><span style="color:#fff;text-transform:uppercase;">${e.volatility || '--'}</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Spread</span><span style="color:#fff;">${e.spread_pips || 0.0} pips</span></div>
+                      <div style="display:flex;justify-content:space-between;"><span>Trading Session</span><span style="color:var(--amber);font-weight:700;">${e.session || '--'}</span></div>
+                    </div>
+                  </div>
+                  <!-- Velocity Trailing Events (if any) -->
+                  ${e.velocity_trailing_events && e.velocity_trailing_events.length > 0 ? `
+                  <div style="margin-top:10px;border-top:1px solid rgba(200,200,200,0.1);padding-top:10px;">
+                    <div style="font-size:7.5px;color:var(--amber);font-weight:900;letter-spacing:.05em;text-transform:uppercase;margin-bottom:6px;border-bottom:1px solid rgba(255,193,7,0.15);padding-bottom:3px;">⚡ Velocity Trailing Events</div>
+                    ${e.velocity_trailing_events.map(v => `
+                    <div style="display:flex;justify-content:space-between;font-size:7px;color:var(--text-secondary);margin-bottom:4px;padding:4px;background:rgba(255,193,7,0.05);border-radius:2px;">
+                      <span>${v.time || '--'}</span>
+                      <span>${v.old_sl ? parseFloat(v.old_sl).toFixed(5) : '--'} → ${v.new_sl ? parseFloat(v.new_sl).toFixed(5) : '--'}</span>
+                      <span style="color:var(--text-dim);">${v.reason || 'adjustment'}</span>
+                    </div>
+                    `).join('')}
+                  </div>
+                  ` : ''}
+                </div>
+              </div>`;
+            }).join("");
+          }
+        }
+      } catch (err) { console.error(err); }
+    } else if (sub === "system") {
+      try {
+        const r = await fetch("/api/logs/system");
+        const j = await r.json();
+        const body = document.getElementById("jview-system-body");
+        if (body && j.status === "success") {
+          body.textContent = j.lines.join("\n");
+          setTimeout(() => { body.scrollTop = body.scrollHeight; }, 50);
+        }
+      } catch (err) { console.error(err); }
+    }
+  }
+  triggerBeep(freq,dur){try{if(!this.audioCtx)this.audioCtx=new(window.AudioContext||window.webkitAudioContext)();if(this.audioCtx.state==="suspended")this.audioCtx.resume();const osc=this.audioCtx.createOscillator(),gain=this.audioCtx.createGain();osc.type="sine";osc.frequency.setValueAtTime(freq,this.audioCtx.currentTime);gain.gain.setValueAtTime(.003,this.audioCtx.currentTime);gain.gain.exponentialRampToValueAtTime(.00001,this.audioCtx.currentTime+dur);osc.connect(gain);gain.connect(this.audioCtx.destination);osc.start();osc.stop(this.audioCtx.currentTime+dur)}catch(e){}}
+  toggleTradeDetails(ticket) {
+    const el = document.getElementById("tdetails-" + ticket);
+    const arrow = document.getElementById("tarrow-" + ticket);
+    if (el) {
+      const isHidden = el.style.display === "none";
+      el.style.display = isHidden ? "block" : "none";
+      if (arrow) arrow.textContent = isHidden ? "▲" : "▼";
+    }
+  }
+}
+window.onload=()=>{new DashboardController()};
+</script>
+</body>
+</html>
