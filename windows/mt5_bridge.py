@@ -658,8 +658,8 @@ async def http_handler(reader, writer):
 
 async def run_http_server(host, port):
     """Run a simple HTTP server for health checks."""
-    server = await asyncio.start_server(http_handler, host, port + 1)
-    print(f"Health HTTP server on {host}:{port + 1}")
+    server = await asyncio.start_server(http_handler, host, port + 10)
+    print(f"Health HTTP server on {host}:{port + 10}")
     async with server:
         await server.serve_forever()
 
@@ -702,7 +702,7 @@ async def main():
 
     print(f"\nStreaming: {symbol}")
     print(f"WebSocket: ws://{args.host}:{args.port}")
-    print(f"Health:    http://{args.host}:{args.port + 1}/health")
+    print(f"Health:    http://{args.host}:{args.port + 10}/health")
     print("Press Ctrl+C to stop.\n")
 
     # Start servers

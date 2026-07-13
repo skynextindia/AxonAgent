@@ -19,6 +19,7 @@ _ENV_OVERRIDES = {
     "AXONAI_REALTIME_MAX_TRAIL_DISTANCE": "realtime_max_trail_distance",
     "AXONAI_REALTIME_BASE_TRAIL_BUFFER": "realtime_base_trail_buffer",
     "AXONAI_REALTIME_MIN_TRAIL_FLOOR_PIPS": "realtime_min_trail_floor_pips",
+    "AXONAI_REALTIME_MAX_RISK_USD": "realtime_max_risk_usd",
 }
 
 
@@ -76,11 +77,17 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # equity; lot floats with equity & stop distance (see trade_executor sizing).
     "realtime_dynamic_sizing": True,
     "realtime_risk_pct": 0.01,           # HARD 1% risk per trade
+    "realtime_max_risk_usd": 100.0,      # Strict maximum risk limit per trade in account currency
     "realtime_max_lot": 2.00,            # backstop ceiling vs pip-miscalc blow-ups (was 5.0 — too high)
     "realtime_max_lot_gold": 1.00,       # gold-specific ceiling (XAUUSD pip_value ≈ $1/lot → 5.0 = $500/pip)
     "realtime_deviation": 20,
     "realtime_min_confluence_conditions": 1,
     "realtime_dry_run": False,
+    # Calibrated Gold Entry Thresholds
+    "entry_max_velocity_pct_gold": 30.0,
+    "entry_min_decay_ratio_gold": 0.40,
+    "entry_max_tick_efficiency_gold": 0.30,
+    "entry_min_stall_duration": 15.0,
     "paper_trade": True,           # True = simulate fills internally, never call mt5.order_send (safe for tests / funded accounts)
     "peak_detector_rule_c_enabled": False,
     "trade_risk_pct": 0.01,

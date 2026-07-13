@@ -181,9 +181,22 @@ class VelocityTrailingManager:
         if current_profit <= 0:
             return None
 
+        # Trailing Stop Activation Gate
+        # Prevent trailing too early by requiring a minimum profit threshold proportional to the pair's scale.
+        _scale = float(self.config.get("pair_move_scale", 1.0))
+        activation_pips = float(self.config.get("realtime_trail_activation_pips", 5.0)) * _scale
+        if current_profit < activation_pips:
+            return None
+
         # MTF Retrace Delay Check: prevent trailing stop cuts on pullbacks when HTF is aligned
         enable_retrace_delay = self.config.get("enable_mtf_retrace_delay", True)
-        retrace_threshold = float(self.config.get("mtf_retrace_threshold_pips", 1.0))
+        
+        # Scale the retrace threshold dynamically by the pair's volatility scale and the live session noise
+        session_vol = 1.0
+        if velocity and hasattr(velocity, "vol_pips") and velocity.vol_pips is not None:
+            session_vol = max(0.5, velocity.vol_pips)  # Floor at 0.5 to prevent dividing by zero
+            
+        retrace_threshold = float(self.config.get("mtf_retrace_threshold_pips", 1.5)) * _scale * session_vol
         
         if is_htf_aligned and enable_retrace_delay:
             if position_type == "BUY":

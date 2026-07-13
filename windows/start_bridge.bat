@@ -7,22 +7,14 @@ echo  Make sure MetaTrader 5 is running and logged in.
 echo ============================================================
 echo.
 
-set PYTHON=C:\Python313\python.exe
+set PYTHON=python
 set SCRIPT=%~dp0mt5_bridge.py
 set PORT=8765
 
-if not exist "%PYTHON%" (
-    echo ERROR: Python not found at %PYTHON%
-    echo Please update the PYTHON path in this script.
-    pause
-    exit /b 1
-)
+echo Starting MT5 Data Bridge on port 8765...
+start "MT5 Data Bridge" "%PYTHON%" "%SCRIPT%" --port %PORT%
 
-echo Starting MT5 Bridge on port %PORT%...
-echo WSL dashboard will connect to this bridge.
-echo Close this window to stop the bridge.
-echo.
-
-"%PYTHON%" "%SCRIPT%" --port %PORT%
+echo Starting MT5 Execution Bridge on port 8766...
+start "MT5 Execution Bridge" "%PYTHON%" "%~dp0execution_bridge.py" --port 8766
 
 pause

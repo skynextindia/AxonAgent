@@ -279,6 +279,8 @@ class MT5TradeExecutor:
             else:
                 risk_pct = float(self.config.get("realtime_risk_pct", 0.01))
                 risk_amount = equity * risk_pct          # HARD 1% lock, account currency
+                max_risk_usd = float(self.config.get("realtime_max_risk_usd", 100.0))
+                risk_amount = min(max_risk_usd, risk_amount)
 
                 sl_pips = sl_distance / pip
                 if sl_pips < 1.0:
@@ -318,17 +320,13 @@ class MT5TradeExecutor:
                 vol_step = _num(vol_step, 0.01) or 0.01
                 vol_max = _num(vol_max, 0.0) or None
 
-                if tick_value > 0 and tick_size > 0:
-                    pip_value_per_lot = (pip / tick_size) * tick_value
-                elif price > 1000:
-                    # XAUUSD (pip=0.01): true pip_value ≈ $1.00/lot, NOT $10.
-                    # The old fallback of 10.0 produced 10x oversized lots.
+                is_gold_symbol = (pip == 0.01 and price > 1000.0)
+                if is_gold_symbol:
                     pip_value_per_lot = 1.0
-                    logger.warning(
-                        "TradeExecutor: using FALLBACK pip_value_per_lot=%.2f for %s "
-                        "(tick_value/tick_size unavailable from broker)",
-                        pip_value_per_lot, symbol,
-                    )
+                elif tick_value > 0 and tick_size > 0:
+                    pip_value_per_lot = (pip / tick_size) * tick_value
+                else:
+                    pip_value_per_lot = 10.0  # standard fallback for currency pairs
 
                 raw_lot = risk_amount / max(sl_pips * pip_value_per_lot, 1e-6)
 

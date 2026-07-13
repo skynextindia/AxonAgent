@@ -76,8 +76,8 @@ def start_execution_bridge(exec_path, port):
     print(f"      exec terminal: {exec_path or 'auto-detect'}")
     proc = subprocess.Popen(cmd)
 
-    # Poll the bridge health endpoint (port + 1) until it answers or we give up.
-    health_url = f"http://127.0.0.1:{port + 1}/health"
+    # Poll the bridge health endpoint (port + 10) until it answers or we give up.
+    health_url = f"http://127.0.0.1:{port + 10}/health"
     import time
     for _ in range(30):  # ~15s
         if proc.poll() is not None:

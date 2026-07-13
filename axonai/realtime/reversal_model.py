@@ -97,6 +97,23 @@ def _unified_confluence_score(
         return (False, 0.0, "structural break in progress (falling knife)")
     if getattr(vel, "is_unusual", False) and getattr(liq, "liquidity_void_active", False):
         return (False, 0.0, "velocity spike in liquidity void")
+        
+    # --- CALIBRATED MICROSTRUCTURE FILTERS ---
+    # Filters out chasing spikes and enters only when stalled/absorbing
+    max_vel_pct = float(cfg.get("entry_max_velocity_pct", 100.0))
+    min_decay_ratio = float(cfg.get("entry_min_decay_ratio", 0.0))
+    max_tick_eff = float(cfg.get("entry_max_tick_efficiency", 1.0))
+    
+    vel_pct = getattr(vel, "percentile", 50.0) or 50.0
+    decay = getattr(vel, "decay_ratio", 1.0) or 1.0
+    eff = getattr(vel, "tick_efficiency", 0.5) or 0.5
+    
+    if vel_pct > max_vel_pct:
+        return (False, 0.0, f"entry velocity percentile too high ({vel_pct:.1f}% > {max_vel_pct:.1f}%)")
+    if decay < min_decay_ratio:
+        return (False, 0.0, f"decay ratio too low ({decay:.2f} < {min_decay_ratio:.2f})")
+    if eff > max_tick_eff:
+        return (False, 0.0, f"tick efficiency too high ({eff:.2f} > {max_tick_eff:.2f})")
     # Hard reject: counter-trend without any exhaustion (unchanged from old gate)
     h4b = mtf.h4_bias
     h1b = mtf.h1_bias
@@ -142,8 +159,43 @@ def _unified_confluence_score(
             if dist_pips <= max_prox_pips:
                 # Closer = higher score (1.0 at 0 pips, 0.0 at max_prox_pips)
                 prox_score = 1.0 - (dist_pips / max_prox_pips)
-                # Boost for high-strength levels (major TF or multi-touch)
-                strength = getattr(lvl, "strength", 0.5)
+                
+                # --- DYNAMIC LEVEL CONFLUENCE SCORER ---
+                strength = getattr(lvl, "strength", 0.4) or 0.4
+                lvl_type = str(getattr(lvl, "level_type", "")).upper()
+                tf = str(getattr(lvl, "timeframe", "")).upper()
+                
+                # Boost for major timeframes & daily levels
+                if any(x in lvl_type for x in ["PDH", "PDL", "PWH", "PWL", "H4", "H1"]):
+                    strength = max(strength, 0.8)
+                
+                # Boost for round numbers (.00 / .50)
+                symbol_upper = str(cfg.get("symbol") or cfg.get("mt5_symbol") or "").upper()
+                is_gold = "XAU" in symbol_upper
+                is_jpy = "JPY" in symbol_upper
+                
+                if is_gold or is_jpy:
+                    remainder = lvl.price % 0.50
+                    is_round_number = remainder < 0.05 or remainder > 0.45
+                else:
+                    pips_val = round(lvl.price / pip) if pip else 0
+                    is_round_number = (pips_val % 50 == 0) or ((pips_val + 1) % 50 == 0) or ((pips_val - 1) % 50 == 0)
+                
+                if is_round_number:
+                    strength = max(strength, 0.70)
+                
+                # Boost for multiple touches
+                touches = getattr(lvl, "touches", 1) or 1
+                if touches >= 3:
+                    strength = max(strength, 0.85)
+                elif touches == 2:
+                    strength = max(strength, 0.65)
+                
+                # Reject weak levels (< 0.70 strength)
+                min_lvl_strength = float(cfg.get("min_level_strength", 0.70))
+                if strength < min_lvl_strength:
+                    continue
+                
                 prox_score = min(1.0, prox_score * (0.7 + 0.3 * strength))
                 best_prox = max(best_prox, prox_score)
         score += 0.25 * best_prox

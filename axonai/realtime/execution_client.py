@@ -38,10 +38,12 @@ def run_coroutine(coro):
 
 async def _ws_send_cmd(url, request_dict):
     import websockets
-    async with websockets.connect(url, ping_interval=None) as ws:
-        await ws.send(json.dumps(request_dict))
-        response = await ws.recv()
-        return json.loads(response)
+    async def _send_and_recv():
+        async with websockets.connect(url, ping_interval=None) as ws:
+            await ws.send(json.dumps(request_dict))
+            response = await ws.recv()
+            return json.loads(response)
+    return await asyncio.wait_for(_send_and_recv(), timeout=0.25)
 
 
 def send_execution_command(config: dict, request_dict: dict) -> dict:
@@ -70,5 +72,23 @@ def send_execution_command(config: dict, request_dict: dict) -> dict:
     try:
         return run_coroutine(_ws_send_cmd(url, request_dict))
     except Exception as e:
+        # If connection refused, attempt to auto-start the bridge in the background
+        err_msg = str(e).lower()
+        if "refused" in err_msg or "1225" in err_msg or "timeout" in err_msg:
+            import subprocess
+            import sys
+            import platform
+            import os
+            try:
+                if platform.system() == "Windows":
+                    # Spawning execution_bridge.py directly on native Windows
+                    script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "windows", "execution_bridge.py")
+                    subprocess.Popen([sys.executable, script_path, "--port", str(port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                else:
+                    # Spawning start_bridge.bat via cmd.exe in WSL
+                    subprocess.Popen(["cmd.exe", "/c", "start", "windows\\start_bridge.bat"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            except Exception:
+                pass
+
         logger.error("Failed to send command to execution bridge at %s: %s", url, e)
         return {"success": False, "reason": f"bridge_connection_error: {e}"}

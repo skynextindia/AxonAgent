@@ -54,6 +54,17 @@ if not bridge_host:
 print(f'Bridge host: {bridge_host}', flush=True)
 print(f'Symbols: {", ".join(symbols)}', flush=True)
 
+# Auto-start Windows MT5 Bridge Service if running locally via WSL
+if platform.system() != "Windows" and (bridge_host == "127.0.0.1" or bridge_host.startswith("172.") or bridge_host.startswith("192.")):
+    try:
+        import subprocess
+        logger = logging.getLogger(__name__)
+        logger.info("Attempting to auto-start Windows MT5 Bridge...")
+        subprocess.Popen(["cmd.exe", "/c", "start", "windows\\start_bridge.bat"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        logger.info("Windows MT5 Bridge auto-start command sent successfully.")
+    except Exception as e:
+        pass
+
 # ── Tick Behavior Analyzer ──────────────────────────────────────────
 analyzer = TickBehaviorAnalyzer(
     log_dir="reports/tick_behavior",

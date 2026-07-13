@@ -100,6 +100,10 @@ class EntryStateMachine:
         self._spread_history: deque[float] = deque(maxlen=5)
         self._smoothed_spread_pips: float = 1.0
         self._retest_start_time: float = 0.0
+        
+        # Stall tracking
+        self._arm_start_time: float = 0.0
+        self._min_stall_duration: float = float(self._config.get("entry_min_stall_duration", 15.0))
 
     def reset(self) -> None:
         """Force the machine back to IDLE."""
@@ -111,6 +115,7 @@ class EntryStateMachine:
         self._max_adverse_excursion = 0.0
         self._last_tick_time = 0.0
         self._retest_start_time = 0.0
+        self._arm_start_time = 0.0
         self._prev_net_sign = 0
         self._last_reason = "Reset"
 
@@ -404,9 +409,11 @@ class EntryStateMachine:
 
         # Arm if we see trap or absorption logic
         if disp.classification in (DISPLACEMENT_TRAP, DISPLACEMENT_ABSORPTION):
+            self._arm_start_time = ts
             self._transition(STATE_ARMING, "Absorption confirmed. Arming trigger.")
         # Or arm if velocity completely decays (exhaustion)
         elif vel.is_decaying:
+            self._arm_start_time = ts
             self._transition(STATE_ARMING, "Velocity decayed. Arming trigger.")
 
     def _evaluate_arming(
@@ -435,11 +442,15 @@ class EntryStateMachine:
             decay = getattr(vel, "decay_ratio", 1.0) or 1.0
             is_decaying = getattr(vel, "is_decaying", False)
             if is_decaying and decay < 0.5:
-                self._transition(
-                    STATE_TRIGGERED,
-                    f"Optimistic velocity decay entry (decay={decay:.2f} < 0.5, at wick extreme)."
-                )
-                return
+                # Stall delay validation
+                if (ts - self._arm_start_time) >= self._min_stall_duration:
+                    self._transition(
+                        STATE_TRIGGERED,
+                        f"Optimistic velocity decay entry (decay={decay:.2f} < 0.5, at wick extreme)."
+                    )
+                    return
+                else:
+                    logger.debug("EntryARMING: Stall delay active on optimistic trigger. Spent %.1fs / %.1fs", ts - self._arm_start_time, self._min_stall_duration)
 
         # Trigger criteria: Impulse, or high displacement ratio, or exhaustion (velocity decay = momentum shift)
         is_impulse = (
@@ -479,6 +490,9 @@ class EntryStateMachine:
         )
 
         if is_trigger:
+            if (ts - self._arm_start_time) < self._min_stall_duration:
+                logger.debug("EntryARMING: Stall delay active on standard trigger. Spent %.1fs / %.1fs", ts - self._arm_start_time, self._min_stall_duration)
+                return
             if strong_reversal or not self._require_retest_confirm:
                 self._transition(STATE_TRIGGERED, f"Reversal inflection confirmed ({disp.classification}, flip={flip_favorable}). Trigger.")
             else:
@@ -521,7 +535,10 @@ class EntryStateMachine:
             # Trigger confirm: relaxed to just decay < 0.6 (candle setup already filtered noise)
             # Old: decay < 0.4 AND tr_10 < tr_300 * 0.6 (dual condition — too strict)
             if decay < 0.6:
-                self._transition(STATE_TRIGGERED, f"Retest confirmed (decay={decay:.2f}). Reversal trigger.")
+                if (ts - self._arm_start_time) >= self._min_stall_duration:
+                    self._transition(STATE_TRIGGERED, f"Retest confirmed (decay={decay:.2f}). Reversal trigger.")
+                else:
+                    logger.debug("EntryRETEST: Stall delay active on retest trigger. Spent %.1fs / %.1fs", ts - self._arm_start_time, self._min_stall_duration)
 
 
     def _calculate_quality(self, regime: "RegimeState", mtf: MTFState) -> float:

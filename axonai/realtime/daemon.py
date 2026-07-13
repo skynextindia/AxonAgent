@@ -120,6 +120,18 @@ class AxonDaemon:
         config.setdefault("realtime_base_trail_buffer", 7.5 * _scale)
         config.setdefault("realtime_min_trail_floor_pips", 4.0 * _scale)
         config.setdefault("exit_profit_protect_pips", 4.0 * _scale)
+        
+        # Apply calibrated entry thresholds per currency
+        if "XAU" in _sym_u:
+            config.setdefault("entry_max_velocity_pct", config.get("entry_max_velocity_pct_gold", 30.0))
+            config.setdefault("entry_min_decay_ratio", config.get("entry_min_decay_ratio_gold", 0.40))
+            config.setdefault("entry_max_tick_efficiency", config.get("entry_max_tick_efficiency_gold", 0.30))
+        else:
+            # Standard FX defaults (allow normal triggers to process)
+            config.setdefault("entry_max_velocity_pct", 100.0)
+            config.setdefault("entry_min_decay_ratio", 0.0)
+            config.setdefault("entry_max_tick_efficiency", 1.0)
+
         self._trade_terminal_path = config.get("mt5_trade_terminal_path")
         self.offset_hours = 0
         self.tz = timezone.utc
@@ -1629,18 +1641,19 @@ class AxonDaemon:
                     atr = 0.0012
                 buffer = 1.0 * pip
 
-                min_sl_pips = 12.0 if "GBP" in self.mt5_symbol.upper() else (15.0 if "JPY" in self.mt5_symbol.upper() else (8.0 * float(self.config.get("pair_move_scale", 1.0)) if "XAU" in self.mt5_symbol.upper() else 8.0))
+                # Dynamic SL floor: 1.0 * H1 ATR (ensures Gold gets $2.50+ and AUDUSD gets 8-10 pips)
+                min_sl_distance = max(1.0 * atr, 8.0 * pip)
                 if snapshot.entry_decision.direction == "BUY":
                     sl_distance = (snapshot.price - anomaly_price) + spread + buffer
-                    sl_distance = max(min_sl_pips * pip, min(sl_distance, 1.5 * atr))
+                    sl_distance = max(min_sl_distance, min(sl_distance, 1.5 * atr))
                     sl = snapshot.price - sl_distance
-                    tp_distance = max(2.0 * sl_distance, 16 * pip)
+                    tp_distance = max(2.0 * sl_distance, 1.0 * atr)
                     tp = snapshot.price + tp_distance
                 else:
                     sl_distance = (anomaly_price - snapshot.price) + spread + buffer
-                    sl_distance = max(min_sl_pips * pip, min(sl_distance, 1.5 * atr))
+                    sl_distance = max(min_sl_distance, min(sl_distance, 1.5 * atr))
                     sl = snapshot.price + sl_distance
-                    tp_distance = max(2.0 * sl_distance, 16 * pip)
+                    tp_distance = max(2.0 * sl_distance, 1.0 * atr)
                     tp = snapshot.price - tp_distance
 
                 # Execute order on MT5 terminal
@@ -1760,17 +1773,18 @@ class AxonDaemon:
                     continue
 
                 if use_market:
-                    min_sl_pips = 12.0 if "GBP" in self.mt5_symbol.upper() else (15.0 if "JPY" in self.mt5_symbol.upper() else (8.0 * float(self.config.get("pair_move_scale", 1.0)) if "XAU" in self.mt5_symbol.upper() else 8.0))
+                    # Dynamic SL floor: 1.0 * H1 ATR
+                    min_sl_distance = max(1.0 * atr, 8.0 * pip)
                     if direction == "BUY":
-                        sl_distance = max(min_sl_pips * pip, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
+                        sl_distance = max(min_sl_distance, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
                         sl = snapshot.price - sl_distance
-                        tp_distance = max(2.0 * sl_distance, 16 * pip)
+                        tp_distance = max(2.0 * sl_distance, 1.0 * atr)
                         tp = snapshot.price + tp_distance
                         signal = "Buy"
                     else:
-                        sl_distance = max(min_sl_pips * pip, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
+                        sl_distance = max(min_sl_distance, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
                         sl = snapshot.price + sl_distance
-                        tp_distance = max(2.0 * sl_distance, 16 * pip)
+                        tp_distance = max(2.0 * sl_distance, 1.0 * atr)
                         tp = snapshot.price - tp_distance
                         signal = "Sell"
 
@@ -2171,6 +2185,14 @@ class AxonDaemon:
             "decay_ratio": round(float(getattr(v, "decay_ratio", 0.0) or 0.0), 3),
             "vol_pips": round(float(getattr(v, "vol_pips", 0.0) or 0.0), 3),
             "tick_eff": round(float(getattr(v, "tick_efficiency", 0.0) or 0.0), 3),
+            "tick_rate_10s": round(float(getattr(v, "tick_rate_10s", 0.0) or 0.0), 3),
+            "tick_rate_60s": round(float(getattr(v, "tick_rate_60s", 0.0) or 0.0), 3),
+            "tick_rate_300s": round(float(getattr(v, "tick_rate_300s", 0.0) or 0.0), 3),
+            "displacement_velocity": round(float(getattr(v, "displacement_velocity", 0.0) or 0.0), 4),
+            "abs_velocity": round(float(getattr(v, "abs_velocity", 0.0) or 0.0), 4),
+            "velocity_ratio": round(float(getattr(v, "velocity_ratio", 0.0) or 0.0), 3),
+            "is_unusual": int(bool(getattr(v, "is_unusual", False))),
+            "is_accelerating": int(bool(getattr(v, "is_accelerating", False))),
             "disp_class": getattr(d, "classification", ""),
             "disp_ratio": round(float(getattr(d, "displacement_ratio", 0.0) or 0.0), 3),
             "net_disp_pips": round(float(getattr(d, "net_displacement_pips", 0.0) or 0.0), 2),

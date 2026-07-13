@@ -460,8 +460,8 @@ async def http_handler(reader, writer):
 
 
 async def run_http_server(host, port):
-    server = await asyncio.start_server(http_handler, host, port + 1)
-    print(f"Health HTTP server on {host}:{port + 1}")
+    server = await asyncio.start_server(http_handler, host, port + 10)
+    print(f"Health HTTP server on {host}:{port + 10}")
     async with server:
         await server.serve_forever()
 
@@ -503,7 +503,7 @@ async def main():
         sys.exit(1)
 
     print(f"\nExecution Bridge: ws://{args.host}:{args.port}")
-    print(f"Health check:     http://{args.host}:{args.port + 1}/health")
+    print(f"Health check:     http://{args.host}:{args.port + 10}/health")
     print("Press Ctrl+C to stop.\n")
 
     async with ws_serve(handle_client, args.host, args.port):
