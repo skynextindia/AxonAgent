@@ -1159,6 +1159,8 @@ class AxonDaemon:
 
     def _on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Called by TickEngine on every new tick."""
+        self.current_bid = bid
+        self.current_ask = ask
         mid = (bid + ask) / 2.0
         self.live_state.on_tick(bid, ask, timestamp)
 
@@ -1290,8 +1292,11 @@ class AxonDaemon:
         elif state in ("INVALIDATED", "IDLE") and self._pending_limit_ticket is not None:
             self.event_queue.put({"type": "cancel_limit"})
 
-        # 3. Check for exit triggers
-        if snapshot.exit_decision.should_exit or snapshot.exit_decision.action == "ADJUST_SL":
+        # 3. Check for exit triggers — ONLY CLOSE_NOW goes through the event queue.
+        # SL adjustments are handled exclusively by VelocityTrailingManager in
+        # _manage_trailing_stops() to prevent three competing trail systems from
+        # racing each other and ratcheting SL too tight.
+        if snapshot.exit_decision.should_exit:
             self.event_queue.put({"type": "exit", "snapshot": snapshot})
 
         # Handle trailing stops and closed position logging (both dryrun AND live).
@@ -1495,9 +1500,13 @@ class AxonDaemon:
                     replayed += 1
 
             mtf = self.reversal_model._last_mtf_state
+            # Clear any candle setups detected during historical backfill. We only want
+            # to trade setups detected on LIVE candle closes to prevent premature startup entries.
+            self.reversal_model.candle_setup.clear()
+            
             logger.info(
                 "AxonDaemon: MTF warm-up complete (%d bars). h4_bias=%.2f h1_bias=%.2f "
-                "m15_bias=%.2f pdh=%.5f pdl=%.5f",
+                "m15_bias=%.2f pdh=%.5f pdl=%.5f. Candle setup cleared.",
                 replayed, mtf.h4_bias, mtf.h1_bias, mtf.m15_bias, mtf.pdh, mtf.pdl,
             )
         except Exception as e:
@@ -1612,7 +1621,7 @@ class AxonDaemon:
                 if isinstance(anomaly_price, Mock) or not isinstance(anomaly_price, (int, float)):
                     anomaly_price = snapshot.price
                 if isinstance(pip, Mock) or not isinstance(pip, (int, float)):
-                    pip = 0.0001
+                    pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
 
                 spread = ask - bid
                 atr = self.live_state._state.atr_14_h1 if (self.live_state and self.live_state._state) else 0.0012
@@ -1738,7 +1747,7 @@ class AxonDaemon:
                 if isinstance(anomaly_price, Mock) or not isinstance(anomaly_price, (int, float)):
                     anomaly_price = snapshot.price
                 if isinstance(pip, Mock) or not isinstance(pip, (int, float)):
-                    pip = 0.0001
+                    pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
 
                 spread = ask - bid
                 atr = self.live_state._state.atr_14_h1 if (self.live_state and self.live_state._state) else 0.0012
@@ -1902,43 +1911,12 @@ class AxonDaemon:
                 
                 is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
                 if decision.action == "ADJUST_SL" and decision.suggested_sl:
-                    # Trailing stop update logic
-                    if is_bridge:
-                        from axonai.realtime.execution_client import send_execution_command
-                        res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol, "magic": self.trade_executor_opt.magic})
-                        positions = res.get("positions", []) if res.get("success", False) else []
-                        for p in positions:
-                            res_mod = send_execution_command(self.config, {
-                                "action": "modify",
-                                "position": p["ticket"],
-                                "symbol": p["symbol"],
-                                "sl": decision.suggested_sl,
-                                "tp": p["tp"]
-                            })
-                            if res_mod and res_mod.get("success"):
-                                logger.info("Adjusted SL (Bridge) successful for ticket %d to %.5f", p["ticket"], decision.suggested_sl)
-                            else:
-                                reason = res_mod.get("reason") if res_mod else "No response"
-                                comment = res_mod.get("comment") if res_mod else ""
-                                logger.error("Adjusted SL (Bridge) FAILED for ticket %d to %.5f. Reason: %s (%s)", p["ticket"], decision.suggested_sl, reason, comment)
-                    else:
-                        from axonai.dataflows.mt5_order_bridge import get_positions_via_bridge
-                        if self._trade_terminal_path:
-                            pos_result = get_positions_via_bridge(self._trade_terminal_path, self.mt5_symbol)
-                            positions = pos_result.get("positions", []) if pos_result and pos_result.get("success") else []
-                        else:
-                            positions = []
-                        if positions:
-                            for p in positions:
-                                request = {
-                                    "action": mt5.TRADE_ACTION_SLTP,
-                                    "position": p["ticket"],
-                                    "symbol": p["symbol"],
-                                    "sl": decision.suggested_sl,
-                                    "tp": p["tp"]
-                                }
-                                self._send_order(request)
-                                logger.info("Adjusted SL for ticket %d to %.5f", p["ticket"], decision.suggested_sl)
+                    # SL adjustments are now handled exclusively by VelocityTrailingManager
+                    # in _manage_trailing_stops(). Logging only for diagnostics.
+                    logger.debug(
+                        "EXIT DECISION ADJUST_SL ignored (VelocityTrailing is sole SL authority): %.5f",
+                        decision.suggested_sl
+                    )
                                         
                 elif decision.action == "CLOSE_NOW":
                     if is_bridge:
@@ -2466,37 +2444,13 @@ class AxonDaemon:
                         else:
                             logger.error("[EXIT_ENGINE] Failed to close ticket %d: %s", ticket, res)
                 elif exit_signal and exit_signal.action == "ADJUST_SL" and exit_signal.suggested_sl:
-                    new_sl = round(exit_signal.suggested_sl, 5 if ("JPY" not in self.mt5_symbol.upper() and "XAU" not in self.mt5_symbol.upper()) else 3)
-                    logger.info("[EXIT_ENGINE] Adjusting SL for ticket %d: %.5f -> %.5f", ticket, pos_sl, new_sl)
-                    # Track SL adjustment for velocity trailing visibility
-                    if ticket not in self._active_trade_velocity_events:
-                        self._active_trade_velocity_events[ticket] = []
-                    self._active_trade_velocity_events[ticket].append({
-                        "time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                        "old_sl": round(pos_sl, 5),
-                        "new_sl": new_sl,
-                        "reason": getattr(exit_signal, "details", {}).get("reason", "velocity_trailing")
-                    })
-                    if is_bridge:
-                        from axonai.realtime.execution_client import send_execution_command
-                        send_execution_command(self.config, {
-                            "action": "modify",
-                            "position": ticket,
-                            "symbol": pos_symbol,
-                            "sl": new_sl,
-                            "tp": pos_tp,
-                        })
-                    else:
-                        request = {
-                            "action": mt5.TRADE_ACTION_SLTP,
-                            "position": ticket,
-                            "symbol": self.mt5_symbol,
-                            "sl": new_sl,
-                            "tp": pos_tp,
-                        }
-                        res = self._send_order(request)
-                        if res and res.get("retcode") == mt5.TRADE_RETCODE_DONE:
-                            logger.info("[EXIT_ENGINE] SL modification successful for ticket %d", ticket)
+                    # SL adjustments are now handled exclusively by VelocityTrailingManager
+                    # above. ExitEngine ADJUST_SL is logged but NOT applied to prevent
+                    # two trail systems racing each other and choking the stop.
+                    logger.debug(
+                        "[EXIT_ENGINE] ADJUST_SL suppressed for ticket %d (VelocityTrailing is sole SL authority): %.5f",
+                        ticket, exit_signal.suggested_sl,
+                    )
 
     def _check_for_closed_positions(self, bid: float, ask: float):
         """Detect closed positions and log outcomes."""

@@ -63,7 +63,7 @@ class EntryDecision:
 class EntryStateMachine:
     """Stateful trade entry execution manager."""
 
-    def __init__(self, timeout_sec: float = 120.0, pip_mult: float = 0.0001, config: Optional[dict] = None):
+    def __init__(self, pip_mult: float = 0.0001, timeout_sec: float = 120.0, config: Optional[dict] = None):
         # Late import to avoid circular dependency
         from axonai.realtime.regime_engine import REGIME_RANGE_CHOP, REGIME_EXHAUSTION, REGIME_REVERSAL
 

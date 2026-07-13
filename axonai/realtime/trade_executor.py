@@ -321,12 +321,25 @@ class MT5TradeExecutor:
                 if tick_value > 0 and tick_size > 0:
                     pip_value_per_lot = (pip / tick_size) * tick_value
                 elif price > 1000:
-                    pip_value_per_lot = 1.0 if pip >= 0.1 else 10.0
+                    # XAUUSD (pip=0.01): true pip_value ≈ $1.00/lot, NOT $10.
+                    # The old fallback of 10.0 produced 10x oversized lots.
+                    pip_value_per_lot = 1.0
+                    logger.warning(
+                        "TradeExecutor: using FALLBACK pip_value_per_lot=%.2f for %s "
+                        "(tick_value/tick_size unavailable from broker)",
+                        pip_value_per_lot, symbol,
+                    )
 
                 raw_lot = risk_amount / max(sl_pips * pip_value_per_lot, 1e-6)
 
                 # Hard ceiling = min(broker volume_max, config backstop)
-                ceiling = float(self.config.get("realtime_max_lot", 5.0))
+                # Gold gets a tighter ceiling (default 1.00) because $1 pip-value
+                # per lot means a 5.00 lot risks ~$500/pip — catastrophic.
+                is_gold_symbol = (pip == 0.01 and price > 1000.0)
+                if is_gold_symbol:
+                    ceiling = float(self.config.get("realtime_max_lot_gold", 1.0))
+                else:
+                    ceiling = float(self.config.get("realtime_max_lot", 2.0))
                 if vol_max and vol_max > 0:
                     ceiling = min(ceiling, float(vol_max))
                 if raw_lot > ceiling:

@@ -76,7 +76,8 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # equity; lot floats with equity & stop distance (see trade_executor sizing).
     "realtime_dynamic_sizing": True,
     "realtime_risk_pct": 0.01,           # HARD 1% risk per trade
-    "realtime_max_lot": 5.00,            # backstop ceiling vs pip-miscalc blow-ups
+    "realtime_max_lot": 2.00,            # backstop ceiling vs pip-miscalc blow-ups (was 5.0 — too high)
+    "realtime_max_lot_gold": 1.00,       # gold-specific ceiling (XAUUSD pip_value ≈ $1/lot → 5.0 = $500/pip)
     "realtime_deviation": 20,
     "realtime_min_confluence_conditions": 1,
     "realtime_dry_run": False,

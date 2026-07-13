@@ -212,9 +212,10 @@ class ReversalModel:
         self._last_disp_state = DisplacementState()
         self._last_health_state = TradeHealth()
         
-        # H1 ATR tracking
+        # H1 ATR tracking (default 12 pips on FX, scaled for JPY/XAU)
         self._h1_tr_window = deque(maxlen=14)
-        self._h1_atr = 0.0012
+        _sym = self._config.get("symbol", "").upper()
+        self._h1_atr = 0.12 if ("JPY" in _sym or "XAU" in _sym) else 0.0012
         self._prev_h1_close = None
 
         self.latest_snapshot = None  # Populated on every tick by daemon.py (bug #3 fix)

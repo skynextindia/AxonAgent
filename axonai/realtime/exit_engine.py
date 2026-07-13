@@ -92,12 +92,21 @@ class ExitEngine:
         elif trade_state.htf_context == "ALIGNED":
             htf_mult = self.config.get("htf_aligned_sensitivity_multiplier", 0.7)
 
+        # Profit protection threshold: once a trade is profitable beyond this,
+        # let VelocityTrailingManager manage exits instead of cutting here.
+        profit_protect_pips = self.config.get("exit_profit_protect_pips", 4.0)
+
         # --- PRIORITY 1: THESIS FAILURE (highest urgency) ---
+        # Only close on thesis failure if the trade is NOT already meaningfully
+        # profitable. Once in profit past exit_profit_protect_pips, hand it to
+        # VelocityTrailingManager which will lock gains via SL — cutting here
+        # would cap every winner at a scalp.
         if thesis_status == "BROKEN":
             if (
                 velocity_pct > 50
                 and displacement in ["ABSORPTION", "TRAP"]
                 and trade_state.ticks_in_trade > self.config.get("trade_phase_min_duration_ticks", 3)
+                and trade_state.current_profit_pips < profit_protect_pips
             ):
                 urgency = self.config.get("thesis_failure_urgency", 1.0) * htf_mult
                 return ExitSignal(
@@ -160,30 +169,11 @@ class ExitEngine:
                 urgency=min(1.0, urgency),
             )
 
-        # --- PRIORITY 4: TRAILING STOP (legacy fallback, lowest urgency) ---
-        # Delegate to legacy AdaptiveExitManager for trailing stop logic
-        if self.legacy and hasattr(self.legacy, "evaluate"):
-            legacy_decision = self.legacy.evaluate(
-                current_price=current_price,
-                health=getattr(snapshot, "trade_health", None),
-                regime=getattr(snapshot, "regime", None),
-                liquidity=getattr(snapshot, "liquidity", None),
-                velocity=snapshot.velocity,
-                displacement=snapshot.displacement,
-                phase=getattr(snapshot, "phase", None),
-                phase_confidence=getattr(snapshot, "phase_confidence", 0.0),
-                mtf=getattr(snapshot, "mtf", None),
-                atr=getattr(snapshot, "atr", None),
-            )
-            if legacy_decision and legacy_decision.should_exit:
-                urgency = self.config.get("trailing_stop_urgency", 0.3)
-                return ExitSignal(
-                    should_exit=True,
-                    action=legacy_decision.action,
-                    reason=f"Trailing stop: {legacy_decision.reason}",
-                    urgency=urgency,
-                    suggested_sl=legacy_decision.suggested_sl,
-                )
+        # --- PRIORITY 4: TRAILING STOP (REMOVED) ---
+        # VelocityTrailingManager is now the sole authority for SL adjustments.
+        # The legacy AdaptiveExitManager trail logic is no longer invoked here
+        # to prevent two competing trail systems from racing each other and
+        # ratcheting the stop too tight (see implementation_plan Bug 2).
 
         # --- DEFAULT: HOLD ---
         return ExitSignal(should_exit=False, action="HOLD", reason="All conditions favorable", urgency=0.0)
