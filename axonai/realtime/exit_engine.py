@@ -129,6 +129,12 @@ class ExitEngine:
         # `exit_profit_protect_pips`, hand it to the trailing manager instead of
         # closing here. Losing/flat trades are still cut instantly (correct).
         adverse_min_ticks = self.config.get("adverse_impulse_min_ticks", 3)
+        
+        # Check tick efficiency defensively from velocity snapshot
+        tick_eff = 1.0
+        if snapshot and hasattr(snapshot, "velocity") and snapshot.velocity:
+            tick_eff = getattr(snapshot.velocity, "tick_efficiency", 1.0)
+
         if (
             velocity_pct > 70
             and displacement == "IMPULSE"
@@ -136,12 +142,13 @@ class ExitEngine:
             and trade_state.current_phase in ["ENTRY", "EXPANSION"]
             and trade_state.ticks_in_trade > adverse_min_ticks
             and trade_state.current_profit_pips < profit_protect_pips
+            and tick_eff < 0.15
         ):
             urgency = self.config.get("adverse_impulse_urgency", 0.9) * htf_mult
             return ExitSignal(
                 should_exit=True,
                 action="CLOSE_NOW",
-                reason="Adverse impulse: opposing velocity spike",
+                reason=f"Adverse impulse: opposing velocity spike (eff={tick_eff:.2f})",
                 urgency=min(1.0, urgency),
             )
 
@@ -159,9 +166,15 @@ class ExitEngine:
         exhaustion_vel_max = self.config.get("exhaustion_detection_velocity_max", 30)
         exhaustion_disp_max = self.config.get("exhaustion_detection_displacement_max", 0.3)
 
+        # Check decay ratio defensively
+        decay_ratio = 0.0
+        if snapshot and hasattr(snapshot, "velocity") and snapshot.velocity:
+            decay_ratio = getattr(snapshot.velocity, "decay_ratio", 0.0)
+
         if (
             trade_state.current_phase == "EXHAUSTION"
-            and velocity_pct > exhaustion_vel_max
+            and velocity_pct < exhaustion_vel_max
+            and decay_ratio >= 0.80
             and abs(trade_state.current_profit_pips / max(mfe, 1.0)) < exhaustion_disp_max
             and at_structure
         ):
@@ -169,7 +182,7 @@ class ExitEngine:
             return ExitSignal(
                 should_exit=True,
                 action="CLOSE_NOW",
-                reason="Exhaustion: high velocity, trapped, at structure",
+                reason=f"Exhaustion: low velocity stall (decay={decay_ratio:.2f}) near structure",
                 urgency=min(1.0, urgency),
             )
 
