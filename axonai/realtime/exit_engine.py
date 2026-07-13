@@ -92,9 +92,14 @@ class ExitEngine:
         elif trade_state.htf_context == "ALIGNED":
             htf_mult = self.config.get("htf_aligned_sensitivity_multiplier", 0.7)
 
-        # Profit protection threshold: once a trade is profitable beyond this,
-        # let VelocityTrailingManager manage exits instead of cutting here.
-        profit_protect_pips = self.config.get("exit_profit_protect_pips", 4.0)
+        # Scale profit protection by live session volatility (vol_pips)
+        vol_scale = 1.0
+        if snapshot and hasattr(snapshot, "velocity") and snapshot.velocity:
+            vp = getattr(snapshot.velocity, "vol_pips", None)
+            if vp and vp > 0:
+                vol_scale = max(0.5, min(vp / 1.0, 3.0))
+        
+        profit_protect_pips = float(self.config.get("exit_profit_protect_pips", 4.0)) * vol_scale
 
         # --- PRIORITY 1: THESIS FAILURE (highest urgency) ---
         # Only close on thesis failure if the trade is NOT already meaningfully
@@ -124,7 +129,6 @@ class ExitEngine:
         # `exit_profit_protect_pips`, hand it to the trailing manager instead of
         # closing here. Losing/flat trades are still cut instantly (correct).
         adverse_min_ticks = self.config.get("adverse_impulse_min_ticks", 3)
-        profit_protect_pips = self.config.get("exit_profit_protect_pips", 4.0)
         if (
             velocity_pct > 70
             and displacement == "IMPULSE"
