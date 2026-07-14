@@ -85,7 +85,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_dry_run": False,
     # Calibrated Gold Entry Thresholds
     "entry_max_velocity_pct_gold": 30.0,
-    "entry_min_decay_ratio_gold": 0.40,
+    "entry_min_decay_ratio_gold": 0.25,
     "entry_max_tick_efficiency_gold": 0.30,
     "entry_min_stall_duration": 15.0,
     "paper_trade": True,           # True = simulate fills internally, never call mt5.order_send (safe for tests / funded accounts)
@@ -133,7 +133,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "placeholder_tp_sl_multiple": 3.0,
 
     # ── Trade Lifecycle Phase Transitions ──────────────────────────────────
-    "trade_phase_min_duration_ticks": 3,              # debounce: min ticks before phase transition
+    "trade_phase_min_duration_ticks": 30,              # debounce: min ticks before phase transition
     "at_structure_atr_threshold": 0.5,                # distance to S/R in ATR units before "at_structure"
     "expansion_phase_min_displacement": 2.0,          # pips of net move to confirm EXPANSION
     "exhaustion_detection_velocity_max": 30,          # percentile threshold (velocity > this → high activity)

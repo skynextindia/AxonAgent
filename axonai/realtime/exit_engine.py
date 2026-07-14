@@ -140,9 +140,9 @@ class ExitEngine:
             and displacement == "IMPULSE"
             and not trade_state.last_displacement_direction_favorable
             and trade_state.current_phase in ["ENTRY", "EXPANSION"]
-            and trade_state.ticks_in_trade > adverse_min_ticks
+            and trade_state.ticks_in_trade > self.config.get("adverse_impulse_min_ticks", 30)
             and trade_state.current_profit_pips < profit_protect_pips
-            and tick_eff < 0.15
+            and tick_eff > 0.40
         ):
             urgency = self.config.get("adverse_impulse_urgency", 0.9) * htf_mult
             return ExitSignal(

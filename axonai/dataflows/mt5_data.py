@@ -87,6 +87,22 @@ def mt5_initialize(terminal_path: Optional[str] = None) -> bool:
         logger.warning("MT5 initialize failed: %s", err)
         return False
 
+    # Wait up to 10 seconds for the terminal to establish server connection
+    import time
+    connected = False
+    for i in range(10):
+        term_info = mt5.terminal_info()
+        if term_info and term_info.connected:
+            connected = True
+            break
+        logger.info("[TRACE] mt5_initialize: Waiting for terminal to connect to broker (attempt %d/10)...", i+1)
+        time.sleep(1.0)
+
+    if not connected:
+        logger.error("MT5 terminal started but failed to connect to broker server.")
+        mt5.shutdown()
+        return False
+
     _initialized = True
     atexit.register(mt5_shutdown)
 
@@ -146,6 +162,22 @@ def mt5_initialize_trade(terminal_path: Optional[str] = None) -> bool:
     if not mt5.initialize(**kwargs):
         err = mt5.last_error()
         logger.warning("MT5 trade terminal initialize failed: %s", err)
+        return False
+
+    # Wait up to 10 seconds for the trade terminal to establish server connection
+    import time
+    connected = False
+    for i in range(10):
+        term_info = mt5.terminal_info()
+        if term_info and term_info.connected:
+            connected = True
+            break
+        logger.info("[TRACE] mt5_initialize_trade: Waiting for terminal to connect to broker (attempt %d/10)...", i+1)
+        time.sleep(1.0)
+
+    if not connected:
+        logger.error("MT5 trade terminal started but failed to connect to broker server.")
+        mt5.shutdown()
         return False
 
     _trade_initialized = True

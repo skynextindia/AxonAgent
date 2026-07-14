@@ -1279,7 +1279,7 @@ class AxonDaemon:
         # Check for RETEST_WAIT/TRIGGERED to place limit order, and check for INVALIDATED/IDLE to cancel it
         state = snapshot.entry_decision.state
         entry_style = self.config.get("realtime_entry_style", "instant")
-        should_enter = (state == "TRIGGERED")
+        should_enter = (state == "TRIGGERED" and getattr(snapshot.entry_decision, "is_valid_entry", True))
 
         if should_enter:
             has_position = False
@@ -2670,7 +2670,8 @@ class AxonDaemon:
                     elif "so" in comment:
                         reason = "Stop Out (SO)"
                     else:
-                        reason = f"Closed ({exit_deal['comment'] if is_bridge else getattr(exit_deal, 'comment', 'Manual')})"
+                        if not reason or reason.startswith("Closed ("):
+                            reason = f"Closed ({exit_deal['comment'] if is_bridge else getattr(exit_deal, 'comment', 'Manual')})"
                 else:
                     logger.warning(f"[DEAL_NOT_FOUND] Ticket {ticket}: No exit deal in {len(deals)} deals returned")
                         
