@@ -58,6 +58,7 @@ class DashboardServer:
             "mode": None,
             "trade_state": None,
             "location_context": None,
+            "risk_state": None,
         }
 
     def __init__(self, host: str = "127.0.0.1", port: int = 8000):
@@ -171,97 +172,10 @@ class DashboardServer:
                     return {"status": "success", "config": target_daemon.config}
                 return {"status": "success", "config": self.fallback_config}
 
-        @self.app.post("/config")
-        def update_config(new_config: dict, symbol: str = None):
-            with self._lock:
-                target_daemon = None
-                if symbol:
-                    # Clean symbol (e.g. EURUSD=X to EURUSD)
-                    s_clean = symbol.replace("=X", "").replace("=x", "").upper()
-                    for k, d in self.daemons.items():
-                        if s_clean in k.upper():
-                            target_daemon = d
-                            break
-                            
-                if not target_daemon and self.daemon:
-                    target_daemon = self.daemon
-                    
-                if target_daemon:
-                    # Update config in daemon and dependent modules!
-                    target_daemon.config.update(new_config)
-                    # Expose configuration update to tick_engine, live_state, etc.
-                    if hasattr(target_daemon, "tick_engine") and target_daemon.tick_engine:
-                        target_daemon.tick_engine.poll_interval_ms = int(target_daemon.config.get("tick_poll_interval_ms", 100))
-                    if hasattr(target_daemon, "reversal_model") and target_daemon.reversal_model:
-                        target_daemon.reversal_model.config.update(new_config)
-                    if hasattr(target_daemon, "live_state") and target_daemon.live_state:
-                        target_daemon.live_state.config.update(new_config)
-                    if hasattr(target_daemon, "live_evidence") and target_daemon.live_evidence:
-                        target_daemon.live_evidence.config.update(new_config)
-                    return {"status": "success", "config": target_daemon.config}
-                
-                self.fallback_config.update(new_config)
-                return {"status": "success", "config": self.fallback_config}
-
-        @self.app.post("/trigger")
-        def trigger_event(event_type: str = "level_breach", peak_type: str = "microstructure_exhaustion"):
-            from axonai.realtime.event_types import MarketEvent, EventType, EventPriority
-            from datetime import datetime
-            with self._lock:
-                if self.daemon:
-                    price = self.daemon.live_state.current_price if hasattr(self.daemon.live_state, "current_price") else 1.0
-                    try:
-                        ev_type = EventType(event_type.lower())
-                    except ValueError:
-                        ev_type = EventType.LEVEL_BREACH
-                    
-                    details = {"news": "USER FORCED TEST EVENT"}
-                    if ev_type == EventType.PEAK_DETECTION:
-                        details = {
-                            "peak_type": peak_type,
-                            "direction": "bearish_reversal",
-                            "peak_price": price,
-                            "intensity": "HIGH",
-                            "velocity_divergence": 10.0,
-                            "price_per_tick_efficiency": 0.05,
-                            "divergence_warning": True,
-                            "peak_confirmed": True,
-                            "peak_confidence": 0.85
-                        }
-                    
-                    # Trigger endpoint currently unsupported without EventDetector
-                    return {"status": "error", "message": "Trigger via API disabled on pure-math engine"}
-                return {"status": "error", "message": "Daemon not registered"}
-        @self.app.post("/api/emergency_stop")
-        def emergency_stop():
-            with self._lock:
-                if self.daemon:
-                    self.daemon.stop()
-                    return {"status": "success", "message": "Daemon halted"}
-                return {"status": "error", "message": "Daemon not registered"}
-
-        @self.app.post("/api/close_all")
-        def close_all_positions():
-            with self._lock:
-                if self.daemon and hasattr(self.daemon, "_close_all_positions"):
-                    n = self.daemon._close_all_positions("Manual close-all (dashboard)")
-                    return {"status": "success", "message": f"Closed {n} position(s)"}
-                return {"status": "error", "message": "Execution engine not available"}
-
-        @self.app.post("/api/pause_trading")
-        def pause_trading():
-            with self._lock:
-                if self.daemon and hasattr(self.daemon, "paused"):
-                    self.daemon.paused = not self.daemon.paused
-                    state = "paused" if self.daemon.paused else "resumed"
-                    return {"status": "success", "message": f"Trading operations {state}", "paused": self.daemon.paused}
-                return {"status": "error", "message": "Daemon not registered or not pausable"}
-
-        @self.app.post("/api/pause_llm")
-        def pause_llm():
-            # Alias for backward compatibility
-            return pause_trading()
-
+        # Write surface removed (read-only dashboard): POST /config, /trigger,
+        # /api/emergency_stop, /api/close_all, /api/pause_trading, /api/pause_llm.
+        # Nothing reachable from a browser can alter trading behavior. Emergency
+        # actions belong in the terminal / MT5, not an unauthenticated HTTP port.
 
         # /api/logs/decisions removed — pure-math engine has no LLM decision journal;
         # trade history is served exclusively by /api/logs/trades.
@@ -761,10 +675,16 @@ class DashboardServer:
         import time
 
         if msg_type == "tick":
+            # Per-symbol throttle: a shared timestamp lets high-rate symbols
+            # (XAUUSD) starve slow ones (EURUSD) so their ticks never reach
+            # the dashboard. Track last-broadcast per symbol instead.
             now_ms = time.perf_counter() * 1000
-            if now_ms - self._last_broadcast_ms < self._broadcast_interval_ms:
+            _tsym = (message.get("symbol") or "_").upper()
+            if not hasattr(self, "_last_tick_ms_by_symbol"):
+                self._last_tick_ms_by_symbol = {}
+            if now_ms - self._last_tick_ms_by_symbol.get(_tsym, 0.0) < self._broadcast_interval_ms:
                 return  # drop tick, trading logic unaffected
-            self._last_broadcast_ms = now_ms
+            self._last_tick_ms_by_symbol[_tsym] = now_ms
             
         # Determine symbol routing
         sym = message.get("symbol") or message.get("mt5_symbol")
@@ -814,6 +734,7 @@ class DashboardServer:
                 "trigger_metrics",
                 "trade_state",
                 "location_context",
+                "risk_state",
             ]:
                 hist_ref[msg_type] = message
                 if msg_type == "decision":
@@ -927,6 +848,9 @@ class DashboardServer:
         news_thread = threading.Thread(target=self._calendar_poller, daemon=True, name="DashboardCalendarPoller")
         news_thread.start()
 
+        fleet_thread = threading.Thread(target=self._fleet_poller, daemon=True, name="DashboardFleetPoller")
+        fleet_thread.start()
+
     def _calendar_poller(self):
         """Background thread: periodically fetches the economic calendar from NewsGuard.
 
@@ -997,6 +921,81 @@ class DashboardServer:
 
             # Poll every 5 minutes (calendar events don't change faster than that)
             time.sleep(300.0)
+
+    def _build_fleet_summary(self) -> Dict[str, Any]:
+        """Aggregate the per-symbol caches into one compact fleet roll-up for
+        the dashboard FLEET view. Reuses symbol_history + symbol_positions +
+        the merged account. No new engine coupling."""
+        rows = []
+        port_realized = 0.0
+        port_limit = 0.0
+        port_positions = 0
+        port_max = int(self.fallback_config.get("max_concurrent_positions", 5))
+        port_halted = False
+        for s in list(self.active_symbols):
+            s_up = s.replace("=X", "").replace("=x", "").upper()
+            with self._get_symbol_lock(s_up):
+                h = self.symbol_history.get(s_up) or {}
+                tm = h.get("trigger_metrics") or {}
+                rs = h.get("risk_state") or {}
+                rg = h.get("regime") or {}
+                ts = h.get("trade_state") or {}
+            pos_list = self.symbol_positions.get(s_up) or []
+            port_realized += float(rs.get("daily_realized", 0.0) or 0.0)
+            if rs.get("daily_loss_limit"):
+                port_limit = float(rs.get("daily_loss_limit"))
+            if rs.get("max_concurrent"):
+                port_max = int(rs.get("max_concurrent"))
+            if rs.get("halted"):
+                port_halted = True
+            port_positions += len(pos_list)
+            open_t = None
+            if pos_list:
+                p = pos_list[0]
+                open_t = {"dir": p.get("type"), "lots": p.get("volume"),
+                          "pnl": p.get("profit"), "sl": p.get("sl"), "tp": p.get("tp")}
+            rows.append({
+                "sym": s_up,
+                "engine_state": tm.get("state") or (ts.get("current_phase") if pos_list else None) or "MONITOR",
+                "quality": tm.get("signal_quality"),
+                "floor": rs.get("signal_quality_floor"),
+                "h4_bias": tm.get("mtf_h4_bias"),
+                "h1_bias": tm.get("mtf_h1_bias"),
+                "regime": tm.get("regime") or rg.get("dominant"),
+                "cooldown": rg.get("cooldown_remaining"),
+                "in_trade": bool(pos_list),
+                "phase": ts.get("current_phase"),
+                "profit_pips": ts.get("current_profit_pips"),
+                "open": open_t,
+            })
+        acct = self.history.get("account") or {}
+        return {
+            "type": "fleet_summary",
+            "symbols": rows,
+            "portfolio": {
+                "day_pnl": round(port_realized, 2),
+                "day_limit": port_limit or float(self.fallback_config.get("max_daily_loss_usd", 500.0)),
+                "positions": port_positions,
+                "max_concurrent": port_max,
+                "halted": port_halted,
+                "equity": acct.get("equity"),
+                "balance": acct.get("balance"),
+                "profit": acct.get("profit"),
+            },
+        }
+
+    def _fleet_poller(self):
+        """Emit fleet_summary (~1 Hz) so the FLEET view sees all symbols at once,
+        independent of which symbol a client is subscribed to."""
+        import time
+        logger.info("Dashboard API: Fleet-summary poller started.")
+        while not hasattr(self, "_poller_stop") or not self._poller_stop.is_set():
+            try:
+                if self.active_connections and self.active_symbols:
+                    self.broadcast(self._build_fleet_summary())
+            except Exception as e:
+                logger.debug("Dashboard API: fleet_summary poll failed: %s", e)
+            time.sleep(1.0)
 
     def _run_server(self):
         """Target for Uvicorn runner inside the thread."""
