@@ -188,7 +188,7 @@ bt_mod.BacktestEngine.load_historical_data = patched_load_historical_data
 if args.winning_config:
     logger.info("Using WINNING strategy parameters from calibration.")
     config = {
-        "min_signal_quality": 0.65,
+        "min_signal_quality": 0.50,
         "sl_atr_multiple": 1.0,
         "tp_atr_multiple": 2.0,
         "cooldown_seconds": 900,
@@ -201,7 +201,7 @@ if args.winning_config:
 else:
     logger.info("Using DEFAULT baseline configuration.")
     config = {
-        "min_signal_quality": 0.60,
+        "min_signal_quality": 0.50,
         "sl_atr_multiple": 1.0,
         "tp_atr_multiple": 1.5,
         "cooldown_seconds": 300,
@@ -211,6 +211,29 @@ else:
         "drawdown_limit_trending": 2400,
         "drawdown_limit_ranging": 2700,
     }
+
+# Ticker-specific optimized parameter overrides
+clean_t = ticker.upper().replace("=X", "").replace("/", "")
+if "GBPUSD" in clean_t:
+    logger.info("Applying GBPUSD optimized parameters (tight SL, wide TP multiple).")
+    config["sl_atr_multiple"] = 0.8
+    config["tp_atr_multiple"] = 4.0
+    config["min_signal_quality"] = 0.55
+elif "USDJPY" in clean_t:
+    logger.info("Applying USDJPY optimized parameters (defensive SL/TP multiples).")
+    config["sl_atr_multiple"] = 1.6
+    config["tp_atr_multiple"] = 2.0
+    config["min_signal_quality"] = 0.60
+elif "AUDUSD" in clean_t:
+    logger.info("Applying AUDUSD optimized parameters (looser quality floor to capture trades).")
+    config["sl_atr_multiple"] = 1.0
+    config["tp_atr_multiple"] = 2.0
+    config["min_signal_quality"] = 0.45
+else:
+    logger.info("Applying EURUSD baseline parameters.")
+    config["sl_atr_multiple"] = 1.0
+    config["tp_atr_multiple"] = 2.0
+    config["min_signal_quality"] = 0.50
 
 # Calculate days dynamically
 start_dt = datetime.strptime(start_date, "%Y-%m-%d")

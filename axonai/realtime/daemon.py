@@ -1629,15 +1629,14 @@ class AxonDaemon:
                 anomaly_price = getattr(self.reversal_model.entry, "_anomaly_price", 0.0)
                 pip = getattr(self.reversal_model.entry, "_pip", 0.0001)
 
-                from unittest.mock import Mock
-                if isinstance(anomaly_price, Mock) or not isinstance(anomaly_price, (int, float)):
+                if not isinstance(anomaly_price, (int, float)) or anomaly_price <= 0:
                     anomaly_price = snapshot.price
-                if isinstance(pip, Mock) or not isinstance(pip, (int, float)):
+                if not isinstance(pip, (int, float)) or pip <= 0:
                     pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
 
                 spread = ask - bid
                 atr = self.live_state._state.atr_14_h1 if (self.live_state and self.live_state._state) else 0.0012
-                if isinstance(atr, Mock) or not isinstance(atr, (int, float)):
+                if not isinstance(atr, (int, float)) or atr <= 0:
                     atr = 0.0012
                 buffer = 1.0 * pip
 
@@ -1756,15 +1755,14 @@ class AxonDaemon:
                 anomaly_price = getattr(self.reversal_model.entry, "_anomaly_price", 0.0)
                 pip = getattr(self.reversal_model.entry, "_pip", 0.0001)
 
-                from unittest.mock import Mock
-                if isinstance(anomaly_price, Mock) or not isinstance(anomaly_price, (int, float)):
+                if not isinstance(anomaly_price, (int, float)) or anomaly_price <= 0:
                     anomaly_price = snapshot.price
-                if isinstance(pip, Mock) or not isinstance(pip, (int, float)):
+                if not isinstance(pip, (int, float)) or pip <= 0:
                     pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
 
                 spread = ask - bid
                 atr = self.live_state._state.atr_14_h1 if (self.live_state and self.live_state._state) else 0.0012
-                if isinstance(atr, Mock) or not isinstance(atr, (int, float)):
+                if not isinstance(atr, (int, float)) or atr <= 0:
                     atr = 0.0012
                 buffer = 1.0 * pip
 
@@ -1938,9 +1936,8 @@ class AxonDaemon:
                         res = send_execution_command(self.config, {"action": "positions_get", "symbol": self.mt5_symbol, "magic": self.trade_executor_opt.magic})
                         positions = res.get("positions", []) if res.get("success", False) else []
                         for p in positions:
-                            # Close position via bridge
                             # Determine close side: Send SELL (1) to close BUY (0), BUY (0) to close SELL (1)
-                            order_type = 1 if p["type"] == "SELL" else 0
+                            order_type = 0 if p["type"] == "SELL" else 1
                             tick_bid = self.live_state.current_bid if hasattr(self.live_state, "current_bid") else p["price_current"]
                             tick_ask = self.live_state.current_ask if hasattr(self.live_state, "current_ask") else p["price_current"]
                             price = tick_ask if order_type == 0 else tick_bid
@@ -2415,64 +2412,7 @@ class AxonDaemon:
                     if res and res.get("retcode") == mt5.TRADE_RETCODE_DONE:
                         logger.info("AxonDaemon: SL modification successful for ticket %d", ticket)
 
-            # --- EXIT ENGINE: Evaluate exit conditions (thesis failure, adverse impulse, exhaustion) ---
-            if self.reversal_model and self.reversal_model.trade_state_engine:
-                trade_state = self.reversal_model.trade_state_engine._state
-                snapshot = self.reversal_model.latest_snapshot if hasattr(self.reversal_model, 'latest_snapshot') else None
-                location_context = getattr(snapshot, 'location_context', None)
-                current_price = bid if pos_type_str == "SELL" else ask
 
-                exit_signal = self.exit_engine.evaluate(
-                    trade_state=trade_state,
-                    snapshot=snapshot,
-                    location_context=location_context,
-                    current_price=current_price
-                )
-
-                # Execute exit decision (CLOSE_NOW, ADJUST_SL, or HOLD)
-                if exit_signal and exit_signal.should_exit:
-                    logger.warning(
-                        "[EXIT_ENGINE] CLOSING ticket %d: %s (urgency=%.1f)",
-                        ticket, exit_signal.reason, exit_signal.urgency
-                    )
-                    # Store exit reason for later logging
-                    self._active_trade_exit_reasons[ticket] = {
-                        "reason": exit_signal.reason,
-                        "strategy": getattr(exit_signal, "strategy", "exit_engine"),
-                        "urgency": exit_signal.urgency,
-                        "details": getattr(exit_signal, "details", {})
-                    }
-                    if is_bridge:
-                        from axonai.realtime.execution_client import send_execution_command
-                        send_execution_command(self.config, {
-                            "action": "close",
-                            "position": ticket,
-                            "symbol": pos_symbol,
-                        })
-                    else:
-                        close_request = {
-                            "action": mt5.TRADE_ACTION_DEAL,
-                            "symbol": self.mt5_symbol,
-                            "volume": pos_volume,
-                            "type": mt5.ORDER_TYPE_SELL if pos_type_str == "BUY" else mt5.ORDER_TYPE_BUY,
-                            "position": ticket,
-                            "deviation": self.config.get("realtime_deviation", 20),
-                            "magic": self.config.get("realtime_magic_number", 123456),
-                        }
-                        res = self._send_order(close_request)
-                        if res and res.get("retcode") == mt5.TRADE_RETCODE_DONE:
-                            logger.info("[EXIT_ENGINE] Successfully closed ticket %d", ticket)
-                            self._on_position_closed(ticket, bid, ask)
-                        else:
-                            logger.error("[EXIT_ENGINE] Failed to close ticket %d: %s", ticket, res)
-                elif exit_signal and exit_signal.action == "ADJUST_SL" and exit_signal.suggested_sl:
-                    # SL adjustments are now handled exclusively by VelocityTrailingManager
-                    # above. ExitEngine ADJUST_SL is logged but NOT applied to prevent
-                    # two trail systems racing each other and choking the stop.
-                    logger.debug(
-                        "[EXIT_ENGINE] ADJUST_SL suppressed for ticket %d (VelocityTrailing is sole SL authority): %.5f",
-                        ticket, exit_signal.suggested_sl,
-                    )
 
     def _check_for_closed_positions(self, bid: float, ask: float):
         """Detect closed positions and log outcomes."""

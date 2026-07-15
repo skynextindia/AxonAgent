@@ -37,8 +37,43 @@ class BacktestEngine:
         
         # Clean ticker suffix for pips
         ticker_clean = ticker.upper().replace("=X", "").replace("/", "")
-        self.is_jpy = "JPY" in ticker_clean
+        self.is_jpy = "JPY" in ticker_clean or "XAU" in ticker_clean
         self.pip_mult = 0.01 if self.is_jpy else 0.0001
+        
+        # Load per-pair calibration params
+        try:
+            import json as _json, os as _os
+            _cp = _os.path.join("reports", f"calibration_params_{ticker_clean}.json")
+            if _os.path.exists(_cp):
+                with open(_cp, "r", encoding="utf-8") as _f:
+                    _params = _json.load(_f) or {}
+                for _k, _v in _params.items():
+                    self.config.setdefault(_k, _v)
+                logger.info("BacktestEngine: Loaded %d calibration params from %s", len(_params), _cp)
+        except Exception as _e:
+            logger.warning("BacktestEngine: Calibration params load failed (%s)", _e)
+
+        # Scale defaults (e.g. for Gold)
+        _scale = float(self.config.get("pair_move_scale") or (10.0 if "XAU" in ticker_clean else 1.0))
+        self.config["pair_move_scale"] = _scale
+        self.config.setdefault("displacement_exhaustion_min_move_pips", 3.0 * _scale)
+        self.config.setdefault("displacement_trend_net_pips", 2.0 * _scale)
+        self.config.setdefault("context_exhaustion_net_max_pips", 2.0 * _scale)
+        self.config.setdefault("microstructure_velocity_min", 1.5 * _scale)
+        self.config.setdefault("absorption_max_move_pips", 2.0 * _scale)
+        self.config.setdefault("level_rejection_vel_min", 5.0 * _scale)
+        self.config.setdefault("level_strong_rejection_vel", 8.0 * _scale)
+        self.config.setdefault("vol_pips_ref", 1.0 * _scale)
+        
+        # Apply entry defaults
+        if "XAU" in ticker_clean:
+            self.config.setdefault("entry_max_velocity_pct", self.config.get("entry_max_velocity_pct_gold", 30.0))
+            self.config.setdefault("entry_min_decay_ratio", self.config.get("entry_min_decay_ratio_gold", 0.40))
+            self.config.setdefault("entry_max_tick_efficiency", self.config.get("entry_max_tick_efficiency_gold", 0.30))
+        else:
+            self.config.setdefault("entry_max_velocity_pct", 100.0)
+            self.config.setdefault("entry_min_decay_ratio", 0.0)
+            self.config.setdefault("entry_max_tick_efficiency", 1.0)
         
         # Initialize Event Queue and state tracking
         self.event_queue: queue.Queue[MarketEvent] = queue.Queue()
@@ -463,7 +498,7 @@ class BacktestEngine:
                     entry_style = "instant"
 
                 use_market = entry_style in ("instant", "confirmed")
-                should_enter = (state == "TRIGGERED")
+                should_enter = (state == "TRIGGERED" and getattr(snapshot.entry_decision, "is_valid_entry", True))
 
                 # 1. Place Limit Order or Execute Market Order on entry trigger
                 if should_enter:
@@ -478,14 +513,14 @@ class BacktestEngine:
                             spread = ask - bid
                             
                             if direction == "BUY":
-                                sl_distance = max(8 * self.pip_mult, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
+                                sl_distance = max(8 * self.pip_mult, atr * self.config.get("sl_atr_multiple", 1.0))
                                 sl = snapshot.price - sl_distance
-                                tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
+                                tp_distance = max(16 * self.pip_mult, sl_distance * self.config.get("tp_atr_multiple", 2.0))
                                 tp = snapshot.price + tp_distance
                             else:
-                                sl_distance = max(8 * self.pip_mult, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
+                                sl_distance = max(8 * self.pip_mult, atr * self.config.get("sl_atr_multiple", 1.0))
                                 sl = snapshot.price + sl_distance
-                                tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
+                                tp_distance = max(16 * self.pip_mult, sl_distance * self.config.get("tp_atr_multiple", 2.0))
                                 tp = snapshot.price - tp_distance
                                 
                             # Check Gates (cooldowns & concurrency)
@@ -547,14 +582,14 @@ class BacktestEngine:
                             spread = ask - bid
                             
                             if direction == "BUY":
-                                sl_distance = max(8 * self.pip_mult, min((snapshot.price - anomaly_price) + spread + buffer, 1.5 * atr))
+                                sl_distance = max(8 * self.pip_mult, atr * self.config.get("sl_atr_multiple", 1.0))
                                 sl = anomaly_price - sl_distance
-                                tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
+                                tp_distance = max(16 * self.pip_mult, sl_distance * self.config.get("tp_atr_multiple", 2.0))
                                 tp = anomaly_price + tp_distance
                             else:
-                                sl_distance = max(8 * self.pip_mult, min((anomaly_price - snapshot.price) + spread + buffer, 1.5 * atr))
+                                sl_distance = max(8 * self.pip_mult, atr * self.config.get("sl_atr_multiple", 1.0))
                                 sl = anomaly_price + sl_distance
-                                tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
+                                tp_distance = max(16 * self.pip_mult, sl_distance * self.config.get("tp_atr_multiple", 2.0))
                                 tp = anomaly_price - tp_distance
                                 
                             # Check Gates
@@ -786,17 +821,13 @@ class BacktestEngine:
         spread = ask - bid
         buffer = 1.0 * self.pip_mult
 
+        sl_distance = max(8 * self.pip_mult, atr * self.config.get("sl_atr_multiple", 1.0))
+        tp_distance = max(16 * self.pip_mult, sl_distance * self.config.get("tp_atr_multiple", 2.0))
         if direction == "BUY":
-            sl_distance = (entry_price - anomaly_price) + spread + buffer
-            sl_distance = max(8 * self.pip_mult, min(sl_distance, 1.5 * atr))
             sl = entry_price - sl_distance
-            tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
             tp = entry_price + tp_distance
         else:
-            sl_distance = (anomaly_price - entry_price) + spread + buffer
-            sl_distance = max(8 * self.pip_mult, min(sl_distance, 1.5 * atr))
             sl = entry_price + sl_distance
-            tp_distance = max(2.0 * sl_distance, 16 * self.pip_mult)
             tp = entry_price - tp_distance
                 
         self._open_position(direction, entry_price, evt_time, trigger_reason, signal_quality, sl=sl, tp=tp)

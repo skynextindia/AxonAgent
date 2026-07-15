@@ -88,11 +88,14 @@ def _unified_confluence_score(
     if direction not in ("BUY", "SELL"):
         return (False, 0.0, "indeterminate direction")
     want = 1.0 if direction == "BUY" else -1.0
-    min_score = float(cfg.get("min_confluence_score", 0.65))
+    min_score = float(cfg.get("min_confluence_score", cfg.get("realtime_min_signal_quality", cfg.get("min_signal_quality", 0.65))))
 
     score = 0.0
 
     # --- HARD REJECTS (same as before — fail-safe) ---
+    is_aligned = (want > 0 and mtf.h4_bias > 0 and mtf.h1_bias > 0) or (want < 0 and mtf.h4_bias < 0 and mtf.h1_bias < 0)
+    if candle_setup_score <= 0.0 and not is_aligned:
+        return (False, 0.0, "no active candle setup and not trend-aligned")
     if len(getattr(liq, "active_breaks", []) or []) > 0:
         return (False, 0.0, "structural break in progress (falling knife)")
     if getattr(vel, "is_unusual", False) and getattr(liq, "liquidity_void_active", False):

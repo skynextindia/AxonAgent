@@ -89,7 +89,7 @@ def analyze(symbol: str, reversal_pips: float, pre: int, min_events: int) -> Non
         for e in events:
             lo = max(0, e["idx"] - pre)
             for j in range(lo, e["idx"] + 1):
-                r = dict(rows[j])
+                r = {k: v for k, v in rows[j].items() if k is not None}
                 r["_event_kind"] = e["kind"]
                 r["_ticks_to_turn"] = e["idx"] - j
                 if writer is None:
