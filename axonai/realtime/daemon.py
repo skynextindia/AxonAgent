@@ -746,6 +746,18 @@ class AxonDaemon:
                     logger.debug("Bridge positions_get returned None")
                     return self._bridge_account_cache
                 pos_list = self._enrich_positions(pos_res.get("positions", []))
+                # Resting/pending limit orders from the slow-poll cache (populated
+                # regardless of execution mode). Bridge account_info doesn't carry
+                # them, so include them here or the dashboard shows no resting orders.
+                ord_list = []
+                for o in (getattr(self, "_order_cache", None) or []):
+                    if isinstance(o, dict):
+                        ord_list.append({
+                            "ticket": int(o.get("ticket", 0)), "symbol": o.get("symbol", ""),
+                            "type": o.get("type", "other"), "volume_initial": float(o.get("volume_initial", 0)),
+                            "price_open": float(o.get("price_open", 0)), "price_current": float(o.get("price_current", 0)),
+                            "sl": float(o.get("sl", 0)), "tp": float(o.get("tp", 0)),
+                        })
                 payload = {
                     "type": "account",
                     "symbol": self.mt5_symbol,
@@ -755,7 +767,8 @@ class AxonDaemon:
                     "margin": acc_res.get("margin", 0.0),
                     "free_margin": acc_res.get("free_margin", 0.0),
                     "margin_level": acc_res.get("margin_level", 0.0),
-                    "positions": pos_list
+                    "positions": pos_list,
+                    "pending_orders": ord_list
                 }
                 self._bridge_account_cache = payload  # update cache
                 return payload

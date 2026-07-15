@@ -360,7 +360,14 @@ class Axon{
     const ps=Array.isArray(d.positions)?d.positions:[];
     $("positions-table-body").innerHTML=ps.length?ps.map(p=>{const dir=(p.type===0||p.type==="BUY")?"BUY":"SELL";return '<tr><td>'+(p.symbol||"")+'</td><td class="'+(dir==="BUY"?"pos":"neg")+'">'+dir+'</td><td>'+(p.volume||"")+'</td><td class="'+((p.profit||0)>=0?"pos":"neg")+'">'+money(p.profit)+'</td></tr>';}).join(""):'<tr><td colspan="4" class="empty">None</td></tr>';
     const os=Array.isArray(d.pending_orders)?d.pending_orders:[];
-    $("orders-table-body").innerHTML=os.length?os.map(o=>'<tr><td>'+(o.symbol||"")+'</td><td>'+(o.type||"")+'</td><td>'+nf(o.price,this.pip===0.01?3:5)+'</td><td class="d">'+nf(Math.abs((o.price||0)-(this.lastBid||o.price||0))/this.pip,1)+'p</td></tr>').join(""):'<tr><td colspan="4" class="empty">None</td></tr>';
+    $("orders-table-body").innerHTML=os.length?os.map(o=>{
+      const px=o.price_open!=null?o.price_open:o.price;                 // daemon sends price_open
+      const cur=o.price_current!=null?o.price_current:this.lastBid;
+      const jpy=(o.symbol||"").toUpperCase().match(/JPY|XAU/)?0.01:this.pip;
+      const dist=(px!=null&&cur)?nf(Math.abs(px-cur)/jpy,1)+"p":"—";
+      const ty=(""+(o.type!=null?o.type:"")).replace("ORDER_TYPE_","");
+      return '<tr><td>'+(o.symbol||"")+'</td><td>'+ty+'</td><td>'+nf(px,jpy===0.01?3:5)+'</td><td class="d">'+dist+'</td></tr>';
+    }).join(""):'<tr><td colspan="4" class="empty">None</td></tr>';
     // active-trade HUD + live journal
     const mine=ps.filter(p=>!this.active||(p.symbol||"").toUpperCase().includes(this.active));
     const p0=ps[0];$("active-trade-hud").innerHTML=p0?('<div class="kv">'+((p0.type===0||p0.type==="BUY")?"BUY":"SELL")+' '+(p0.symbol||"")+' <b>'+(p0.volume||"")+'</b></div><div class="kv">Entry <b>'+nf(p0.price_open,5)+'</b></div><div class="kv">Now <b>'+nf(p0.price_current,5)+'</b></div><div class="kv">PnL <b class="'+((p0.profit||0)>=0?"pos":"neg")+'">'+money(p0.profit)+'</b></div><div class="kv">SL/TP <b>'+nf(p0.sl,5)+' / '+nf(p0.tp,5)+'</b></div>'):'<span class="empty">No open trade.</span>';
