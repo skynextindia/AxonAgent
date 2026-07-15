@@ -58,7 +58,7 @@ class DashboardServer:
             "regime": None,
             "levels": None,
             "account": None,
-            "news_data": None,
+            "calendar_data": None,
             "candles": {},       # Map of timeframe -> latest candle dict
             "events": [],        # List of last 30 detected events
             "agent_trace": [],   # List of last 50 agent steps
@@ -177,9 +177,9 @@ class DashboardServer:
         @self.app.post("/api/close_all")
         def close_all_positions():
             with self._lock:
-                if self.daemon and hasattr(self.daemon, "execution"):
-                    self.daemon.execution.close_all()
-                    return {"status": "success", "message": "Close all signal sent to MT5"}
+                if self.daemon and hasattr(self.daemon, "_close_all_positions"):
+                    n = self.daemon._close_all_positions("Manual close-all (dashboard)")
+                    return {"status": "success", "message": f"Closed {n} position(s)"}
                 return {"status": "error", "message": "Execution engine not available"}
 
         @self.app.post("/api/pause_llm")
@@ -630,7 +630,7 @@ class DashboardServer:
             events_data = list(self.history["events"])
             trace_data = list(self.history["agent_trace"])
             decision_data = self.history["decision"]
-            news_data = self.history["news_data"]
+            calendar_data = self.history["calendar_data"]
 
         # 2. Perform all asynchronous sends safely OUTSIDE the lock block!
         # 1. Account details
@@ -657,9 +657,9 @@ class DashboardServer:
         # 8. Latest final trade decision
         if decision_data:
             await websocket.send_json(decision_data)
-        # 9. Sentiment News Feed
-        if news_data:
-            await websocket.send_json(news_data)
+        # 9. Economic calendar feed
+        if calendar_data:
+            await websocket.send_json(calendar_data)
 
     def broadcast(self, message: Dict[str, Any]):
         """Thread-safe queueing of message broadcast across all websockets."""
@@ -672,7 +672,8 @@ class DashboardServer:
             # Update cache history
             save_needed = False
             if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data"]:
-                self.history[msg_type] = message
+                # The calendar poller broadcasts type "news_data"; store it under calendar_data.
+                self.history["calendar_data" if msg_type == "news_data" else msg_type] = message
                 if msg_type in ["decision", "news_data"]:
                     save_needed = True
             elif msg_type in ["candle", "candles"]:
@@ -732,7 +733,7 @@ class DashboardServer:
                 "events": self.history["events"],
                 "agent_trace": self.history["agent_trace"],
                 "decision": self.history["decision"],
-                "news_data": self.history["news_data"],
+                "calendar_data": self.history["calendar_data"],
                 "levels_state": levels_state
             }
             with open(".axon_session.json", "w") as f:
@@ -752,7 +753,7 @@ class DashboardServer:
                     self.history["events"] = state.get("events", [])
                     self.history["agent_trace"] = state.get("agent_trace", [])
                     self.history["decision"] = state.get("decision", None)
-                    self.history["news_data"] = state.get("news_data", None)
+                    self.history["calendar_data"] = state.get("calendar_data", None)
                     self.history["levels_state"] = state.get("levels_state", [])
                 logger.info("Dashboard API: restored %d events, %d agent traces, %d S/R levels from local storage",
                             len(self.history["events"]), len(self.history["agent_trace"]), len(self.history.get("levels_state", [])))
@@ -773,57 +774,80 @@ class DashboardServer:
         server_thread.start()
         logger.info("Dashboard API Server starting on thread %s", server_thread.name)
 
-        # Start background news poller thread!
-        news_thread = threading.Thread(target=self._news_poller, daemon=True, name="DashboardNewsPoller")
+        # Start background economic calendar poller thread
+        news_thread = threading.Thread(target=self._calendar_poller, daemon=True, name="DashboardCalendarPoller")
         news_thread.start()
 
-    def _news_poller(self):
-        """Background thread: periodically polls news sources (non-blocking) and backfills."""
-        import time
-        from datetime import datetime
-        from axonai.dataflows.yfinance_news import get_global_news_yfinance
-        from axonai.dataflows.forex_social import fetch_forex_social_feed
-        from axonai.dataflows.reddit import fetch_reddit_posts
+    def _calendar_poller(self):
+        """Background thread: periodically fetches the economic calendar from NewsGuard.
 
-        logger.info("Dashboard API: Background News Sentiment poller started.")
+        Replaced the old news/social poller. The pure-math engine has no use for
+        forex social feeds or LLM-facing news, and those scrapers frequently hung
+        the loop (rate-limits/timeouts), stalling the whole feed. Only the economic
+        calendar is retained because NewsGuard uses it to gate entries around
+        high-impact events.
+        """
+        import time
+        from datetime import datetime, timezone
+
+        logger.info("Dashboard API: Economic calendar poller started.")
         while not hasattr(self, "_poller_stop") or not self._poller_stop.is_set():
             try:
-                # 1. Determine active ticker (default to EURUSD)
-                ticker = "EURUSD=X"
-                if self.daemon and hasattr(self.daemon, "yf_symbol"):
-                    ticker = self.daemon.yf_symbol
+                # Resolve the NewsGuard instance (daemon-registered or local fallback)
+                ng = None
+                if self.daemon and hasattr(self.daemon, "news_guard"):
+                    ng = self.daemon.news_guard
+                else:
+                    if not hasattr(self, "_local_news_guard"):
+                        from axonai.realtime.news_guard import NewsGuard
+                        config = self.daemon.config if (self.daemon and hasattr(self.daemon, "config")) else {}
+                        self._local_news_guard = NewsGuard(config)
+                    ng = self._local_news_guard
 
-                curr_date = datetime.now().strftime("%Y-%m-%d")
-                
-                # 2. Fetch in non-blocking background mode
-                logger.info("Dashboard API: Refreshing News Sentiment Feed (cached continuous mode)...")
-                
-                # Fetch global news
-                news = get_global_news_yfinance(curr_date=curr_date, look_back_days=3, limit=10)
-                
-                # Fetch social feed (MT5 ticker mapping e.g. EURUSDm -> EURUSD)
-                fs_ticker = ticker.replace("=X", "").replace("=x", "")
-                forex_social = fetch_forex_social_feed(fs_ticker, limit=10)
-                
-                # Fetch reddit
-                reddit = fetch_reddit_posts(fs_ticker)
-                
-                # 3. Update cache history and broadcast
+                calendar_events = []
+                if ng:
+                    try:
+                        ng.refresh()  # Respects internal throttle; no-ops if fresh
+                    except Exception:
+                        pass
+                    now_utc = datetime.now(timezone.utc)
+                    for ev in getattr(ng, "_events", []):
+                        dt = ev["dt"]
+                        mins_away = (dt - now_utc).total_seconds() / 60.0
+                        # Include events within ±12h lookback and +24h lookahead
+                        if -720 <= mins_away <= 1440:
+                            blocked, _ = ng.should_block_entry(
+                                getattr(self.daemon, "mt5_symbol", "EURUSD") if self.daemon else "EURUSD",
+                                now_utc,
+                            )
+                            calendar_events.append({
+                                "title": ev["title"],
+                                "currency": ev["currency"],
+                                "impact": ev["impact"],
+                                "iso": dt.isoformat(),
+                                "time": dt.strftime("%H:%M UTC"),
+                                "forecast": ev.get("forecast", ""),
+                                "previous": ev.get("previous", ""),
+                                "actual": ev.get("actual", ""),
+                                "mins_away": round(mins_away, 0),
+                                "is_blocking": abs(mins_away) <= 30 and blocked,
+                            })
+                    calendar_events.sort(key=lambda x: x["mins_away"])
+
                 payload = {
                     "type": "news_data",
-                    "news": news,
-                    "forex_social": forex_social,
-                    "reddit": reddit,
-                    "timestamp": datetime.now().strftime("%H:%M:%S")
+                    "calendar": calendar_events,
+                    "timestamp": datetime.now().strftime("%H:%M:%S"),
                 }
-                
                 self.broadcast(payload)
-                logger.info("Dashboard API: News Sentiment Feed cache refreshed successfully.")
-                
+                logger.info(
+                    "Dashboard API: Economic calendar broadcast — %d events.", len(calendar_events)
+                )
+
             except Exception as e:
-                logger.warning("Dashboard API: Background News Sentiment poll failed (offline or connection issue): %s", e)
-            
-            # Wait for 300 seconds (5 minutes) before next update
+                logger.warning("Dashboard API: Calendar poll failed: %s", e)
+
+            # Poll every 5 minutes (calendar events don't change faster than that)
             time.sleep(300.0)
 
     def _run_server(self):

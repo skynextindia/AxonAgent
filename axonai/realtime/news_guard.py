@@ -35,8 +35,8 @@ class NewsGuard:
         self.block_impacts = {
             str(i).lower() for i in self.config.get("news_guard_block_impacts", ["High"])
         }
-        self.pre = timedelta(minutes=int(self.config.get("news_guard_pre_minutes", 30)) + 5)
-        self.post = timedelta(minutes=int(self.config.get("news_guard_post_minutes", 30)) + 5)
+        self.pre = timedelta(minutes=int(self.config.get("news_guard_pre_minutes", 15)))
+        self.post = timedelta(minutes=int(self.config.get("news_guard_post_minutes", 15)))
         self.url = self.config.get("news_guard_calendar_url", _DEFAULT_URL)
         self.refresh_interval = timedelta(
             hours=float(self.config.get("news_guard_refresh_hours", 6))

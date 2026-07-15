@@ -25,7 +25,6 @@ from axonai.realtime.event_types import EventPriority, LiveCandle, MarketEvent, 
 from axonai.realtime.tick_engine import TickEngine
 from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
 from axonai.realtime.event_detector import EventDetector
-from axonai.realtime.graph_executor import GraphExecutor
 from axonai.realtime.trade_executor import MT5TradeExecutor
 from axonai.realtime.api_server import get_dashboard
 from cli.stats_handler import StatsCallbackHandler
@@ -73,10 +72,6 @@ class AxonDaemon:
             self.live_state, self.live_evidence,
             self.event_queue, config,
         )
-
-        # Layer 3: Graph Executor
-        self.stats_handler = StatsCallbackHandler()
-        self.graph_executor = GraphExecutor(symbol, config, callbacks=[self.stats_handler])
 
         # Layer 4: Trade Executor
         config_opt = config.copy()
@@ -284,7 +279,7 @@ class AxonDaemon:
             "market_resume_timestamp": market_resume_timestamp,
             # --- Daemon Status and Stats ---
             "daemon_start_time": self._start_time.timestamp() * 1000 if self._start_time else None,
-            "cooldown_remaining": int(self.graph_executor.seconds_until_ready),
+            "cooldown_remaining": int(max(0.0, (self.event_detector._cooldown_until - datetime.now(timezone.utc if self.event_detector._cooldown_until.tzinfo else None)).total_seconds()) if hasattr(self.event_detector, "_cooldown_until") else 0.0),
             "events_detected": self._events_detected,
             "events_fired": self._events_fired,
             "events_skipped": self._events_skipped,
@@ -309,11 +304,11 @@ class AxonDaemon:
             "ny_range_high": me.ny_range_high,
             "ny_range_low": me.ny_range_low,
             # --- Token Consumption and Stats ---
-            "tokens_in": self.stats_handler.tokens_in,
-            "tokens_out": self.stats_handler.tokens_out,
-            "tokens_total": self.stats_handler.tokens_in + self.stats_handler.tokens_out,
-            "llm_calls": self.stats_handler.llm_calls,
-            "tool_calls": self.stats_handler.tool_calls
+            "tokens_in": 0,
+            "tokens_out": 0,
+            "tokens_total": 0,
+            "llm_calls": 0,
+            "tool_calls": 0
         }
 
     def _get_levels_payload(self) -> dict:
@@ -495,11 +490,6 @@ class AxonDaemon:
 
         logger.info("Step 2/4: Live state initialized")
 
-        # 3. Compile graph
-        logger.info("Step 3/4: Compiling LangGraph...")
-        self.graph_executor.compile_graph()
-        logger.info("Step 3/4: Graph compiled")
-
         # 4. Wire tick engine callbacks
         self.tick_engine.on_tick_callback = self._on_tick
         self.tick_engine.on_candle_close_callback = self._on_candle_close
@@ -562,6 +552,12 @@ class AxonDaemon:
             self._check_eod_close(bid, ask)
         except Exception as e:
             logger.error("Error in EOD close check: %s", e, exc_info=True)
+
+        # News Event force-close check
+        try:
+            self._check_pre_news_close(bid, ask)
+        except Exception as e:
+            logger.error("Error in Pre-News close check: %s", e, exc_info=True)
 
         self.event_detector.is_in_trade = len(self._tracked_positions) > 0
         self.event_detector.on_tick(bid, ask, timestamp)
@@ -734,8 +730,26 @@ class AxonDaemon:
                             is_gate_passed = False
                             gate_reason = f"counter daily trend (trend: DOWN, trade: {direction})"
                         else:
-                            logger.info("LIVE PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f is %.2f pips from %s level %.5f. Trend=%s, Trade=%s",
-                                        event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
+                            # 3. M15 Candle Extreme Gate Check (Avoid buying at the top or selling at the bottom of a candle)
+                            m15_builder = self.tick_engine.candle_builders.get("M15")
+                            if m15_builder and m15_builder.current:
+                                m15_high = m15_builder.current.high
+                                m15_low = m15_builder.current.low
+                                m15_range = m15_high - m15_low
+                                if m15_range > 0:
+                                    relative_pos = (event.price - m15_low) / m15_range
+                                    if direction == "SELL" and relative_pos < 0.65:
+                                        is_gate_passed = False
+                                        gate_reason = f"Sell triggered in lower part of M15 range (relative pos: {relative_pos:.2f})"
+                                    elif direction == "BUY" and relative_pos > 0.35:
+                                        is_gate_passed = False
+                                        gate_reason = f"Buy triggered in upper part of M15 range (relative pos: {relative_pos:.2f})"
+                                    else:
+                                        logger.info("M15 EXTREME GATE PASSED: %s relative position inside active M15 candle is %.2f", direction, relative_pos)
+                            
+                            if is_gate_passed:
+                                logger.info("LIVE PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f is %.2f pips from %s level %.5f. Trend=%s, Trade=%s",
+                                            event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
 
             dashboard = get_dashboard()
             if not self.config.get("test_mode", False) and not (is_peak and is_exhaustion and is_gate_passed):
@@ -851,217 +865,50 @@ class AxonDaemon:
                     })
                 continue
 
-            # Check WorldState gate
-            if not is_dry_run and not ws.should_run_graph:
-                self._events_skipped += 1
-                logger.info("SKIPPED (WorldState gate: belief=%.2f reason=%s)",
-                            ws.belief_score, ws.abort_reason)
-                
-                if dashboard:
-                    dashboard.broadcast({
-                        "type": "event",
-                        "id": self._events_detected,
-                        "event_type": event.event_type.value,
-                        "priority": event.priority.name,
-                        "price": event.price,
-                        "details": event.details,
-                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                        "status": "skipped",
-                        "reason": f"WorldState gate: {ws.abort_reason}",
-                        "events_detected": self._events_detected,
-                        "events_fired": self._events_fired,
-                        "events_skipped": self._events_skipped,
-                    })
-                continue
-
-            # Fire graph or execute directly for dryrun
-            if is_dry_run and not self.config.get("test_mode", False):
-                self._events_fired += 1
-                dir_str = event.details.get("direction", "")
-                if "bullish" in dir_str or "low" in peak_type:
-                    signal = "Buy"
-                else:
-                    signal = "Sell"
-                
-                system_name = event.details.get("system", "optimized")
-                logger.info("DRYRUN (%s): Bypassing LLM Graph debate. Pure Rule A+B trigger direct signal: %s", system_name, signal)
-                
-                # Broadcast decision status
-                if dashboard:
-                    dashboard.broadcast({
-                        "type": "decision",
-                        "signal": signal,
-                        "system": system_name,
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    })
-                
-                # Execute order on MT5 terminal using the correct trade executor
-                trade_result = None
-                executor = self.trade_executor_opt if system_name == "optimized" else self.trade_executor_base
-                try:
-                    trade_result = executor.execute_signal(self.mt5_symbol, signal, self.live_state)
-                    if trade_result:
-                        logger.info("AxonDaemon: Order execution complete for %s system: %s", system_name, trade_result)
-                        ticket = trade_result.get("order")
-                        if ticket:
-                            self._tracked_positions.add(ticket)
-                            self._active_trade_initial_sl[ticket] = trade_result.get("sl")
-                            self._active_trade_system[ticket] = system_name
-                            atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
-                            self._active_trade_atr[ticket] = atr
-                            self._active_trade_peak_price[ticket] = trade_result.get("price", 0.0)
-                except Exception as ex_err:
-                    logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
-                
-                # Persistently log signal to file
-                self._log_signal(event, ws, signal, trade_result)
-                
-                # Set cooldown on event detector
-                cooldown = self.config.get("realtime_cooldown_seconds", 300)
-                self.event_detector.set_cooldown(cooldown)
-                
-                # Print stats
-                self._log_stats()
-                continue
 
             self._events_fired += 1
-            logger.info("FIRING GRAPH #%d for event: %s",
-                        self._events_fired, event.event_type.value)
-            if hasattr(self, '_log_dry_run_event'):
-                self._log_dry_run_event('graph_fire', {'event_type': event.event_type.value})
-
-            # Broadcast firing event status
+            dir_str = event.details.get("direction", "")
+            if "bullish" in dir_str or "low" in peak_type:
+                signal = "Buy"
+            else:
+                signal = "Sell"
+            
+            system_name = event.details.get("system", "optimized")
+            logger.info("EXECUTION (%s): Direct signal: %s", system_name, signal)
+            
+            # Broadcast decision status
             if dashboard:
                 dashboard.broadcast({
-                    "type": "event",
-                    "id": self._events_detected,
-                    "event_type": event.event_type.value,
-                    "priority": event.priority.name,
-                    "price": event.price,
-                    "details": event.details,
-                    "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                    "status": "firing",
-                    "events_detected": self._events_detected,
-                    "events_fired": self._events_fired,
-                    "events_skipped": self._events_skipped,
+                    "type": "decision",
+                    "signal": signal,
+                    "system": system_name,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
-            logger.info("WorldState: regime=%s(%.2f) session=%s belief=%.2f spread=%.1f",
-                        ws.dominant_regime, ws.regime_confidence,
-                        ws.session, ws.belief_score, ws.spread_pips)
-
+            
+            # Execute order on MT5 terminal using the correct trade executor
+            trade_result = None
             try:
-                # Define local dynamic LangGraph chunk streaming callback
-                def chunk_callback(chunk):
-                    dash = get_dashboard()
-                    if not dash:
-                        return
-                    AGENT_NAME_MAP = {
-                        "Market Analyst": "WYCKOFF",
-                        "Fundamentals Analyst": "KEYNES",
-                        "News Analyst": "REUTERS",
-                        "Sentiment Analyst": "LIVERMORE",
-                        "Bull Researcher": "BUFFETT",
-                        "Bear Researcher": "SOROS",
-                        "Research Manager": "MUNGER",
-                        "Trader": "TUDOR",
-                        "Aggressive Analyst": "SIMONS",
-                        "Conservative Analyst": "DALIO",
-                        "Neutral Analyst": "MARKS",
-                        "Portfolio Manager": "DRUCKENMILLER"
-                    }
-                    
-                    for node, content in chunk.items():
-                        if node in ["__pregel_loop__", "checkpointer"]:
-                            continue
-                        
-                        messages = []
-                        if isinstance(content, dict) and "messages" in content:
-                            messages = content["messages"]
-                        elif isinstance(content, list):
-                            messages = content
-                        elif hasattr(content, "messages"):
-                            messages = content.messages
-                        
-                        for message in messages:
-                            from cli.main import classify_message_type, format_tool_args
-                            msg_type, txt_content = classify_message_type(message)
-                            
-                            tool_calls_list = []
-                            if hasattr(message, "tool_calls") and message.tool_calls:
-                                for tc in message.tool_calls:
-                                    name = tc.get("name") if isinstance(tc, dict) else getattr(tc, "name", "")
-                                    args = tc.get("args") if isinstance(tc, dict) else getattr(tc, "args", {})
-                                    tool_calls_list.append(f"{name}({format_tool_args(args, 60)})")
-                            
-                            if (txt_content and txt_content.strip()) or tool_calls_list:
-                                dash.broadcast({
-                                    "type": "agent",
-                                    "agent_name": AGENT_NAME_MAP.get(node, node),
-                                    "status": "active",
-                                    "message": txt_content or "",
-                                    "tool_calls": tool_calls_list,
-                                    "timestamp": datetime.now().strftime("%H:%M:%S")
-                                })
-
-                self.config["realtime_chunk_callback"] = chunk_callback
-
-                final_state, signal = self.graph_executor.execute(event, ws, me)
-
-                logger.info("\n" + "*"*50)
-                logger.info("DECISION: %s", signal)
-                logger.info("*"*50 + "\n")
-                if hasattr(self, '_log_dry_run_event'):
-                    decision_obj = final_state.get('final_trade_decision', {}) if isinstance(final_state, dict) else getattr(final_state, 'final_trade_decision', {})
-                    if not isinstance(decision_obj, dict) and hasattr(decision_obj, 'dict'):
-                        decision_obj = decision_obj.dict()
-                    elif not isinstance(decision_obj, dict) and hasattr(decision_obj, '__dict__'):
-                        decision_obj = decision_obj.__dict__
-                    elif not isinstance(decision_obj, dict):
-                        decision_obj = {}
-                    self._log_dry_run_event('decision', {
-                        'execute': decision_obj.get('execute', signal in ['Buy', 'Sell', 'Overweight', 'Underweight']),
-                        'direction': decision_obj.get('direction', signal),
-                        'confidence': decision_obj.get('confidence', 0),
-                        'reason': decision_obj.get('reason', ''),
-                        'abort_reason': decision_obj.get('abort_reason', None)
-                    })
-
-                if dashboard:
-                    dashboard.broadcast({
-                        "type": "decision",
-                        "signal": signal,
-                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                    })
-
-                # Execute order on MT5 terminal
-                trade_result = None
-                try:
-                    trade_result = self.trade_executor.execute_signal(self.mt5_symbol, signal, self.live_state)
-                    if trade_result:
-                        logger.info("AxonDaemon: Order execution complete: %s", trade_result)
-                        ticket = trade_result.get("order")
-                        if ticket:
-                            self._tracked_positions.add(ticket)
-                            self._active_trade_initial_sl[ticket] = trade_result.get("sl")
-                            self._active_trade_system[ticket] = event.details.get("system", "optimized")
-                            atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
-                            self._active_trade_atr[ticket] = atr
-                            self._active_trade_peak_price[ticket] = trade_result.get("price", 0.0)
-                except Exception as ex_err:
-                    logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
-
-                # Persistently log signal to file
-                self._log_signal(event, ws, signal, trade_result)
-
-                # Set cooldown on event detector
-                cooldown = self.config.get("realtime_cooldown_seconds", 300)
-                self.event_detector.set_cooldown(cooldown)
-
-            except Exception as e:
-                logger.error("Graph execution failed: %s", e, exc_info=True)
-                if hasattr(self, '_log_dry_run_event'):
-                    self._log_dry_run_event('error', {'error': str(e)})
-
+                trade_result = self.trade_executor.execute_signal(self.mt5_symbol, signal, self.live_state)
+                if trade_result:
+                    logger.info("AxonDaemon: Order execution complete for %s system: %s", system_name, trade_result)
+                    ticket = trade_result.get("order")
+                    if ticket:
+                        self._tracked_positions.add(ticket)
+                        self._active_trade_initial_sl[ticket] = trade_result.get("sl")
+                        self._active_trade_system[ticket] = system_name
+                        atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
+                        self._active_trade_atr[ticket] = atr
+                        self._active_trade_peak_price[ticket] = trade_result.get("price", 0.0)
+            except Exception as ex_err:
+                logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
+            
+            # Persistently log signal to file
+            self._log_signal(event, ws, signal, trade_result)
+            
+            # Set cooldown on event detector
+            cooldown = self.config.get("realtime_cooldown_seconds", 300)
+            self.event_detector.set_cooldown(cooldown)
+            
             # Print stats
             self._log_stats()
 
@@ -1131,6 +978,98 @@ class AxonDaemon:
             logger.info("AxonDaemon: EOD transition %s → %s; flattening profitable positions", prev, current)
             self._close_all_profitable_positions(bid, ask, "End of Day (Session Close)")
 
+    def _check_pre_news_close(self, bid: float, ask: float) -> None:
+        """Flatten ALL open positions (profit or loss) within 5 minutes before a
+        high-impact news event."""
+        if not self.config.get("news_guard_enabled", True):
+            return
+
+        pre_close_minutes = float(self.config.get("news_guard_pre_close_minutes", 5))
+        now_utc = datetime.now(timezone.utc)
+        ccys = self.news_guard._currencies_for(self.mt5_symbol)
+        if not ccys:
+            return
+
+        for event in self.news_guard._events:
+            dt = event["dt"]
+            currency = event["currency"]
+            impact = event["impact"]
+            title = event["title"]
+            if currency not in ccys:
+                continue
+            if impact.lower() not in self.news_guard.block_impacts:
+                continue
+
+            # Fire only inside the tight pre-event window (default 5 min before).
+            mins_to_event = (dt - now_utc).total_seconds() / 60.0
+            if 0 <= mins_to_event <= pre_close_minutes:
+                closed = self._close_all_positions(
+                    f"Pre-News Close ({impact} {currency} news '{title}')"
+                )
+                if closed > 0:
+                    logger.info(
+                        "NewsGuard: Flattened %d positions %.1fm before news event: %s",
+                        closed, mins_to_event, title,
+                    )
+                break
+
+    def _close_all_positions(self, reason: str) -> int:
+        """Close every open position for this symbol/magic, regardless of PnL.
+
+        Used by the pre-news flatten and the manual dashboard close-all button.
+        Fetches the current tick internally so callers need not supply bid/ask.
+        """
+        if not mt5 or not mt5.terminal_info():
+            logger.warning("Close-all: MT5 not connected, cannot close positions.")
+            return 0
+
+        positions = mt5.positions_get(symbol=self.mt5_symbol)
+        if not positions:
+            return 0
+
+        tick = mt5.symbol_info_tick(self.mt5_symbol)
+        if not tick:
+            logger.warning("Close-all: no tick for %s, cannot close.", self.mt5_symbol)
+            return 0
+        bid, ask = tick.bid, tick.ask
+
+        closed_count = 0
+        for pos in positions:
+            if pos.magic != self.trade_executor_opt.magic:
+                continue
+
+            if pos.type == mt5.POSITION_TYPE_BUY:
+                close_price = bid
+                close_type = mt5.POSITION_TYPE_SELL
+            else:
+                close_price = ask
+                close_type = mt5.POSITION_TYPE_BUY
+
+            request = {
+                "action": mt5.TRADE_ACTION_DEAL,
+                "symbol": pos.symbol,
+                "volume": pos.volume,
+                "type": close_type,
+                "position": pos.ticket,
+                "price": close_price,
+                "deviation": 20,
+                "magic": pos.magic,
+                "comment": reason[:31],
+                "type_time": mt5.ORDER_TIME_GTC,
+                "type_filling": mt5.ORDER_FILLING_IOC,
+            }
+
+            res = mt5.order_send(request)
+            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                logger.info("Close-all: closed position %d (%.2f profit) — %s",
+                            pos.ticket, pos.profit, reason)
+                closed_count += 1
+            else:
+                logger.warning("Close-all: failed to close position %d: %s",
+                               pos.ticket, getattr(res, "comment", "Unknown"))
+
+        return closed_count
+
     def _close_all_profitable_positions(self, bid: float, ask: float, reason: str) -> int:
         """Close open positions for this symbol/magic ONLY if they are currently in profit."""
         if not mt5 or not mt5.terminal_info():
@@ -1190,6 +1129,7 @@ class AxonDaemon:
         """Log daemon statistics."""
         if self._start_time:
             uptime = datetime.now() - self._start_time
+            cooldown_rem = max(0.0, (self.event_detector._cooldown_until - datetime.now(timezone.utc if self.event_detector._cooldown_until.tzinfo else None)).total_seconds()) if hasattr(self.event_detector, "_cooldown_until") else 0.0
             logger.info(
                 "STATS: uptime=%s | ticks=%d | events_detected=%d | "
                 "events_fired=%d | events_skipped=%d | cooldown_remaining=%.0fs",
@@ -1198,7 +1138,7 @@ class AxonDaemon:
                 self._events_detected,
                 self._events_fired,
                 self._events_skipped,
-                self.graph_executor.seconds_until_ready,
+                cooldown_rem,
             )
 
     def _signal_handler(self, signum, frame):

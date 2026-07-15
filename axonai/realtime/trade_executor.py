@@ -109,7 +109,7 @@ class MT5TradeExecutor:
         direction = "BUY" if order_type == mt5.ORDER_TYPE_BUY else "SELL"
         pip = 0.01 if "JPY" in symbol.upper() else 0.0001
         
-        sl_distance = max(atr * 1.0, 8 * pip)
+        sl_distance = max(atr * 2.0, 16 * pip)
         tp_distance = max(atr * 2.0, 16 * pip)
         
         sl = entry - sl_distance if direction == "BUY" else entry + sl_distance
