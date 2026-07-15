@@ -327,7 +327,13 @@ class Axon{
       case"location_context":return this.onLoc(d);case"risk_state":return this.onRisk(d);case"levels":return this.onLevels(d);
       case"candles":return this.onCandles(d);case"candle":return this.onCandle(d);}}
 
-  onSymbols(d){this.symbols=d.symbols||[];if(!this.active&&this.symbols[0])this.focus(this.symbols[0]);}
+  onSymbols(d){this.symbols=d.symbols||[];const rail=$("rail");
+    this.symbols.forEach(sym=>{let c=rail.querySelector('.chip[data-s="'+sym+'"]');
+      if(!c){c=document.createElement("div");c.className="chip";c.dataset.s=sym;c.onclick=()=>this.focus(sym);
+        c.innerHTML='<div class="t"><span class="s">'+sym+'</span><span class="pill mon">—</span></div><div class="m"><span class="q mono d">—</span></div><div class="f"><span class="d">tap to view</span></div>';
+        rail.appendChild(c);}
+      c.classList.toggle("on",sym===this.active);});
+    if(!this.active&&this.symbols[0])this.focus(this.symbols[0]);}
   focus(sym){if(!sym)return;this.active=sym;this.pip=/JPY|XAU/.test(sym)?0.01:0.0001;setV("ch-sym",sym);setV("health-pair",sym);
     document.querySelectorAll(".chip").forEach(c=>c.classList.toggle("on",c.dataset.s===sym));
     this.m15=[];this.h1=[];this.h4=[];this.trade=null;this._fit=false;this.clearOverlays();if(this.series)this.series.setData([]);if(this.hist)this.hist.setData([]);
