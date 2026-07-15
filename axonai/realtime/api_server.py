@@ -710,16 +710,29 @@ class DashboardServer:
             if msg_type == "account":
                 sym_key = (sym or "").replace("=X", "").replace("=x", "").upper()
                 if sym_key:
+                    import time as _t
+                    now = _t.time()
                     self.symbol_positions[sym_key] = message.get("positions", [])
                     self.symbol_orders[sym_key] = message.get("pending_orders", [])
-                    
+                    if not hasattr(self, "_sym_acct_ts"):
+                        self._sym_acct_ts = {}
+                    self._sym_acct_ts[sym_key] = now
+                    # Expire per-symbol positions/orders that haven't refreshed within
+                    # the TTL, so a symbol whose trade closed (then stopped broadcasting)
+                    # does not leave phantom positions in the merged account forever.
+                    POS_TTL = 45.0
                     merged_positions = []
                     merged_orders = []
                     for s_k, plist in list(self.symbol_positions.items()):
-                        merged_positions.extend(plist)
+                        if now - self._sym_acct_ts.get(s_k, 0.0) <= POS_TTL:
+                            merged_positions.extend(plist)
+                        else:
+                            self.symbol_positions[s_k] = []
                     for s_k, olist in list(self.symbol_orders.items()):
-                        merged_orders.extend(olist)
-                        
+                        if now - self._sym_acct_ts.get(s_k, 0.0) <= POS_TTL:
+                            merged_orders.extend(olist)
+                        else:
+                            self.symbol_orders[s_k] = []
                     message["positions"] = merged_positions
                     message["pending_orders"] = merged_orders
             
