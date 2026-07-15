@@ -128,7 +128,7 @@ class ExitEngine:
         # every winning trade at scalp size. Once the trade is in profit past
         # `exit_profit_protect_pips`, hand it to the trailing manager instead of
         # closing here. Losing/flat trades are still cut instantly (correct).
-        adverse_min_ticks = self.config.get("adverse_impulse_min_ticks", 3)
+        adverse_min_ticks = self.config.get("adverse_impulse_min_ticks", 30)
         
         # Check tick efficiency defensively from velocity snapshot
         tick_eff = 1.0
@@ -140,7 +140,7 @@ class ExitEngine:
             and displacement == "IMPULSE"
             and not trade_state.last_displacement_direction_favorable
             and trade_state.current_phase in ["ENTRY", "EXPANSION"]
-            and trade_state.ticks_in_trade > self.config.get("adverse_impulse_min_ticks", 30)
+            and trade_state.ticks_in_trade > adverse_min_ticks
             and trade_state.current_profit_pips < profit_protect_pips
             and tick_eff > 0.40
         ):
@@ -255,6 +255,7 @@ if __name__ == "__main__":
     trade_state.last_displacement_direction_favorable = False
     trade_state.current_phase = "ENTRY"
     trade_state.current_profit_pips = -2.0  # not yet profitable -> not protected
+    trade_state.ticks_in_trade = 50  # past adverse_impulse_min_ticks (30) min-hold
     signal = engine.evaluate(trade_state, snapshot, location_ctx, current_price=1.0805)
     test3_pass = signal.should_exit == True and signal.reason.startswith("Adverse")
     print(f"  Test 3 (adverse impulse): {'PASS' if test3_pass else 'FAIL'}")

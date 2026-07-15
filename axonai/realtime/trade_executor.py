@@ -15,6 +15,7 @@ except ImportError:
 
 from axonai.dataflows.mt5_data import get_mt5_trade
 from axonai.realtime.risk_guard import RiskGuard
+from axonai.realtime.portfolio_guard import PortfolioGuard
 from axonai.realtime.alerts import send_alert
 from axonai.realtime.trade_phase import TradePhaseTracker
 from axonai.realtime.exit_stats import ExitStats
@@ -47,6 +48,8 @@ class MT5TradeExecutor:
         self.default_lot_size = config.get("realtime_default_lot_size", 0.01)
         self.risk_guard = RiskGuard(config)
         self.circuit_breaker = self.risk_guard
+        # Account-wide pre-trade caps (concurrent positions + daily-loss halt).
+        self.portfolio_guard = PortfolioGuard(config)
         # Paper-trade mode: simulated fills, never sent to the broker.
         self.paper_trade = config.get("paper_trade", False)
         self._paper_ticket_seq = 0
@@ -82,6 +85,14 @@ class MT5TradeExecutor:
             logger.warning("CIRCUIT BREAKER ACTIVE — trade rejected")
             return {"success": False, "reason": "circuit_breaker_tripped"}
 
+        # Portfolio-level pre-trade gate (concurrent cap + daily realized-loss
+        # halt). Only runs for order-placing signals so HOLD ticks stay cheap.
+        if signal in ("Buy", "Overweight", "Sell", "Underweight", "BuyLimit", "SellLimit"):
+            allowed, reason = self._portfolio_gate(signal)
+            if not allowed:
+                logger.warning("PORTFOLIO GUARD — trade rejected: %s", reason)
+                return {"success": False, "reason": reason}
+
         if signal in ["Buy", "Overweight"]:
             return self.send_order(symbol, ORDER_TYPE_BUY, live_state, sl, tp)
         elif signal in ["Sell", "Underweight"]:
@@ -93,6 +104,33 @@ class MT5TradeExecutor:
         else:
             logger.info("TradeExecutor: Signal is %s. No order action taken (HOLD).", signal)
             return None
+
+    def _get_all_open_positions(self) -> list:
+        """All open positions on the account (across symbols and magics), used
+        for the portfolio-wide concurrent cap. Fails open (returns []) on a
+        transient query error so a bridge hiccup doesn't hard-block trading."""
+        is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
+        try:
+            if is_bridge:
+                from axonai.realtime.execution_client import send_execution_command
+                res = send_execution_command(self.config, {"action": "positions_get"})
+                return res.get("positions", []) if res.get("success", False) else []
+            mt5_inst = self._get_mt5()
+            pos = mt5_inst.positions_get() if mt5_inst else None
+            return list(pos) if pos else []
+        except Exception as e:
+            logger.error("PortfolioGuard: position query failed (%s) — allowing trade", e)
+            return []
+
+    def _portfolio_gate(self, signal: str) -> tuple[bool, str]:
+        """Run the account-wide PortfolioGuard for an order-placing signal."""
+        positions = self._get_all_open_positions()
+        try:
+            realized = float(self.risk_guard.daily_pnl.get("realized_pnl", 0.0))
+        except Exception:
+            realized = 0.0
+        direction = "BUY" if signal in ("Buy", "Overweight", "BuyLimit") else "SELL"
+        return self.portfolio_guard.check(positions, realized, intended_direction=direction)
 
     def send_order(self, symbol: str, order_type: int, live_state: Optional[Any] = None, sl: Optional[float] = None, tp: Optional[float] = None, price: Optional[float] = None) -> Optional[dict]:
         """Send a market order with dynamic SL/TP and position sizing to MT5."""

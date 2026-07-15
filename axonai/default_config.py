@@ -83,6 +83,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_deviation": 20,
     "realtime_min_confluence_conditions": 1,
     "realtime_dry_run": False,
+    # ── Portfolio-level risk caps (account-wide, enforced pre-trade) ─────────
+    "max_concurrent_positions": 5,       # max simultaneous open positions across ALL symbols (0 = disabled)
+    "max_daily_loss_usd": 500.0,         # halt new entries once the day's realized loss hits this (0 = disabled)
+    "max_same_direction_positions": 0,   # correlation cap: max same-direction concurrent (0 = disabled)
     # Calibrated Gold Entry Thresholds
     "entry_max_velocity_pct_gold": 30.0,
     "entry_min_decay_ratio_gold": 0.25,
@@ -142,6 +146,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # ── Exit Engine Priority Urgency Multipliers ────────────────────────────
     "thesis_failure_urgency": 1.0,                    # highest
     "adverse_impulse_urgency": 0.9,
+    "adverse_impulse_min_ticks": 30,                  # min-hold before adverse-impulse CLOSE_NOW can fire
     "exhaustion_urgency": 0.7,
     "trailing_stop_urgency": 0.3,                     # lowest (legacy fallback)
 
@@ -163,3 +168,28 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "indicator_ema_fast": 12,
     "indicator_ema_slow": 26,
 })
+
+
+# ── Per-symbol confluence-score floor ───────────────────────────────────────
+# Single source of truth shared by the live daemon and the intraday backtester
+# so live selectivity == backtest selectivity. Matched by substring (upper-cased,
+# suffix-stripped), so "GBPUSD", "GBPUSD=X" and "GBPUSD.r" all resolve.
+SIGNAL_QUALITY_BY_SYMBOL = {
+    "GBPUSD": 0.55,
+    "USDJPY": 0.60,
+    "AUDUSD": 0.45,
+    "EURUSD": 0.50,
+}
+SIGNAL_QUALITY_DEFAULT = 0.50
+
+
+def signal_quality_for(symbol: str) -> float:
+    """Return the per-symbol confluence-score floor for `symbol`.
+
+    Falls back to SIGNAL_QUALITY_DEFAULT for any symbol not in the map.
+    """
+    s = (symbol or "").upper().replace("=X", "").replace("/", "")
+    for key, val in SIGNAL_QUALITY_BY_SYMBOL.items():
+        if key in s:
+            return val
+    return SIGNAL_QUALITY_DEFAULT

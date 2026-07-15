@@ -212,28 +212,29 @@ else:
         "drawdown_limit_ranging": 2700,
     }
 
-# Ticker-specific optimized parameter overrides
+# Ticker-specific optimized parameter overrides (SL/TP multiples).
+# min_signal_quality comes from the shared per-symbol map (default_config) so
+# backtest selectivity == live selectivity.
+from axonai.default_config import signal_quality_for
 clean_t = ticker.upper().replace("=X", "").replace("/", "")
 if "GBPUSD" in clean_t:
     logger.info("Applying GBPUSD optimized parameters (tight SL, wide TP multiple).")
     config["sl_atr_multiple"] = 0.8
     config["tp_atr_multiple"] = 4.0
-    config["min_signal_quality"] = 0.55
 elif "USDJPY" in clean_t:
     logger.info("Applying USDJPY optimized parameters (defensive SL/TP multiples).")
     config["sl_atr_multiple"] = 1.6
     config["tp_atr_multiple"] = 2.0
-    config["min_signal_quality"] = 0.60
 elif "AUDUSD" in clean_t:
     logger.info("Applying AUDUSD optimized parameters (looser quality floor to capture trades).")
     config["sl_atr_multiple"] = 1.0
     config["tp_atr_multiple"] = 2.0
-    config["min_signal_quality"] = 0.45
 else:
     logger.info("Applying EURUSD baseline parameters.")
     config["sl_atr_multiple"] = 1.0
     config["tp_atr_multiple"] = 2.0
-    config["min_signal_quality"] = 0.50
+config["min_signal_quality"] = signal_quality_for(clean_t)
+logger.info("Signal-quality floor for %s: %.2f", clean_t, config["min_signal_quality"])
 
 # Calculate days dynamically
 start_dt = datetime.strptime(start_date, "%Y-%m-%d")

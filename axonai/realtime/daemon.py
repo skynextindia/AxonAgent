@@ -77,6 +77,12 @@ class AxonDaemon:
         self.yf_symbol = clean_sym + "=X"  # e.g. "EURUSD=X"
         self.mt5_symbol = _to_mt5_symbol(symbol, config)
         self.config = config
+        # Per-symbol confluence-score floor (live == backtest selectivity).
+        # Single source of truth: default_config.signal_quality_for. Overrides
+        # the flat DEFAULT so each pair uses its tuned floor.
+        from axonai.default_config import signal_quality_for
+        config["realtime_min_signal_quality"] = signal_quality_for(clean_sym)
+        logger.info("Signal-quality floor for %s: %.2f", self.mt5_symbol, config["realtime_min_signal_quality"])
         # Ensure the per-symbol velocity-baseline file is keyed correctly on every
         # entrypoint (the `daemon` CLI path doesn't set config["symbol"]); prevents
         # cross-pair baseline contamination. setdefault preserves an explicit value.
@@ -571,10 +577,8 @@ class AxonDaemon:
             "exit_action": exit_action,
             "exit_reason": exit_reason,
             "exit_should_exit": exit_should_exit,
-            # Velocity engine header metrics (read by dashboard JS as d.rule_a_max_velocity etc.)
-            "rule_a_max_velocity": round(ws.velocity.raw_velocity, 4) if (ws and getattr(ws, "velocity", None)) else 0.0,
-            "rule_b_divergence": round(ws.velocity.decay_ratio, 4) if (ws and getattr(ws, "velocity", None) and hasattr(ws.velocity, "decay_ratio")) else 0.0,
-            "tick_efficiency": round(ws.velocity.tick_efficiency, 4) if (ws and getattr(ws, "velocity", None)) else 0.0,
+            # rule_a/rule_b/tick_efficiency removed: they read ws.velocity, an
+            # attribute LiveWorldState never had — the values were always 0.0.
             "engine_state": entry_state or "MONITOR",
             "trigger_direction": entry_direction or ""
         }
@@ -1465,6 +1469,24 @@ class AxonDaemon:
                 else:
                     logger.debug("Account payload is None")
 
+                # Risk layer telemetry: daily realized PnL vs halt, portfolio caps,
+                # per-symbol quality floor. Renders in the dashboard RISK panel.
+                try:
+                    _rg = getattr(self.trade_executor_opt, "risk_guard", None)
+                    _realized = float(_rg.daily_pnl.get("realized_pnl", 0.0)) if _rg else 0.0
+                    _loss_limit = float(self.config.get("max_daily_loss_usd", 500.0))
+                    dashboard.broadcast({
+                        "type": "risk_state",
+                        "symbol": self.mt5_symbol,
+                        "daily_realized": round(_realized, 2),
+                        "daily_loss_limit": _loss_limit,
+                        "halted": bool(_loss_limit > 0 and _realized <= -_loss_limit),
+                        "max_concurrent": int(self.config.get("max_concurrent_positions", 5)),
+                        "signal_quality_floor": float(self.config.get("realtime_min_signal_quality", 0.5)),
+                    })
+                except Exception as _re:
+                    logger.debug("risk_state broadcast failed: %s", _re)
+
     def _backfill_history(self):
         """Warm MTF EMAs, regime, and daily levels from historical bars before
         the live loop starts, so the entry trend filter (entry_state_machine
@@ -1792,6 +1814,21 @@ class AxonDaemon:
                         trade_result = self.trade_executor_opt.execute_signal(
                             self.mt5_symbol, signal, self.live_state, sl=sl, tp=tp
                         )
+                        # Surface portfolio-guard rejections on the dashboard events log
+                        if trade_result and not trade_result.get("success", True) and str(trade_result.get("reason", "")).startswith("portfolio"):
+                            try:
+                                from axonai.realtime.api_server import get_dashboard
+                                _db = get_dashboard()
+                                if _db:
+                                    _db.broadcast({
+                                        "type": "event", "symbol": self.mt5_symbol,
+                                        "event_type": "PORTFOLIO_GUARD", "priority": "HIGH",
+                                        "level": "warn",
+                                        "message": f"Entry blocked: {trade_result.get('reason')}",
+                                        "timestamp": datetime.now().isoformat(), "status": "blocked",
+                                    })
+                            except Exception:
+                                pass
                         if trade_result and trade_result.get("success", False) and trade_result.get("order"):
                             logger.info("AxonDaemon: Market execution complete: %s", trade_result)
                             ticket = trade_result.get("order")
@@ -2678,7 +2715,14 @@ class AxonDaemon:
             logger.info("=" * 60)
             logger.info(log_msg)
             logger.info("=" * 60)
-            
+
+            # Feed realized PnL to the portfolio daily-loss halt. Equity-independent,
+            # so it works in bridge mode where RiskGuard's equity drawdown never seeds.
+            try:
+                self.trade_executor_opt.risk_guard.record_trade_result(float(profit))
+            except Exception as _e:
+                logger.warning("RiskGuard record_trade_result failed: %s", _e)
+
             # Append outcome to reports/signals.log and jsonl
             try:
                 import os, json
