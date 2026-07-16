@@ -486,6 +486,33 @@ class DashboardServer:
             except Exception as e:
                 return {"status": "error", "message": str(e)}
 
+        @self.app.get("/api/logs/analytics")
+        def get_trade_analytics(symbol: str = None, limit: int = 200):
+            """Full per-trade decision + exit context from trade_analytics.jsonl:
+            entry regime/MTF/displacement/S-R, exit_reason, MFE, health. Newest first."""
+            import os, json as _json
+            path = os.path.join("reports", "trade_analytics.jsonl")
+            if not os.path.exists(path):
+                return {"status": "success", "trades": []}
+            out = []
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    for ln in f:
+                        ln = ln.strip()
+                        if not ln:
+                            continue
+                        try:
+                            rec = _json.loads(ln)
+                        except Exception:
+                            continue
+                        if symbol and str(rec.get("symbol", "")).upper() != symbol.upper():
+                            continue
+                        out.append(rec)
+                out = out[-int(limit):][::-1]  # newest first
+                return {"status": "success", "trades": out}
+            except Exception as e:
+                return {"status": "error", "message": str(e), "trades": []}
+
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             # Security: only accept WebSocket connections from localhost origins
@@ -594,21 +621,27 @@ class DashboardServer:
 
     async def _hydrate_client(self, websocket: WebSocket, symbol: str = None):
         """Send all cached state history to a newly connected client."""
+        # Build fresh candle payloads OUTSIDE the global lock. Walking the daemon's
+        # candle deques is the switch-latency hot spot; doing it under self._lock
+        # stalled every other client's tick/account broadcast on each pair switch.
+        fresh_candles = {}
+        daemon = self.daemons.get(symbol) if symbol else self.daemon
+        if daemon:
+            for tf in ["M15", "H1", "H4"]:
+                try:
+                    fresh_candles[tf] = daemon._get_candles_payload(tf)
+                except Exception as e:
+                    logger.warning("Dashboard WS: failed to update active candle for %s: %s", tf, e)
+
         # 1. Thread-safely update and copy dynamic state cache
         with self._lock:
             # Fallback for old behaviour or global messages
             hist_ref = self.symbol_history.get(symbol) if symbol else self.history
             if not hist_ref and symbol:
                  hist_ref = self.history
-                 
-            # Update candles dynamically from the active daemon if registered
-            daemon = self.daemons.get(symbol) if symbol else self.daemon
-            if daemon:
-                for tf in ["M15", "H1", "H4"]:
-                    try:
-                        hist_ref["candles"][tf] = daemon._get_candles_payload(tf)
-                    except Exception as e:
-                        logger.warning("Dashboard WS: failed to update active candle for %s: %s", tf, e)
+
+            if fresh_candles:
+                hist_ref.setdefault("candles", {}).update(fresh_candles)
 
             # Copy cached states to local variables under lock
             account_data = self.history["account"]  # Global
@@ -735,7 +768,32 @@ class DashboardServer:
                             self.symbol_orders[s_k] = []
                     message["positions"] = merged_positions
                     message["pending_orders"] = merged_orders
-            
+                    # TOTAL floating P/L = sum of ALL open positions across every symbol — exactly
+                    # what the merged positions table shows and what the terminal reports account-
+                    # wide. Each daemon's own account payload carried a per-cache snapshot that
+                    # flickered (and could reflect one symbol's view), so DERIVE the header's
+                    # profit/equity from the merged total instead of trusting whichever wrote last.
+                    # (account is is_global here → we already hold self._lock; do NOT re-lock.)
+                    total_pnl = 0.0
+                    for _p in merged_positions:
+                        try:
+                            total_pnl += float(_p.get("profit", 0) or 0)
+                        except (TypeError, ValueError):
+                            pass
+                    # balance / margin / free_margin are account-wide; pin to the first active
+                    # symbol so a stale non-authoritative snapshot cannot perturb them.
+                    auth = self.active_symbols[0] if self.active_symbols else None
+                    if auth and sym_key != auth.replace("=X", "").replace("=x", "").upper():
+                        prev = self.history.get("account") or {}
+                        for _f in ("balance", "margin", "free_margin"):
+                            if prev.get(_f) is not None:
+                                message[_f] = prev[_f]
+                    _bal = float(message.get("balance") or 0.0)
+                    _mg = float(message.get("margin") or 0.0)
+                    message["profit"] = round(total_pnl, 2)
+                    message["equity"] = round(_bal + total_pnl, 2)
+                    message["margin_level"] = round(message["equity"] / _mg * 100, 1) if _mg else message.get("margin_level", 0.0)
+
             # Broadcast cache update: batch-update scalar fields directly
             if msg_type in [
                 "tick",
@@ -774,6 +832,14 @@ class DashboardServer:
                     logger = logging.getLogger(__name__)
                     logger.warning("broadcast(%s): no active WebSocket connections!", msg_type)
                 return
+
+        # Account is COALESCED: the merged-positions + scalars state was updated above, but we
+        # do NOT forward each daemon's raw account message. All 5 daemons broadcast the same
+        # account-wide equity/profit/margin sampled a few ms apart; forwarding every one made
+        # the header shuffle. Instead the ~1 Hz fleet poller pushes the single canonical
+        # history["account"]. See _fleet_poller.
+        if msg_type == "account":
+            return
 
         # Uvicorn and FastAPI run inside an asyncio event loop.
         # Since daemon operates in a regular thread, we bridge the call to the loop.
@@ -1006,6 +1072,12 @@ class DashboardServer:
             try:
                 if self.active_connections and self.active_symbols:
                     self.broadcast(self._build_fleet_summary())
+                    # Push the single coalesced account (broadcast() no longer forwards the
+                    # 5 daemons' raw account messages) so the header equity/profit/margin
+                    # update smoothly at ~1 Hz instead of shuffling between interleaved snapshots.
+                    acct = self.history.get("account")
+                    if acct and hasattr(self, "_loop") and self._loop:
+                        asyncio.run_coroutine_threadsafe(self._async_broadcast(acct, None, True), self._loop)
             except Exception as e:
                 logger.debug("Dashboard API: fleet_summary poll failed: %s", e)
             time.sleep(1.0)
