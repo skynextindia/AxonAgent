@@ -1319,6 +1319,17 @@ class AxonDaemon:
             
             if not has_position:
                 edge_ok, edge_why = self._reversal_edge_ok(snapshot)
+                # Edge-gate pass-rate telemetry: a silent 100%-block (floors above
+                # live market conditions) must be loud, not invisible.
+                if edge_ok:
+                    self._edge_gate_pass = getattr(self, "_edge_gate_pass", 0) + 1
+                else:
+                    self._edge_gate_block = getattr(self, "_edge_gate_block", 0) + 1
+                    if self._edge_gate_block % 300 == 0 and getattr(self, "_edge_gate_pass", 0) == 0:
+                        logger.warning(
+                            "REVERSAL-EDGE GATE: %d consecutive blocks, 0 passes — floors "
+                            "likely above live market conditions for %s (last: %s)",
+                            self._edge_gate_block, self.mt5_symbol, edge_why)
                 if not edge_ok:
                     logger.info("ENTRY BLOCKED by reversal-edge gate: %s", edge_why)
                 else:

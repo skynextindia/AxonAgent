@@ -210,7 +210,12 @@ def _unified_confluence_score(
             score += 0.20  # with-trend entry = full credit
         elif h4_align > -0.1:
             score += 0.10  # neutral
-        # counter-trend: 0 (but not rejected here if exhaustion confirmed above)
+        elif is_exhausting:
+            # Counter-trend WITH exhaustion evidence is the reversal thesis
+            # itself, not a defect: historically ~73% win rate. Any counter-
+            # trend trigger reaching this point already passed the exhaustion
+            # hard-reject above, so give it full credit instead of a 0.20 tax.
+            score += 0.20
     else:
         score += 0.10   # unwarmed MTF: partial credit (fail-open)
 

@@ -105,6 +105,13 @@ class EntryStateMachine:
         self._arm_start_time: float = 0.0
         self._min_stall_duration: float = float(self._config.get("entry_min_stall_duration", 15.0))
 
+        # TRIGGERED TTL: a trigger the executor/gate never consumed goes stale —
+        # its anomaly price stops describing the market. Without this, a vetoed
+        # trigger lingered indefinitely and could fire hours later, far from the
+        # level that justified it (limit/retest entry styles).
+        self._triggered_time: float = 0.0
+        self._triggered_ttl_sec: float = float(self._config.get("entry_trigger_ttl_sec", 120.0))
+
     def reset(self) -> None:
         """Force the machine back to IDLE."""
         self._current_state = STATE_IDLE
@@ -117,6 +124,7 @@ class EntryStateMachine:
         self._retest_start_time = 0.0
         self._arm_start_time = 0.0
         self._prev_net_sign = 0
+        self._triggered_time = 0.0
         self._last_reason = "Reset"
 
     def evaluate(
@@ -174,8 +182,13 @@ class EntryStateMachine:
             self._evaluate_retest_wait(price, ts, velocity)
             
         elif self._current_state == STATE_TRIGGERED:
-            # Linger in triggered state until explicitly reset by TradeExecutor
-            pass
+            # Linger until consumed by the executor — but only within the TTL.
+            if self._triggered_time == 0.0:
+                self._triggered_time = ts
+            elif ts - self._triggered_time > self._triggered_ttl_sec:
+                self._transition(STATE_INVALIDATED,
+                                 f"Trigger expired unconsumed after {ts - self._triggered_time:.0f}s")
+                self._triggered_time = 0.0
 
         # 3. Decision generation
         is_trigger = self._current_state == STATE_TRIGGERED

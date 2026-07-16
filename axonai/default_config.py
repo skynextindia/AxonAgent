@@ -95,15 +95,23 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "reversal_block_regimes": ["RANGE_CHOP"],
     "reversal_require_location": False,   # enable after location logging is validated live
     "reversal_location_max_pips": {"default": 8.0, "XAUUSD": 60.0},
+    # Floors sit between p25 and p50 of LIVE TRIGGERED distributions (measured
+    # 2026-07-16 over 1448/1787/655/4/8183 triggers). The previous hand-set
+    # floors were above p50+ on every FX pair (EUR vol 2.0 vs live p50 0.81),
+    # which silently blocked 100% of FX entries. Daily calibration overrides
+    # these per pair when enough reversal events exist.
     "reversal_pair_floors": {
-        "EURUSD": {"vel_pct": 65, "vol_pips": 2.0, "tick_eff": 0.40},
-        "GBPUSD": {"vel_pct": 60, "vol_pips": 2.5, "tick_eff": 0.40},
-        "USDJPY": {"vel_pct": 65, "vol_pips": 1.8, "tick_eff": 0.45},
-        "AUDUSD": {"vel_pct": 65, "vol_pips": 0.9, "tick_eff": 0.50},
-        "XAUUSD": {"vel_pct": 0,  "vol_pips": 400, "tick_eff": 0.15},  # gold: vol-based, no vel floor
+        "EURUSD": {"vel_pct": 35, "vol_pips": 0.75, "tick_eff": 0.25},
+        "GBPUSD": {"vel_pct": 35, "vol_pips": 1.25, "tick_eff": 0.25},
+        "USDJPY": {"vel_pct": 40, "vol_pips": 0.70, "tick_eff": 0.30},
+        "AUDUSD": {"vel_pct": 35, "vol_pips": 0.50, "tick_eff": 0.25},
+        "XAUUSD": {"vel_pct": 0,  "vol_pips": 175,  "tick_eff": 0.15},  # gold: vol-based, no vel floor; tracks calibrated 174.56
     },
     # Calibrated Gold Entry Thresholds
-    "entry_max_velocity_pct_gold": 30.0,
+    # vel cap 30 contradicted gold's own calibration: median vel_pct at 103
+    # measured pre-reversal events = 41.6 (the cap vetoed ~half of genuine
+    # setups, 992 'velocity too high' skips). ~p75 of observed events = 55.
+    "entry_max_velocity_pct_gold": 55.0,
     "entry_min_decay_ratio_gold": 0.25,
     "entry_max_tick_efficiency_gold": 0.30,
     "entry_min_stall_duration": 15.0,
@@ -194,6 +202,7 @@ SIGNAL_QUALITY_BY_SYMBOL = {
     "USDJPY": 0.60,
     "AUDUSD": 0.45,
     "EURUSD": 0.50,
+    "XAUUSD": 0.65,  # worst-performing pair carries the strictest floor (was falling to 0.50 default)
 }
 SIGNAL_QUALITY_DEFAULT = 0.50
 
