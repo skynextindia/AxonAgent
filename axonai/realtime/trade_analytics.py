@@ -1,8 +1,8 @@
 """Trade Analytics Tracker.
 
-Captures comprehensive pre-trade context and post-trade outcomes for
-continuous strategy evaluation. This allows us to answer questions like:
-"How do TRAP entries perform in COMPRESSION regimes?"
+Captures the COMPLETE engine decision context (entry signature + management +
+exit criteria) per trade, so every trade is fully diagnosable off-line:
+"How do high-vel_pct EXHAUSTION entries at-structure perform in TREND regimes?"
 """
 
 from __future__ import annotations
@@ -15,9 +15,35 @@ from datetime import datetime
 from axonai.realtime.reversal_model import EngineSnapshot
 
 
+def _pip(symbol: str) -> float:
+    s = (symbol or "").upper()
+    return 0.01 if ("JPY" in s or "XAU" in s) else 0.0001
+
+
+def _g(obj, name, default=0.0):
+    """Defensive getattr → coerce to the default's type."""
+    v = getattr(obj, name, default) if obj is not None else default
+    if v is None:
+        return default
+    return v
+
+
+def _classify_gate(reason: str) -> str:
+    r = (reason or "").lower()
+    if "thesis" in r: return "thesis_failure"
+    if "adverse" in r: return "adverse_impulse"
+    if "exhaustion" in r: return "exhaustion"
+    if "trail" in r: return "trailing"
+    if "take profit" in r or "tp" in r: return "take_profit"
+    if "stop loss" in r or "sl hit" in r or "hard" in r: return "hard_sl"
+    if "eod" in r or "session" in r: return "eod"
+    if "manual" in r: return "manual"
+    return "other"
+
+
 @dataclass
 class TradeRecord:
-    """Complete lifecycle record of a single trade."""
+    """Complete lifecycle record of a single trade (full engine context)."""
     ticket: int
     symbol: str
     direction: str
@@ -25,8 +51,8 @@ class TradeRecord:
     entry_price: float
     initial_sl: float
     initial_tp: float
-    
-    # Pre-trade Context (from EngineSnapshot)
+
+    # ── Entry context: labels ──────────────────────────────────────────────
     regime: str
     regime_confidence: float
     mtf_alignment: float
@@ -35,25 +61,60 @@ class TradeRecord:
     displacement_classification: str
     nearest_support: float
     nearest_resistance: float
-    
-    # Post-trade Outcome
+
+    # ── Entry context: the reversal SIGNATURE (velocity) ───────────────────
+    vel_pct: float = 0.0
+    vel_tick_eff: float = 0.0
+    vel_vol_pips: float = 0.0
+    vel_decay_ratio: float = 0.0
+    vel_is_unusual: bool = False
+    displacement_ratio: float = 0.0
+    net_displacement_pips: float = 0.0
+    # MTF detail + reversal pressure
+    mtf_h4_bias: float = 0.0
+    mtf_h1_bias: float = 0.0
+    mtf_m15_bias: float = 0.0
+    reversal_pressure: float = 0.0
+    volatility: str = ""
+    # Location (the biggest edge)
+    at_structure: bool = False
+    distance_to_sr: float = 0.0
+    room_available: float = 0.0
+    nearest_level_type: str = ""
+    # Liquidity (sweep confirmation)
+    active_sweeps: int = 0
+    active_breaks: int = 0
+    liquidity_void: bool = False
+    # Order context
+    signal_quality: float = 0.0
+    entry_style: str = ""
+    initial_sl_pips: float = 0.0
+
+    # ── Exit: outcome + criteria + engine state at the cut ─────────────────
     exit_time: str = ""
     exit_price: float = 0.0
     exit_reason: str = ""
+    exit_gate: str = ""
     pips_profit: float = 0.0
+    r_multiple: float = 0.0
     max_favorable_excursion: float = 0.0
+    max_adverse_excursion: float = 0.0
     time_in_drawdown_sec: float = 0.0
     health_score_at_exit: float = 0.0
+    ticks_in_trade: int = 0
+    exit_vel_pct: float = 0.0
+    exit_displacement: str = ""
+    exit_phase: str = ""
+    exit_thesis: str = ""
 
 
 class TradeAnalytics:
-    """Records trade history for off-line evaluation."""
+    """Records full-context trade history for off-line evaluation."""
 
     def __init__(self, log_dir: str = "reports"):
         self._log_dir = log_dir
         os.makedirs(self._log_dir, exist_ok=True)
         self._log_file = os.path.join(self._log_dir, "trade_analytics.jsonl")
-        
         self._active_trades: dict[int, TradeRecord] = {}
 
     def record_entry(
@@ -65,28 +126,61 @@ class TradeAnalytics:
         sl: float,
         tp: float,
         snapshot: EngineSnapshot,
+        entry_style: str = "",
     ) -> None:
-        """Create a new trade record with pre-trade context."""
-        support_price = snapshot.liquidity.nearest_support.price if snapshot.liquidity.nearest_support else 0.0
-        resistance_price = snapshot.liquidity.nearest_resistance.price if snapshot.liquidity.nearest_resistance else 0.0
-        
+        """Create a trade record capturing the full entry decision."""
+        liq = getattr(snapshot, "liquidity", None)
+        v = getattr(snapshot, "velocity", None)
+        d = getattr(snapshot, "displacement", None)
+        mtf = getattr(snapshot, "mtf", None)
+        rg = getattr(snapshot, "regime", None)
+        lc = getattr(snapshot, "location_context", None)
+        ed = getattr(snapshot, "entry_decision", None)
+
+        sup = getattr(liq, "nearest_support", None)
+        res = getattr(liq, "nearest_resistance", None)
+        pip = _pip(symbol)
+
         record = TradeRecord(
-            ticket=ticket,
-            symbol=symbol,
-            direction=direction,
+            ticket=ticket, symbol=symbol, direction=direction,
             entry_time=datetime.now().isoformat(),
-            entry_price=entry_price,
-            initial_sl=sl,
-            initial_tp=tp,
-            regime=snapshot.regime.regime,
-            regime_confidence=snapshot.regime.confidence,
-            mtf_alignment=snapshot.mtf.alignment_score,
-            mtf_context=snapshot.mtf.context_summary,
-            anomaly_velocity_z=snapshot.velocity.z_score,
-            displacement_classification=snapshot.displacement.classification,
-            nearest_support=support_price,
-            nearest_resistance=resistance_price,
+            entry_price=entry_price, initial_sl=sl, initial_tp=tp,
+            regime=str(_g(rg, "regime", "")),
+            regime_confidence=round(float(_g(rg, "confidence", 0.0)), 3),
+            mtf_alignment=round(float(_g(mtf, "alignment_score", 0.0)), 3),
+            mtf_context=str(_g(mtf, "context_summary", "")),
+            anomaly_velocity_z=round(float(_g(v, "z_score", 0.0)), 2),
+            displacement_classification=str(_g(d, "classification", "")),
+            nearest_support=float(_g(sup, "price", 0.0)),
+            nearest_resistance=float(_g(res, "price", 0.0)),
         )
+        # Reversal signature (velocity) — the field set our analysis proved matters
+        record.vel_pct = round(float(_g(v, "percentile", 0.0)), 2)
+        record.vel_tick_eff = round(float(_g(v, "tick_efficiency", 0.0)), 3)
+        record.vel_vol_pips = round(float(_g(v, "vol_pips", 0.0)), 3)
+        record.vel_decay_ratio = round(float(_g(v, "decay_ratio", 0.0)), 3)
+        record.vel_is_unusual = bool(_g(v, "is_unusual", False))
+        record.displacement_ratio = round(float(_g(d, "displacement_ratio", 0.0)), 3)
+        record.net_displacement_pips = round(float(_g(d, "net_displacement_pips", 0.0)), 2)
+        record.mtf_h4_bias = round(float(_g(mtf, "h4_bias", 0.0)), 2)
+        record.mtf_h1_bias = round(float(_g(mtf, "h1_bias", 0.0)), 2)
+        record.mtf_m15_bias = round(float(_g(mtf, "m15_bias", 0.0)), 2)
+        record.reversal_pressure = round(float(_g(mtf, "reversal_pressure", 0.0)), 3)
+        record.volatility = str(_g(rg, "volatility", ""))
+        # Location
+        record.at_structure = bool(_g(lc, "at_structure", False))
+        record.distance_to_sr = round(float(_g(lc, "distance_to_sr", 0.0)), 3)
+        record.room_available = round(float(_g(lc, "room_available", 0.0)), 2)
+        record.nearest_level_type = str(_g(lc, "nearest_level_type", ""))
+        # Liquidity
+        record.active_sweeps = len(_g(liq, "active_sweeps", []) or [])
+        record.active_breaks = len(_g(liq, "active_breaks", []) or [])
+        record.liquidity_void = bool(_g(liq, "liquidity_void_active", False))
+        # Order context
+        record.signal_quality = round(float(_g(ed, "signal_quality", 0.0)), 3)
+        record.entry_style = entry_style
+        record.initial_sl_pips = round(abs(entry_price - sl) / pip, 1) if pip else 0.0
+
         self._active_trades[ticket] = record
 
     def record_exit(
@@ -97,20 +191,34 @@ class TradeAnalytics:
         exit_reason: str,
         snapshot: EngineSnapshot,
     ) -> None:
-        """Complete the trade record and write to disk."""
+        """Complete the record with exit criteria + engine state at the cut."""
         if ticket not in self._active_trades:
             return
-            
         record = self._active_trades[ticket]
+        th = getattr(snapshot, "trade_health", None)
+        ts = getattr(snapshot, "trade_state", None)
+        v = getattr(snapshot, "velocity", None)
+        d = getattr(snapshot, "displacement", None)
+
         record.exit_time = datetime.now().isoformat()
         record.exit_price = exit_price
-        record.pips_profit = pips_profit
+        record.pips_profit = round(float(pips_profit), 2)
         record.exit_reason = exit_reason
-        
-        record.max_favorable_excursion = snapshot.trade_health.max_favorable_excursion
-        record.time_in_drawdown_sec = snapshot.trade_health.time_in_drawdown_sec
-        record.health_score_at_exit = snapshot.trade_health.score
-        
+        record.exit_gate = _classify_gate(exit_reason)
+        record.r_multiple = round(pips_profit / record.initial_sl_pips, 2) if record.initial_sl_pips else 0.0
+        record.max_favorable_excursion = round(float(_g(th, "max_favorable_excursion", 0.0)), 1)
+        record.max_adverse_excursion = round(float(
+            _g(th, "max_adverse_excursion", None) if getattr(th, "max_adverse_excursion", None) is not None
+            else _g(ts, "mae", 0.0)), 1)
+        record.time_in_drawdown_sec = round(float(_g(th, "time_in_drawdown_sec", 0.0)), 1)
+        record.health_score_at_exit = round(float(_g(th, "score", 0.0)), 2)
+        record.ticks_in_trade = int(_g(ts, "ticks_in_trade", 0))
+        # Engine state at the moment the gate fired
+        record.exit_vel_pct = round(float(_g(v, "percentile", 0.0)), 2)
+        record.exit_displacement = str(_g(d, "classification", ""))
+        record.exit_phase = str(_g(ts, "current_phase", ""))
+        record.exit_thesis = str(_g(ts, "thesis_status", ""))
+
         self._write_record(record)
         del self._active_trades[ticket]
 
@@ -118,8 +226,8 @@ class TradeAnalytics:
         try:
             with open(self._log_file, "a", encoding="utf-8") as f:
                 f.write(json.dumps(asdict(record)) + "\n")
-        except Exception as e:
-            pass # Failsafe against I/O errors interrupting the daemon
+        except Exception:
+            pass  # never let logging I/O interrupt the daemon
 
 
 __all__ = ["TradeAnalytics", "TradeRecord"]
