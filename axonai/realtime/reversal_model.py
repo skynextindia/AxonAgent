@@ -400,16 +400,39 @@ class ReversalModel:
             candle_setup_direction=self.candle_setup.setup_direction,
         )
 
+        # Snapshot the candle setup that ARMS the machine. The M15 setup often
+        # expires between arm and trigger; re-reading the live tracker at gate
+        # time then hard-rejected ~80% of triggers ("no active candle setup").
+        # The setup that justified arming must be honored at its own trigger.
+        st = entry_decision.state
+        if st in ("ANOMALY", "ARMING"):
+            if self.candle_setup.setup_active:
+                self._armed_setup = (self.candle_setup.setup_score, self.candle_setup.setup_direction)
+        elif st in ("IDLE", "INVALIDATED"):
+            self._armed_setup = None
+        # TRIGGERED: snapshot stays frozen until reset
+
         # 1b. UNIFIED CONFLUENCE GATE (replaces old _reversal_confluence_grade).
         # Uses 4-component weighted score: candle setup (30%) + velocity (25%)
         # + S/R proximity (25%) + H4/H1 alignment (20%). Threshold: 0.65.
         # Hard-rejects (falling knife, void spike, counter-trend) preserved.
         if entry_decision.is_valid_entry and self._config.get("enable_reversal_gate", True):
+            # Direction-aware effective setup score: an opposite-direction setup
+            # must not un-veto or boost this trigger; a same-direction setup that
+            # armed the trigger counts even if it expired mid-flight.
+            _ss = self.candle_setup.setup_score if self.candle_setup.setup_active else 0.0
+            _sd = self.candle_setup.setup_direction
+            if _sd and entry_decision.direction and _sd != entry_decision.direction:
+                _ss = 0.0
+            if _ss <= 0.0:
+                _arm = getattr(self, "_armed_setup", None)
+                if _arm and (not _arm[1] or _arm[1] == entry_decision.direction):
+                    _ss = _arm[0]
             allow, score, reason = _unified_confluence_score(
                 entry_decision.direction, price, self._pip, self._h1_atr,
                 self._last_mtf_state, self._last_liquidity_state,
                 vel_state, disp_state, self._price_levels,
-                candle_setup_score=self.candle_setup.setup_score,
+                candle_setup_score=_ss,
                 config=self._config,
             )
             # Carry the confluence score for sizing/observability regardless.
