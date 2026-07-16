@@ -1247,6 +1247,15 @@ class AxonDaemon:
         except Exception:
             pass
 
+        # Structure-fade SHADOW detector: logs level-fade reversal signals the
+        # velocity-anomaly path structurally misses (slow grind into a level,
+        # no spike). Validated offline: 60-76% directional accuracy on FX at
+        # ~2:1 MFE/MAE. Shadow only — records signals, never trades.
+        try:
+            self._structure_fade_shadow(snapshot, timestamp, mid)
+        except Exception:
+            pass
+
         # CHANGE 9C: Dependency injection for EntryDecision
         if snapshot and snapshot.entry_decision:
             snapshot.entry_decision.entry_location_context = {
@@ -2279,6 +2288,74 @@ class AxonDaemon:
                 if not nlp or abs(float(snapshot.price) - nlp) / pipm > lim:
                     return False, "away_from_level"
         return True, ""
+
+    _FADE_SUPPORT = ("ASL", "PDL", "PWL", "LDL", "LNDL", "NYL", "TODAY_L", "SUPPORT")
+    _FADE_RESIST = ("ASH", "PDH", "PWH", "LDH", "LNDH", "NYH", "TODAY_H", "RESISTANCE")
+
+    def _structure_fade_shadow(self, snapshot, timestamp, price: float) -> None:
+        """SHADOW-MODE structure-fade detector (records signals, never trades).
+
+        Catches the reversal class the anomaly path misses: price grinding into
+        a strong level with dying momentum, then turning. Spec matches the
+        offline validation: reversal_pressure >= 0.8, within fade_dist of a
+        session/structural level, and explicitly NO velocity spike. Gold is
+        excluded (no measured edge at this spec). Signals go to
+        reports/fade_signals_{symbol}.jsonl; outcomes are scored offline
+        against the snapshot store before this ever becomes an entry path.
+        """
+        cfg = self.config
+        if not cfg.get("structure_fade_shadow", True) or snapshot is None:
+            return
+        sym = self.mt5_symbol.upper()
+        if "XAU" in sym:
+            return
+        m = self.reversal_model._last_mtf_state
+        revp = float(getattr(m, "reversal_pressure", 0.0) or 0.0) if m else 0.0
+        if revp < float(cfg.get("fade_revp_min", 0.8)):
+            return
+        v = getattr(snapshot, "velocity", None)
+        vel_pct = float(getattr(v, "percentile", 0.0) or 0.0) if v else 0.0
+        if vel_pct >= float(cfg.get("fade_vel_pct_max", 55.0)):
+            return  # spike territory — that's the anomaly path's job
+        lc = getattr(snapshot, "location_context", None)
+        if not lc:
+            return
+        dist = float(getattr(lc, "distance_to_sr", 99.0) or 99.0)
+        if dist > float(cfg.get("fade_dist_pips", 6.0)):
+            return
+        lt = str(getattr(lc, "nearest_level_type", "") or "").upper()
+        if any(s in lt for s in self._FADE_SUPPORT):
+            direction = "BUY"
+        elif any(s in lt for s in self._FADE_RESIST):
+            direction = "SELL"
+        else:
+            return
+        # Per-pair cooldown so one episode logs once, not every tick
+        now_s = timestamp.timestamp() if hasattr(timestamp, "timestamp") else float(timestamp)
+        if now_s - getattr(self, "_last_fade_signal_ts", 0.0) < float(cfg.get("fade_cooldown_sec", 300.0)):
+            return
+        self._last_fade_signal_ts = now_s
+        import os, json as _json
+        os.makedirs("reports", exist_ok=True)
+        rec = {
+            "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] if hasattr(timestamp, "strftime") else str(timestamp),
+            "symbol": self.mt5_symbol,
+            "direction": direction,
+            "price": round(float(price), 5),
+            "level_type": lt,
+            "level_price": float(getattr(lc, "nearest_level_price", 0.0) or 0.0),
+            "dist_pips": round(dist, 2),
+            "reversal_pressure": round(revp, 3),
+            "vel_pct": round(vel_pct, 1),
+            "vol_pips": round(float(getattr(v, "vol_pips", 0.0) or 0.0), 3) if v else 0.0,
+            "decay_ratio": round(float(getattr(v, "decay_ratio", 0.0) or 0.0), 3) if v else 0.0,
+            "room_pips": round(float(getattr(lc, "room_available", 0.0) or 0.0), 1),
+            "regime": str(getattr(getattr(snapshot, "regime", None), "regime", "") or ""),
+        }
+        with open(os.path.join("reports", f"fade_signals_{self.mt5_symbol}.jsonl"), "a", encoding="utf-8") as f:
+            f.write(_json.dumps(rec) + "\n")
+        logger.info("STRUCTURE-FADE shadow signal: %s %s @ %.5f (%s %.1fp away, revp %.2f)",
+                    direction, self.mt5_symbol, price, lt, dist, revp)
 
     def _record_engine_snapshot(self, snapshot, timestamp, price: float) -> None:
         """Append the daemon-processed engine snapshot to a per-pair CSV store.

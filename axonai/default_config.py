@@ -107,6 +107,14 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "AUDUSD": {"vel_pct": 35, "vol_pips": 0.50, "tick_eff": 0.25},
         "XAUUSD": {"vel_pct": 0,  "vol_pips": 175,  "tick_eff": 0.15},  # gold: vol-based, no vel floor; tracks calibrated 174.56
     },
+    # Structure-fade SHADOW detector (logs level-fade signals, never trades).
+    # Spec mirrors the offline validation (60-76% FX directional accuracy).
+    # Promote to a real entry path only after live shadow signals confirm.
+    "structure_fade_shadow": True,
+    "fade_revp_min": 0.8,        # reversal_pressure confirmation threshold
+    "fade_vel_pct_max": 55.0,    # above this = spike; anomaly path's territory
+    "fade_dist_pips": 6.0,       # max distance from the level being faded
+    "fade_cooldown_sec": 300.0,  # one signal per episode, not per tick
     # Calibrated Gold Entry Thresholds
     # vel cap 30 contradicted gold's own calibration: median vel_pct at 103
     # measured pre-reversal events = 41.6 (the cap vetoed ~half of genuine
