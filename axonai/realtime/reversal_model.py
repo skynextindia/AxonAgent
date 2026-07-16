@@ -357,9 +357,13 @@ class ReversalModel:
             rp = 0.0
             if getattr(vel_state, "is_decaying", False):
                 rp += 0.5
-            dr = getattr(vel_state, "decay_ratio", 1.0)
-            if dr is not None and dr < 0.5:
-                rp += min(0.5, (0.5 - dr))
+            # Velocity FADING (high decay_ratio) = exhaustion = reversal pressure.
+            # Bugfix: was inverted (added pressure when decay_ratio was LOW), so
+            # reversal_pressure stayed ~0 at real reversals — which have HIGH
+            # decay_ratio (0.75-0.91 empirically). Now keyed the correct way.
+            dr = getattr(vel_state, "decay_ratio", 0.0)
+            if dr is not None and dr > 0.6:
+                rp += min(0.5, (dr - 0.5))
             if getattr(disp_state, "is_exhausting", False) or getattr(disp_state, "classification", "") in ("EXHAUSTION", "TRAP", "ABSORPTION"):
                 rp += 0.5
             self._last_mtf_state.reversal_pressure = min(1.0, rp)

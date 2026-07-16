@@ -155,7 +155,7 @@ class MTFContext:
             curr_price = self._latest_candles["M15"].close
             dist_pips = abs(curr_price - h4_ema) / self._pip
             atr_pips = (self._h4_atr / self._pip) if self._h4_atr > 0 else 0.0
-            mult = float(self.config.get("mtf_exhaustion_atr_mult", 2.0))
+            mult = float(self.config.get("mtf_exhaustion_atr_mult", 1.5))  # was 2.0 — fired <4%; lowered so exhaustion actually registers
             thresh = (mult * atr_pips) if atr_pips > 0 else 80.0
             if dist_pips > thresh:
                 is_extended = True
