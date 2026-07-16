@@ -48,13 +48,17 @@ connected_clients = set()
 latest_state = {}
 symbol = "EURUSD"
 broker_offset = 0
+terminal_path = None  # data terminal (e.g. Exness); pass --path to pin explicitly
 
 
 # ── MT5 helpers ────────────────────────────────────────────────────
 
 def mt5_init():
     global broker_offset
-    if not mt5.initialize():
+    init_kwargs = {}
+    if terminal_path:
+        init_kwargs["path"] = terminal_path
+    if not mt5.initialize(**init_kwargs):
         err = mt5.last_error()
         print(f"MT5 initialize failed: {err}")
         return False
@@ -671,10 +675,12 @@ async def main():
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="WebSocket port")
     parser.add_argument("--symbol", type=str, default="EURUSD", help="Symbol to stream")
     parser.add_argument("--host", type=str, default="0.0.0.0", help="Bind address")
+    parser.add_argument("--path", type=str, default=None, help="Path to data terminal64.exe (e.g. Exness)")
     args = parser.parse_args()
 
-    global symbol
+    global symbol, terminal_path
     symbol = args.symbol
+    terminal_path = args.path
 
     if sys.platform == "win32":
         try:

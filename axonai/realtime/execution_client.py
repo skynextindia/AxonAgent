@@ -81,9 +81,17 @@ def send_execution_command(config: dict, request_dict: dict) -> dict:
             import os
             try:
                 if platform.system() == "Windows":
-                    # Spawning execution_bridge.py directly on native Windows
+                    # Spawning execution_bridge.py directly on native Windows.
+                    # CRITICAL: pass --path so the bridge attaches to the TRADE terminal.
+                    # Without it, mt5.initialize() grabs whichever terminal it finds first —
+                    # with the Exness data terminal running, account_info AND order execution
+                    # could silently route to the data account.
                     script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "windows", "execution_bridge.py")
-                    subprocess.Popen([sys.executable, script_path, "--port", str(port)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    cmd = [sys.executable, script_path, "--port", str(port)]
+                    trade_path = config.get("mt5_trade_terminal_path")
+                    if trade_path:
+                        cmd += ["--path", trade_path]
+                    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 else:
                     # Spawning start_bridge.bat via cmd.exe in WSL
                     subprocess.Popen(["cmd.exe", "/c", "start", "windows\\start_bridge.bat"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
