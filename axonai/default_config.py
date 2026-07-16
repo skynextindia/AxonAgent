@@ -87,6 +87,21 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "max_concurrent_positions": 5,       # max simultaneous open positions across ALL symbols (0 = disabled)
     "max_daily_loss_usd": 500.0,         # halt new entries once the day's realized loss hits this (0 = disabled)
     "max_same_direction_positions": 0,   # correlation cap: max same-direction concurrent (0 = disabled)
+    # ── Reversal-edge entry filter (data-derived; additive veto, only blocks) ──
+    # From winners-vs-losers analysis: RANGE_CHOP loses; reversals fire at a
+    # per-pair velocity climax. Gold has NO clean velocity edge, so it uses a
+    # volatility floor instead (kept in the system, own thresholds).
+    "reversal_edge_gate_enabled": True,
+    "reversal_block_regimes": ["RANGE_CHOP"],
+    "reversal_require_location": False,   # enable after location logging is validated live
+    "reversal_location_max_pips": {"default": 8.0, "XAUUSD": 60.0},
+    "reversal_pair_floors": {
+        "EURUSD": {"vel_pct": 65, "vol_pips": 2.0, "tick_eff": 0.40},
+        "GBPUSD": {"vel_pct": 60, "vol_pips": 2.5, "tick_eff": 0.40},
+        "USDJPY": {"vel_pct": 65, "vol_pips": 1.8, "tick_eff": 0.45},
+        "AUDUSD": {"vel_pct": 65, "vol_pips": 0.9, "tick_eff": 0.50},
+        "XAUUSD": {"vel_pct": 0,  "vol_pips": 400, "tick_eff": 0.15},  # gold: vol-based, no vel floor
+    },
     # Calibrated Gold Entry Thresholds
     "entry_max_velocity_pct_gold": 30.0,
     "entry_min_decay_ratio_gold": 0.25,

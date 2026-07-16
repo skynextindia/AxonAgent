@@ -97,7 +97,16 @@ class AxonDaemon:
                 with open(_cp, "r", encoding="utf-8") as _f:
                     _params = _json.load(_f) or {}
                 for _k, _v in _params.items():
-                    config.setdefault(_k, _v)  # explicit config already present wins
+                    if _k == "reversal_pair_floors" and isinstance(_v, dict):
+                        # Merge calibrated per-symbol floors so EOD calibration
+                        # OVERRIDES the static defaults (setdefault would ignore them).
+                        config.setdefault("reversal_pair_floors", {})
+                        try:
+                            config["reversal_pair_floors"].update(_v)
+                        except Exception:
+                            config["reversal_pair_floors"] = _v
+                    elif not _k.startswith("_"):
+                        config.setdefault(_k, _v)  # explicit config already present wins
                 logger.info("Loaded %d calibration params from %s", len(_params), _cp)
         except Exception as _e:
             logger.warning("Calibration params load failed (%s); using defaults", _e)
@@ -1309,11 +1318,15 @@ class AxonDaemon:
                     has_position = True
             
             if not has_position:
-                blocked, news_reason = self.news_guard.should_block_entry(self.mt5_symbol)
-                if blocked:
-                    logger.info("ENTRY BLOCKED by News Guard: %s", news_reason)
+                edge_ok, edge_why = self._reversal_edge_ok(snapshot)
+                if not edge_ok:
+                    logger.info("ENTRY BLOCKED by reversal-edge gate: %s", edge_why)
                 else:
-                    self.event_queue.put({"type": "place_limit", "snapshot": snapshot})
+                    blocked, news_reason = self.news_guard.should_block_entry(self.mt5_symbol)
+                    if blocked:
+                        logger.info("ENTRY BLOCKED by News Guard: %s", news_reason)
+                    else:
+                        self.event_queue.put({"type": "place_limit", "snapshot": snapshot})
             
             # Reset FSM immediately for market orders to prevent lingering or late entries!
             if entry_style in ("instant", "confirmed"):
@@ -1474,7 +1487,9 @@ class AxonDaemon:
                 # Fetch and broadcast MetaTrader 5 account info
                 acc_payload = self._get_account_payload()
                 if acc_payload:
-                    logger.info("Broadcasting account: balance=%.2f equity=%.2f profit=%.2f",
+                    # DEBUG, not INFO: fires every 5th tick x 5 daemons; console I/O under the
+                    # logging lock stalls all tick threads (on_tick budget spikes).
+                    logger.debug("Broadcasting account: balance=%.2f equity=%.2f profit=%.2f",
                                acc_payload.get("balance", 0),
                                acc_payload.get("equity", 0),
                                acc_payload.get("profit", 0))
@@ -1767,15 +1782,18 @@ class AxonDaemon:
 
             elif event_type == "place_limit":
                 snapshot = event["snapshot"]
+                self._events_detected += 1  # a reversal entry signal was detected (live path)
                 entry_style = self.config.get("realtime_entry_style", "instant")
                 use_market = entry_style in ("instant", "confirmed")
 
                 if use_market:
                     with self._position_lock:
                         if len(self._tracked_positions) > 0:
+                            self._events_skipped += 1
                             continue
                 else:
                     if self._pending_limit_ticket is not None:
+                        self._events_skipped += 1
                         continue
 
                 remaining = self._seconds_until_ready(
@@ -1784,6 +1802,7 @@ class AxonDaemon:
                     vol_pips=getattr(snapshot.velocity, "vol_pips", 3.0)
                 )
                 if remaining > 0:
+                    self._events_skipped += 1
                     logger.info("SKIPPED ENTRY (cooldown=%.0fs remaining)", remaining)
                     continue
 
@@ -1803,6 +1822,7 @@ class AxonDaemon:
 
                 direction = getattr(self.reversal_model.entry, "_anomaly_direction", None) or snapshot.entry_decision.direction
                 if not direction:
+                    self._events_skipped += 1
                     continue
 
                 if use_market:
@@ -1904,7 +1924,10 @@ class AxonDaemon:
                         logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
 
                     self._last_execution_time = datetime.now()
-                    self._events_fired += 1
+                    if trade_result and trade_result.get("success", False):
+                        self._events_fired += 1
+                    else:
+                        self._events_skipped += 1  # blocked (portfolio guard / broker reject)
 
                 else:
                     min_sl_pips = 12.0 if "GBP" in self.mt5_symbol.upper() else (15.0 if "JPY" in self.mt5_symbol.upper() else (8.0 * float(self.config.get("pair_move_scale", 1.0)) if "XAU" in self.mt5_symbol.upper() else 8.0))
@@ -1941,7 +1964,10 @@ class AxonDaemon:
                         logger.info("AxonDaemon: Pending limit order placed successfully. Ticket: %d", ticket)
 
                     self._last_execution_time = datetime.now()
-                    self._events_fired += 1
+                    if trade_result and trade_result.get("success", False) and trade_result.get("order"):
+                        self._events_fired += 1
+                    else:
+                        self._events_skipped += 1  # limit not placed (guard / reject)
 
             elif event_type == "cancel_limit":
                 if self._pending_limit_ticket is not None:
@@ -2207,6 +2233,42 @@ class AxonDaemon:
     def is_running(self) -> bool:
         return self._running
 
+    def _reversal_edge_ok(self, snapshot) -> tuple:
+        """Data-derived reversal-edge filter. Additive veto — only blocks the
+        setups that empirically lose (chop regime, below per-pair velocity/vol
+        floors), never creates entries. Gold uses a volatility floor (no clean
+        velocity edge). Config: reversal_edge_gate_enabled / *_block_regimes /
+        *_pair_floors / *_require_location. Returns (ok, reason)."""
+        cfg = self.config
+        if not cfg.get("reversal_edge_gate_enabled", True):
+            return True, ""
+        sym = self.mt5_symbol
+        # 1. Regime block — RANGE_CHOP is the biggest empirical loser
+        rg = (getattr(snapshot.regime, "regime", "") if getattr(snapshot, "regime", None) else "") or ""
+        if rg in cfg.get("reversal_block_regimes", ["RANGE_CHOP"]):
+            return False, f"regime={rg}"
+        # 2. Per-pair velocity/vol/tick floors (gold = vol-only)
+        floors = (cfg.get("reversal_pair_floors", {}) or {}).get(sym, {})
+        v = getattr(snapshot, "velocity", None)
+        if v is not None and floors:
+            if floors.get("vel_pct") and float(getattr(v, "percentile", 0.0) or 0.0) < floors["vel_pct"]:
+                return False, f"vel_pct<{floors['vel_pct']}"
+            if floors.get("vol_pips") and float(getattr(v, "vol_pips", 0.0) or 0.0) < floors["vol_pips"]:
+                return False, f"vol_pips<{floors['vol_pips']}"
+            if floors.get("tick_eff") and float(getattr(v, "tick_efficiency", 0.0) or 0.0) < floors["tick_eff"]:
+                return False, f"tick_eff<{floors['tick_eff']}"
+        # 3. Location gate (default off until live location logging is validated)
+        if cfg.get("reversal_require_location", False):
+            lc = getattr(snapshot, "location_context", None)
+            if not (lc and getattr(lc, "at_structure", False)):
+                nlp = float(getattr(lc, "nearest_level_price", 0.0) or 0.0) if lc else 0.0
+                maxp = cfg.get("reversal_location_max_pips", {})
+                lim = maxp.get(sym, maxp.get("default", 8.0)) if isinstance(maxp, dict) else 8.0
+                pipm = getattr(self, "_pip_mult", 0.0001) or 0.0001
+                if not nlp or abs(float(snapshot.price) - nlp) / pipm > lim:
+                    return False, "away_from_level"
+        return True, ""
+
     def _record_engine_snapshot(self, snapshot, timestamp, price: float) -> None:
         """Append the daemon-processed engine snapshot to a per-pair CSV store.
 
@@ -2223,6 +2285,7 @@ class AxonDaemon:
         liq = getattr(snapshot, "liquidity", None) or self.reversal_model._last_liquidity_state
         rg = getattr(snapshot, "regime", None)
         ed = getattr(snapshot, "entry_decision", None)
+        lc = getattr(snapshot, "location_context", None)
         row = {
             "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] if hasattr(timestamp, "strftime") else str(timestamp),
             "price": round(float(price), 5),
@@ -2257,10 +2320,28 @@ class AxonDaemon:
             "entry_dir": getattr(ed, "direction", "") or "",
             "signal_quality": getattr(ed, "signal_quality", 0.0),
             "skip_reason": getattr(ed, "skip_reason", "") or "",
+            # Location context (the missing reversal criterion — reversals must be at S/R).
+            "at_structure": int(bool(getattr(lc, "at_structure", False))),
+            "dist_to_sr": round(float(getattr(lc, "distance_to_sr", 0.0) or 0.0), 3),
+            "dist_to_liq": round(float(getattr(lc, "distance_to_liquidity", 0.0) or 0.0), 3),
+            "room_pips": round(float(getattr(lc, "room_available", 0.0) or 0.0), 2),
+            "near_level_type": getattr(lc, "nearest_level_type", "") or "",
+            "near_level_price": round(float(getattr(lc, "nearest_level_price", 0.0) or 0.0), 5),
         }
         if self._snap_store_fh is None and not self._snap_store_ready:
             os.makedirs("reports", exist_ok=True)
             path = os.path.join("reports", f"engine_snapshots_{self.mt5_symbol}.csv")
+            # Rotate if the existing header's columns differ (we added location fields),
+            # so the CSV never goes ragged and old data stays intact for analysis.
+            if os.path.exists(path) and os.path.getsize(path) > 0:
+                try:
+                    with open(path, "r", encoding="utf-8") as _hf:
+                        existing_cols = _hf.readline().strip().split(",")
+                    if existing_cols != list(row.keys()):
+                        os.rename(path, path.replace(".csv", "_pre_location.csv"))
+                        logger.info("Snapshot store schema changed — rotated old file to *_pre_location.csv")
+                except Exception as _re:
+                    logger.warning("Snapshot store rotation check failed: %s", _re)
             need_header = not os.path.exists(path) or os.path.getsize(path) == 0
             self._snap_store_fh = open(path, "a", newline="", encoding="utf-8")
             self._snap_store_writer = csv.DictWriter(self._snap_store_fh, fieldnames=list(row.keys()))

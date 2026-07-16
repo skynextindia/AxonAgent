@@ -26,6 +26,19 @@ def _pip_mult(symbol: str) -> float:
     return 0.01 if ("JPY" in s or "XAU" in s) else 0.0001
 
 
+def _default_reversal_pips(symbol: str) -> float:
+    """Per-pair 'major reversal' size so the daily run needs no manual tuning.
+    Gold swings hundreds of pips, JPY mid-range, other FX small. A fixed 15-pip
+    default found 0 reversals on low-range pairs (AUDUSD/GBPUSD) and so never
+    calibrated them — this scales the threshold to each pair's typical range."""
+    s = symbol.upper()
+    if "XAU" in s:
+        return 120.0
+    if "JPY" in s:
+        return 12.0
+    return 8.0
+
+
 def _load_rows(path: str) -> List[Dict]:
     with open(path, "r", encoding="utf-8", newline="") as f:
         return list(csv.DictReader(f))
@@ -70,6 +83,11 @@ def _median(vals: List[float]) -> float:
     return statistics.median(vals) if vals else 0.0
 
 
+def _quantile(vals: List[float], q: float) -> float:
+    vals = sorted(v for v in vals if v is not None)
+    return vals[int(len(vals) * q)] if vals else 0.0
+
+
 def analyze(symbol: str, reversal_pips: float, pre: int, min_events: int) -> None:
     pip = _pip_mult(symbol)
     store = os.path.join("reports", f"engine_snapshots_{symbol}.csv")
@@ -83,7 +101,7 @@ def analyze(symbol: str, reversal_pips: float, pre: int, min_events: int) -> Non
     # Dump pre-reversal context windows
     ctx_path = os.path.join("reports", f"reversal_context_{symbol}.csv")
     pre_rows: List[Dict] = []
-    feat = {"vel_pct": [], "decay_ratio": [], "reversal_pressure": [], "disp_ratio": [], "vel_z": []}
+    feat = {"vel_pct": [], "decay_ratio": [], "reversal_pressure": [], "disp_ratio": [], "vel_z": [], "vol_pips": [], "tick_eff": []}
     with open(ctx_path, "w", encoding="utf-8", newline="") as f:
         writer: Optional[csv.DictWriter] = None
         for e in events:
@@ -103,18 +121,29 @@ def analyze(symbol: str, reversal_pips: float, pre: int, min_events: int) -> Non
                         feat[k].append(_f(rows[j], k))
     print(f"[eod] wrote pre-reversal context -> {ctx_path} ({len(pre_rows)} rows)")
 
-    # Conservatively derive params only with enough evidence; else emit {} (fail-open)
-    params: Dict[str, float] = {}
+    # Derive the REAL per-pair reversal floors from the observed reversals
+    # (q25 = a floor that still catches ~75% of turns). Feeds the LIVE
+    # reversal-edge gate (config reversal_pair_floors). Replaces the old
+    # gate_reversal_pressure_min, which tuned a near-dead signal.
+    params: Dict = {}
     if len(events) >= min_events:
-        rp = _median(feat["reversal_pressure"])
-        # Gate: require reversal_pressure a bit below the observed pre-reversal median
-        params["gate_reversal_pressure_min"] = round(max(0.3, rp * 0.8), 3)
-        # Record observed medians for transparency (not consumed as thresholds)
+        is_gold = "XAU" in symbol.upper()
+        # Floor = 80% of the observed reversal median: selective (keeps out the
+        # chop the system over-trades) yet adaptive per pair/day. q25 would be too
+        # loose and re-open the over-trading. Gold has no clean velocity edge → vol-only.
+        floors = {
+            "vel_pct": 0 if is_gold else round(_median(feat["vel_pct"]) * 0.8, 0),
+            "vol_pips": round(_median(feat["vol_pips"]) * 0.8, 2),
+            "tick_eff": round(_median(feat["tick_eff"]) * 0.8, 2),
+        }
+        params["reversal_pair_floors"] = {symbol: floors}
+        # Observed medians for transparency (not consumed as thresholds)
         params["_observed_pre_reversal_medians"] = {
             "vel_pct": round(_median(feat["vel_pct"]), 2),
-            "vel_z": round(_median(feat["vel_z"]), 2),
+            "vol_pips": round(_median(feat["vol_pips"]), 2),
+            "tick_eff": round(_median(feat["tick_eff"]), 3),
             "decay_ratio": round(_median(feat["decay_ratio"]), 3),
-            "reversal_pressure": round(rp, 3),
+            "reversal_pressure": round(_median(feat["reversal_pressure"]), 3),
             "disp_ratio": round(_median(feat["disp_ratio"]), 3),
         }
         params["_events"] = len(events)
@@ -130,12 +159,13 @@ def analyze(symbol: str, reversal_pips: float, pre: int, min_events: int) -> Non
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--symbol", default="EURUSD")
-    ap.add_argument("--reversal-pips", type=float, default=15.0,
-                    help="retrace (in pips) off an extreme that defines a MAJOR reversal")
+    ap.add_argument("--reversal-pips", type=float, default=None,
+                    help="retrace (pips) defining a MAJOR reversal; default auto-scales per symbol")
     ap.add_argument("--pre", type=int, default=10, help="snapshot rows before the turn to capture")
     ap.add_argument("--min-events", type=int, default=8, help="min reversals before deriving thresholds")
     args = ap.parse_args()
-    analyze(args.symbol, args.reversal_pips, args.pre, args.min_events)
+    rev_pips = args.reversal_pips if args.reversal_pips is not None else _default_reversal_pips(args.symbol)
+    analyze(args.symbol, rev_pips, args.pre, args.min_events)
 
 
 if __name__ == "__main__":
