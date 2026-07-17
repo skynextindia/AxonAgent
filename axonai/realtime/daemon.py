@@ -2263,9 +2263,13 @@ class AxonDaemon:
         if not cfg.get("reversal_edge_gate_enabled", True):
             return True, ""
         sym = self.mt5_symbol
-        # 1. Regime block — RANGE_CHOP is the biggest empirical loser
+        # 1. Regime block — per-pair (dict) with "default" fallback; a plain
+        # list still works. EUR/AUD reversals live IN chop, GBP's in trend.
         rg = (getattr(snapshot.regime, "regime", "") if getattr(snapshot, "regime", None) else "") or ""
-        if rg in cfg.get("reversal_block_regimes", ["RANGE_CHOP"]):
+        brs = cfg.get("reversal_block_regimes", ["RANGE_CHOP"])
+        if isinstance(brs, dict):
+            brs = brs.get(sym, brs.get("default", []))
+        if rg in (brs or []):
             return False, f"regime={rg}"
         # 2. Per-pair velocity/vol/tick floors (gold = vol-only)
         floors = (cfg.get("reversal_pair_floors", {}) or {}).get(sym, {})

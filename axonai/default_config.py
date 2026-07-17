@@ -92,7 +92,18 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # per-pair velocity climax. Gold has NO clean velocity edge, so it uses a
     # volatility floor instead (kept in the system, own thresholds).
     "reversal_edge_gate_enabled": True,
-    "reversal_block_regimes": ["RANGE_CHOP"],
+    # Per-pair regime blocks (snapshot study 2026-07-17): EURUSD 30/39 and
+    # AUDUSD 39/42 of real reversals happen IN RANGE_CHOP — the global chop
+    # block was closing exactly their opportunity window. GBPUSD turns live in
+    # TREND_CONTINUATION (45/60), so its chop block stays. XAUUSD is ~93% chop
+    # by tick, so a chop block just disables gold; its guard is the
+    # counter-trend hard block in the confluence gate instead.
+    "reversal_block_regimes": {
+        "default": ["RANGE_CHOP"],
+        "EURUSD": [],
+        "AUDUSD": [],
+        "XAUUSD": [],
+    },
     "reversal_require_location": False,   # enable after location logging is validated live
     "reversal_location_max_pips": {"default": 8.0, "XAUUSD": 60.0},
     # Floors sit between p25 and p50 of LIVE TRIGGERED distributions (measured
@@ -107,6 +118,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "AUDUSD": {"vel_pct": 35, "vol_pips": 0.50, "tick_eff": 0.25},
         "XAUUSD": {"vel_pct": 0,  "vol_pips": 175,  "tick_eff": 0.15},  # gold: vol-based, no vel floor; tracks calibrated 174.56
     },
+    # Exit/hold tuning (journal study 2026-07-17): trail armed at +5p with a 4p
+    # floor parked SL at +1-2p, so noise pullbacks clipped trades at +2-4p while
+    # winners run +17-20p. Arm later and trail wider so profits can breathe;
+    # both scale by pair_move_scale automatically (gold x10).
+    "realtime_trail_activation_pips": 8.0,   # was 5.0 default in code
+    "realtime_min_trail_floor_pips": 6.0,    # was 4.0 default in code
     # Structure-fade SHADOW detector (logs level-fade signals, never trades).
     # Spec mirrors the offline validation (60-76% FX directional accuracy).
     # Promote to a real entry path only after live shadow signals confirm.

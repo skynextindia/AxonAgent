@@ -129,6 +129,11 @@ def _unified_confluence_score(
     )
     if mtf_warm and (h4b + h1b) * want < 0 and not is_exhausting:
         return (False, 0.0, f"counter-trend without exhaustion (H4={h4b:.2f},H1={h1b:.2f})")
+    # Gold: NEVER fade a strongly aligned trend, exhaustion or not. Live trade
+    # log: fully counter-trend gold entries = 0% win. FX fades fine; gold trends.
+    _sym_u = str(cfg.get("symbol") or cfg.get("mt5_symbol") or "").upper()
+    if "XAU" in _sym_u and mtf_warm and (h4b + h1b) * want < -0.5:
+        return (False, 0.0, f"gold strong counter-trend blocked (H4={h4b:.2f},H1={h1b:.2f})")
 
     # --- COMPONENT 1 (30%): Candle Setup Score ---
     score += 0.30 * min(1.0, candle_setup_score)
