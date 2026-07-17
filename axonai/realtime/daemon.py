@@ -2311,25 +2311,47 @@ class AxonDaemon:
             return
         m = self.reversal_model._last_mtf_state
         revp = float(getattr(m, "reversal_pressure", 0.0) or 0.0) if m else 0.0
-        if revp < float(cfg.get("fade_revp_min", 0.8)):
+        # v2: fire on the UPWARD CROSSING of the threshold only. v1 fired on
+        # level >= 0.8 and revp saturates at 1.0 for long stretches, so v1
+        # logged cooldown-paced noise (495 signals/day, ~50% win = coin-flip).
+        _thresh = float(cfg.get("fade_revp_min", 0.8))
+        _prev = getattr(self, "_prev_revp", 0.0)
+        self._prev_revp = revp
+        if revp < _thresh or _prev >= _thresh:
             return
         v = getattr(snapshot, "velocity", None)
         vel_pct = float(getattr(v, "percentile", 0.0) or 0.0) if v else 0.0
         if vel_pct >= float(cfg.get("fade_vel_pct_max", 55.0)):
             return  # spike territory — that's the anomaly path's job
-        lc = getattr(snapshot, "location_context", None)
-        if not lc:
+        # v2: distance to NAMED structural levels only (PDH/PDL/session/weekly).
+        # v1 used location_context.nearest-anything, which always snapped to a
+        # nearby M15 micro-swing (0 of 495 signals were at a named level).
+        _NAMED = ("PDH", "PDL", "PWH", "PWL", "ASH", "ASL", "LDH", "LDL",
+                  "LNDH", "LNDL", "NYH", "NYL", "TODAY_H", "TODAY_L")
+        pipm = 0.01 if ("JPY" in sym or "XAU" in sym) else 0.0001
+        best = None
+        try:
+            for lv in (self.live_evidence.price_levels or []):
+                if not getattr(lv, "is_active", False):
+                    continue
+                lt0 = str(getattr(lv, "level_type", "")).upper()
+                if lt0 not in _NAMED:
+                    continue
+                d0 = abs(float(price) - float(lv.price)) / pipm
+                if d0 <= float(cfg.get("fade_dist_pips", 6.0)) and (best is None or d0 < best[0]):
+                    best = (d0, lt0, float(lv.price), str(getattr(lv, "direction", "")))
+        except Exception:
             return
-        dist = float(getattr(lc, "distance_to_sr", 99.0) or 99.0)
-        if dist > float(cfg.get("fade_dist_pips", 6.0)):
+        if best is None:
             return
-        lt = str(getattr(lc, "nearest_level_type", "") or "").upper()
-        if any(s in lt for s in self._FADE_SUPPORT):
+        dist, lt, lvl_price, lvl_dir = best
+        if lvl_dir == "support":
             direction = "BUY"
-        elif any(s in lt for s in self._FADE_RESIST):
+        elif lvl_dir == "resistance":
             direction = "SELL"
         else:
             return
+        lc = getattr(snapshot, "location_context", None)
         # Per-pair cooldown so one episode logs once, not every tick
         now_s = timestamp.timestamp() if hasattr(timestamp, "timestamp") else float(timestamp)
         if now_s - getattr(self, "_last_fade_signal_ts", 0.0) < float(cfg.get("fade_cooldown_sec", 300.0)):
@@ -2342,14 +2364,15 @@ class AxonDaemon:
             "symbol": self.mt5_symbol,
             "direction": direction,
             "price": round(float(price), 5),
+            "spec": "v2",
             "level_type": lt,
-            "level_price": float(getattr(lc, "nearest_level_price", 0.0) or 0.0),
+            "level_price": lvl_price,
             "dist_pips": round(dist, 2),
             "reversal_pressure": round(revp, 3),
             "vel_pct": round(vel_pct, 1),
             "vol_pips": round(float(getattr(v, "vol_pips", 0.0) or 0.0), 3) if v else 0.0,
             "decay_ratio": round(float(getattr(v, "decay_ratio", 0.0) or 0.0), 3) if v else 0.0,
-            "room_pips": round(float(getattr(lc, "room_available", 0.0) or 0.0), 1),
+            "room_pips": round(float(getattr(lc, "room_available", 0.0) or 0.0), 1) if lc else 0.0,
             "regime": str(getattr(getattr(snapshot, "regime", None), "regime", "") or ""),
         }
         with open(os.path.join("reports", f"fade_signals_{self.mt5_symbol}.jsonl"), "a", encoding="utf-8") as f:
