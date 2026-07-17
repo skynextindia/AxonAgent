@@ -115,6 +115,11 @@ class LiveWorldState:
         
         self._is_jpy = (self._quote_currency == "JPY" or "XAU" in sym_clean)
         self._pip_mult = 0.01 if self._is_jpy else 0.0001
+        # Level-geometry scale: gold moves in dollars, not FX pips. Without this
+        # the ROUND grid was $0.50 and swing/touch floors $0.03-$0.15 — hundreds
+        # of meaningless micro-levels (e.g. R 4017.50 / S 4017.00) polluting
+        # confluence proximity, sweeps and the dashboard. FX/JPY scale = 1.
+        self._lvl_scale = float((config or {}).get("pair_move_scale") or (10.0 if "XAU" in sym_clean else 1.0))
         
         self._broker_symbol = _to_mt5_symbol(self.symbol, self.config)
         self._offset_hours = get_broker_tz_offset(self._broker_symbol)
@@ -798,7 +803,7 @@ class LiveMarketEvidence:
                     ))
 
             # 4. ROUND Numbers
-            pip50 = 50 * self._pip_mult
+            pip50 = 50 * self._pip_mult * self._lvl_scale
             base = round(current_bid / pip50) * pip50
             for i in range(-4, 5):
                 r_price = base + (i * pip50)
@@ -818,7 +823,7 @@ class LiveMarketEvidence:
                     # Swing High
                     if row.high > max(c.high for c in left) and row.high > max(c.high for c in right):
                         window_low = min(c.low for c in h4_list[i-3:i+4])
-                        if row.high - window_low >= 15 * self._pip_mult:
+                        if row.high - window_low >= 15 * self._pip_mult * self._lvl_scale:
                             self.price_levels.append(PriceLevel(
                                 price=float(row.high), level_type="H4_SWING", timeframe="H4",
                                 touches=0, last_touch=now_utc, direction="resistance", strength=0.2, is_active=True
@@ -827,7 +832,7 @@ class LiveMarketEvidence:
                     # Swing Low
                     if row.low < min(c.low for c in left) and row.low < min(c.low for c in right):
                         window_high = max(c.high for c in h4_list[i-3:i+4])
-                        if window_high - row.low >= 15 * self._pip_mult:
+                        if window_high - row.low >= 15 * self._pip_mult * self._lvl_scale:
                             self.price_levels.append(PriceLevel(
                                 price=float(row.low), level_type="H4_SWING", timeframe="H4",
                                 touches=0, last_touch=now_utc, direction="support", strength=0.2, is_active=True
@@ -1002,7 +1007,7 @@ class LiveMarketEvidence:
                 continue
 
             dist = abs(mid - level.price)
-            if dist <= 3 * self._pip_mult:
+            if dist <= 3 * self._pip_mult * self._lvl_scale:
                 # Price is in proximity zone
                 self._pending_touches[level.price] = True
             
@@ -1138,7 +1143,7 @@ class LiveMarketEvidence:
             if row_high > max(c.high for c in left) and row_high > max(c.high for c in right):
                 if current_close < row_high:
                     window_low = min(c.low for c in m15_list[i-3:i+4])
-                    if row_high - window_low >= 3 * self._pip_mult:
+                    if row_high - window_low >= 3 * self._pip_mult * self._lvl_scale:
                         self.price_levels.append(PriceLevel(
                             price=float(row_high),
                             level_type="M15_SWING",
@@ -1154,7 +1159,7 @@ class LiveMarketEvidence:
             if row_low < min(c.low for c in left) and row_low < min(c.low for c in right):
                 if current_close > row_low:
                     window_high = max(c.high for c in m15_list[i-3:i+4])
-                    if window_high - row_low >= 3 * self._pip_mult:
+                    if window_high - row_low >= 3 * self._pip_mult * self._lvl_scale:
                         self.price_levels.append(PriceLevel(
                             price=float(row_low),
                             level_type="M15_SWING",
@@ -1169,7 +1174,7 @@ class LiveMarketEvidence:
     def _invalidate_price_levels(self, close_price: float, timeframe: str):
         """Invalidate levels if closed through, too old, etc."""
         now_utc = datetime.now(timezone.utc)
-        pip_3 = 3 * self._pip_mult
+        pip_3 = 3 * self._pip_mult * self._lvl_scale
 
         for level in self.price_levels:
             if not level.is_active:
