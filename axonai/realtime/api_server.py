@@ -563,6 +563,98 @@ class DashboardServer:
                 return {"status": "error", "message": str(e),
                         "sessions": {}, "adr5": 0, "adr20": 0}
 
+        @self.app.get("/api/replay")
+        def get_replay(symbol: str = None, buckets: int = 600):
+            """Read-only Decision Replay: the engine's per-tick black-box
+            recorder (engine_snapshots_{symbol}.csv) downsampled to M15 buckets.
+            Per bucket: the most-committed entry_state reached, direction, peak
+            signal_quality (confluence), the dominant skip_reason (why it did
+            NOT trade), avg reversal_pressure, exhaustion flag, range_pos.
+            Engine-telemetry only; no account/execution data. Powers the chart
+            state ribbon + 'why blocked' tags."""
+            import os, glob as _glob, csv as _csv, calendar as _cal, time as _time
+            out = {"status": "success", "buckets": []}
+            if not symbol:
+                return out
+            # include rotated stores (*_old_*, *_pre_location) so a schema rotation
+            # on restart doesn't empty the replay; newest first + a row cap bounds cost
+            paths = _glob.glob(os.path.join("reports", f"engine_snapshots_{symbol}*.csv"))
+            if not paths:
+                return out
+            paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+
+            def _rows():
+                seen = 0
+                for _fp in paths:
+                    with open(_fp, "r", encoding="utf-8", errors="ignore", newline="") as f:
+                        for _r in _csv.DictReader(f):
+                            yield _r
+                            seen += 1
+                    if seen > 400000:  # enough recent history; stop before ancient files
+                        break
+            # headline state = the most-committed the machine reached that bucket
+            RANK = {"IDLE": 0, "ANOMALY": 1, "ARMING": 2, "RETEST_WAIT": 3,
+                    "INVALIDATED": 4, "TRIGGERED": 5}
+            agg = {}
+            try:
+                for r in _rows():
+                        ts = (r.get("timestamp") or "")[:19]  # drop millis
+                        if len(ts) < 19:
+                            continue
+                        try:
+                            ep = _cal.timegm(_time.strptime(ts, "%Y-%m-%d %H:%M:%S"))
+                        except ValueError:
+                            continue
+                        st = (r.get("entry_state") or "").strip().upper()
+                        if st not in RANK:  # drop rotated-file rows with drifted schema
+                            continue
+                        bk = (ep // 900) * 900
+                        a = agg.get(bk)
+                        if a is None:
+                            a = agg[bk] = {"t": bk, "state": "IDLE", "dir": "",
+                                           "rank": -1, "q": 0.0, "skips": {},
+                                           "revp_s": 0.0, "revp_n": 0,
+                                           "exh": False, "rpos": None}
+                        rk = RANK.get(st, 0)
+                        if rk >= a["rank"]:
+                            a["rank"] = rk
+                            a["state"] = st
+                            d = (r.get("entry_dir") or "").strip()
+                            if d:
+                                a["dir"] = d
+                        try:
+                            a["q"] = max(a["q"], float(r.get("signal_quality") or 0))
+                        except ValueError:
+                            pass
+                        sk = (r.get("skip_reason") or "").strip()
+                        if sk and any(c.isalpha() for c in sk):  # ignore drifted numeric cols
+                            a["skips"][sk] = a["skips"].get(sk, 0) + 1
+                        try:
+                            a["revp_s"] += float(r.get("reversal_pressure") or 0)
+                            a["revp_n"] += 1
+                        except ValueError:
+                            pass
+                        if (r.get("is_exhaustion_zone") or "").strip().lower() in ("1", "true", "yes"):
+                            a["exh"] = True
+                        try:
+                            a["rpos"] = float(r.get("range_pos") or 0)
+                        except ValueError:
+                            pass
+            except Exception as e:
+                return {"status": "error", "message": str(e), "buckets": []}
+            res = []
+            for k in sorted(agg.keys())[-int(buckets):]:
+                a = agg[k]
+                sk = sorted(a["skips"].items(), key=lambda x: -x[1])
+                res.append({"t": a["t"], "state": a["state"], "dir": a["dir"],
+                            "q": round(a["q"], 2),
+                            "skip": sk[0][0] if sk else "",
+                            "revp": round(a["revp_s"] / a["revp_n"], 2) if a["revp_n"] else 0.0,
+                            "exh": a["exh"],
+                            "rpos": round(a["rpos"], 2) if a["rpos"] is not None else None})
+            out["buckets"] = res
+            return out
+
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             # Security: only accept WebSocket connections from localhost origins

@@ -339,7 +339,8 @@ class Axon{
     this.initChart();this.bindUI();this.connect();
     setInterval(()=>this.clock(),1000);this.loadJournal();setInterval(()=>{if(this.view==="journal")this.loadJournal()},20000);
     setTimeout(()=>this.loadFades(),3000);setInterval(()=>{if(this.active)this.loadFades()},30000);
-    setTimeout(()=>this.loadRangeStats(),3200);setInterval(()=>{if(this.active)this.loadRangeStats()},120000);}
+    setTimeout(()=>this.loadRangeStats(),3200);setInterval(()=>{if(this.active)this.loadRangeStats()},120000);
+    setTimeout(()=>this.loadReplay(),3600);setInterval(()=>{if(this.active)this.loadReplay()},60000);}
   bindUI(){
     document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>this.setView(b.dataset.v));
     document.querySelectorAll(".tfs button").forEach(b=>b.onclick=()=>{this.tf=b.dataset.tf;document.querySelectorAll(".tfs button").forEach(x=>x.classList.toggle("on",x===b));setV("sys-timeframe",this.tf);this.render();});
@@ -390,7 +391,7 @@ class Axon{
     [this._dhL,this._dlL,this._adrHi,this._adrLo].forEach(l=>{if(l)try{this.series.removePriceLine(l)}catch(e){}});this._dhL=this._dlL=this._adrHi=this._adrLo=null;
     if(this.series)this.series.setData([]);if(this.hist)this.hist.setData([]);
     if(this.ws&&this.ws.readyState===1)this.ws.send(JSON.stringify({type:"switch_pair",pair:sym,mt5:sym}));
-    this._rstat=null;this.loadFades();this.loadRangeStats();
+    this._rstat=null;this._replay=[];this.loadFades();this.loadRangeStats();this.loadReplay();
     // instant repaint from cached snapshot; live pushes overwrite as they arrive
     const sn=this.snap&&this.snap[sym];
     if(sn){["candles_M15","candles_H1","candles_H4"].forEach(k=>{if(sn[k])this.onCandles(sn[k]);});
@@ -670,11 +671,11 @@ class Axon{
     this.chart=LightweightCharts.createChart(el,{layout:{attributionLogo:false,background:{color:"transparent"},textColor:"#9fb0c3",fontFamily:'"Cascadia Mono",monospace'},grid:{vertLines:{color:"rgba(255,255,255,.04)"},horzLines:{color:"rgba(255,255,255,.04)"}},crosshair:{vertLine:{color:"rgba(255,255,255,.15)",style:LightweightCharts.LineStyle.Dashed},horzLine:{color:"rgba(255,255,255,.15)",style:LightweightCharts.LineStyle.Dashed}},rightPriceScale:{borderColor:"rgba(255,255,255,.08)",scaleMargins:{top:.06,bottom:.26}},timeScale:{borderColor:"rgba(255,255,255,.08)",timeVisible:true,secondsVisible:false,barSpacing:8,rightOffset:12}});
     this.series=this.chart.addSeries(LightweightCharts.CandlestickSeries,{upColor:"#3ee08a",downColor:"#ff5d73",borderUpColor:"#3ee08a",borderDownColor:"#ff5d73",wickUpColor:"#3ee08a",wickDownColor:"#ff5d73",priceFormat:{type:"custom",minMove:.00001,formatter:GOLD}});
     this.hist=this.chart.addSeries(LightweightCharts.HistogramSeries,{priceScaleId:"m",priceFormat:{type:"volume"}});this.chart.priceScale("m").applyOptions({scaleMargins:{top:.8,bottom:0}});
-    this.chart.timeScale().subscribeVisibleLogicalRangeChange(()=>this.drawSessions());
-    new ResizeObserver(es=>{const r=es[0]&&es[0].contentRect;if(r&&r.width>0){this.chart.resize(r.width,r.height);setTimeout(()=>this.drawSessions(),40);}}).observe(el);
+    this.chart.timeScale().subscribeVisibleLogicalRangeChange(()=>{this.drawSessions();this.drawReplay();});
+    new ResizeObserver(es=>{const r=es[0]&&es[0].contentRect;if(r&&r.width>0){this.chart.resize(r.width,r.height);setTimeout(()=>{this.drawSessions();this.drawReplay();},40);}}).observe(el);
   }catch(e){console.warn("chart",e);}}
   render(){if(!this.series)return;const a=this.arr(this.tf);this.series.setData(a.map(c=>({time:+c.time,open:+c.open,high:+c.high,low:+c.low,close:+c.close})));
-    if(this.hist)this.hist.setData(a.map(c=>{const bv=this._barVel[+c.time],clx=bv&&(bv.u||bv.z>=1.0);return {time:+c.time,value:Math.abs(c.close-c.open),color:clx?"rgba(232,184,102,.8)":(c.close>=c.open?"rgba(62,224,138,.28)":"rgba(255,93,115,.28)")};}));if(!this._fit){this.chart.timeScale().fitContent();this._fit=true;}this.drawSessions();this.dayLines();this.renderMarkers();this.rangeHUD();}
+    if(this.hist)this.hist.setData(a.map(c=>{const bv=this._barVel[+c.time],clx=bv&&(bv.u||bv.z>=1.0);return {time:+c.time,value:Math.abs(c.close-c.open),color:clx?"rgba(232,184,102,.8)":(c.close>=c.open?"rgba(62,224,138,.28)":"rgba(255,93,115,.28)")};}));if(!this._fit){this.chart.timeScale().fitContent();this._fit=true;}this.drawSessions();this.drawReplay();this.dayLines();this.renderMarkers();this.rangeHUD();}
   dayLines(){try{if(!this.series||!this.m15.length)return;const n=new Date(),k=Date.UTC(n.getUTCFullYear(),n.getUTCMonth(),n.getUTCDate())/1000;
     const today=this.m15.filter(c=>+c.time>=k);if(!today.length)return;
     const hi=Math.max(...today.map(c=>+c.high)),lo=Math.min(...today.map(c=>+c.low));
@@ -736,6 +737,27 @@ class Axon{
     (j.signals||[]).forEach(s=>{const t=Math.floor(Date.parse((s.timestamp||"").replace(" ","T")+"Z")/1000);if(!t)return;
       this.pushEvt(sym,{kind:"fade",dir:(s.direction||"").toUpperCase(),price:+s.price,t,ticket:"fade_"+t});});}catch(e){}}
   async loadRangeStats(){try{const sym=this.active;if(!sym)return;const r=await fetch("/api/range_stats?symbol="+sym);const j=await r.json();this._rstat=(j&&j.sessions&&Object.keys(j.sessions).length)?j:null;this.rangeHUD();}catch(e){this._rstat=null;}}
+  async loadReplay(){try{const sym=this.active;if(!sym)return;const r=await fetch("/api/replay?symbol="+sym+"&buckets=600");const j=await r.json();this._replay=(j&&j.buckets)?j.buckets:[];this.drawReplay();}catch(e){this._replay=[];}}
+  _skAbbr(s){s=(s||"").toLowerCase();
+    if(s.includes("regime"))return"REGIME";if(s.includes("confluence")||s.includes("quality")||s.includes("floor"))return"CONFL";
+    if(s.includes("room")||s.includes("space"))return"NO-ROOM";if(s.includes("location")||s.includes("level"))return"LOC";
+    if(s.includes("cooldown"))return"COOL";if(s.includes("velocity")||s.includes("vel"))return"VEL";
+    if(s.includes("counter")||s.includes("trend"))return"TREND";if(s.includes("edge"))return"EDGE";
+    if(s.includes("guard"))return"GUARD";if(s.includes("exhaust"))return"EXH";
+    return s.replace(/[^a-z0-9]/g," ").trim().slice(0,7).toUpperCase()||"SKIP";}
+  drawReplay(){try{if(!this.chart||!this.series)return;const el=$("price-chart");let svg=$("replay-svg");
+    if(!svg){svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.id="replay-svg";svg.style.cssText="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2";el.appendChild(svg);}
+    svg.innerHTML="";const bs=this._replay;if(!bs||!bs.length)return;const NS="http://www.w3.org/2000/svg",H=el.clientHeight,ts=this.chart.timeScale();
+    const yB=H-40,hB=7;// state band sits just above the time axis
+    const COL={ANOMALY:"rgba(90,169,255,.55)",ARMING:"rgba(232,184,102,.85)",RETEST_WAIT:"rgba(56,224,255,.85)",TRIGGERED:"rgba(62,224,138,.95)",INVALIDATED:"rgba(255,93,115,.7)"};
+    let cw=3;if(bs.length>1){const x0=ts.timeToCoordinate(bs[0].t),x1=ts.timeToCoordinate(bs[1].t);if(x0!=null&&x1!=null)cw=Math.max(1.5,Math.abs(x1-x0)-0.4);}
+    let lastLbl="",nLbl=0;
+    bs.forEach(b=>{const x=ts.timeToCoordinate(b.t);if(x==null)return;const c=COL[b.state];
+      if(c){const r=document.createElementNS(NS,"rect");r.setAttribute("x",x-cw/2);r.setAttribute("y",yB);r.setAttribute("width",cw);r.setAttribute("height",hB);r.setAttribute("fill",c);svg.appendChild(r);}
+      if(b.exh){const d=document.createElementNS(NS,"rect");d.setAttribute("x",x-1);d.setAttribute("y",yB+hB+1);d.setAttribute("width",2);d.setAttribute("height",2);d.setAttribute("fill","rgba(232,184,102,.9)");svg.appendChild(d);}
+      if(b.skip&&b.state!=="TRIGGERED"){if(b.skip!==lastLbl&&nLbl<14){nLbl++;const t=document.createElementNS(NS,"text");t.setAttribute("x",x);t.setAttribute("y",yB-3);t.setAttribute("fill","rgba(255,140,150,.78)");t.setAttribute("transform","rotate(-90 "+x+" "+(yB-3)+")");t.style.font="700 7px monospace";t.textContent=this._skAbbr(b.skip);svg.appendChild(t);}lastLbl=b.skip;}});
+    const cap=document.createElementNS(NS,"text");cap.setAttribute("x",4);cap.setAttribute("y",yB+hB-1);cap.setAttribute("fill","rgba(255,255,255,.32)");cap.style.font="700 7px monospace";cap.textContent="DECISION";svg.appendChild(cap);
+  }catch(e){}}
   drawZone(p){if(!this.series)return;this.clearZone();const hw=this.pip===0.01?0.5:0.0005;try{this.zoneLines.push(this.series.createPriceLine({price:p,color:"rgba(56,224,255,.85)",lineWidth:2,lineStyle:0,axisLabelVisible:true,title:"RETEST"}));this.zoneLines.push(this.series.createPriceLine({price:p+hw,color:"rgba(56,224,255,.3)",lineWidth:1,lineStyle:2,axisLabelVisible:false,title:""}));this.zoneLines.push(this.series.createPriceLine({price:p-hw,color:"rgba(56,224,255,.3)",lineWidth:1,lineStyle:2,axisLabelVisible:false,title:""}));}catch(e){}}
   sessions(cs){if(!cs||!cs.length)return[];const days={};cs.forEach(c=>{const d=new Date(c.time*1000),k=d.getUTCFullYear()+"-"+d.getUTCMonth()+"-"+d.getUTCDate();(days[k]=days[k]||[]).push({t:+c.time,h:d.getUTCHours()});});
     const defs=[{n:"SYD",s:21,e:6,c:"rgba(90,169,255,.05)"},{n:"TYO",s:0,e:9,c:"rgba(255,93,115,.04)"},{n:"LDN",s:7,e:16,c:"rgba(167,139,250,.05)"},{n:"NY",s:12,e:21,c:"rgba(62,224,138,.04)"}];
