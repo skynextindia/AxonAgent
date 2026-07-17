@@ -513,6 +513,56 @@ class DashboardServer:
             except Exception as e:
                 return {"status": "error", "message": str(e), "trades": []}
 
+        @self.app.get("/api/fade_signals")
+        def get_fade_signals(symbol: str = None, limit: int = 200):
+            """Read-only: recent structure-fade SHADOW signals from
+            reports/fade_signals_{symbol}.jsonl (records only, never trades).
+            Powers the chart's fade ghost-arrow overlay. Newest first."""
+            import os, json as _json
+            if not symbol:
+                return {"status": "success", "signals": []}
+            path = os.path.join("reports", f"fade_signals_{symbol}.jsonl")
+            if not os.path.exists(path):
+                return {"status": "success", "signals": []}
+            out = []
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    for ln in f:
+                        ln = ln.strip()
+                        if not ln:
+                            continue
+                        try:
+                            out.append(_json.loads(ln))
+                        except Exception:
+                            continue
+                return {"status": "success", "signals": out[-int(limit):][::-1]}
+            except Exception as e:
+                return {"status": "error", "message": str(e), "signals": []}
+
+        @self.app.get("/api/range_stats")
+        def get_range_stats(symbol: str = None):
+            """Read-only: per-session average range + session/day ratio and ADR
+            from reports/range_stats_{symbol}.json (computed daily by
+            range_stats.py). Powers the chart HUD's session-ADR line. Derived
+            purely from market-data snapshots -- no account/execution data."""
+            import os, json as _json
+            empty = {"status": "success", "sessions": {}, "adr5": 0, "adr20": 0}
+            if not symbol:
+                return empty
+            path = os.path.join("reports", f"range_stats_{symbol}.json")
+            if not os.path.exists(path):
+                return empty
+            try:
+                with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                    d = _json.load(f)
+                return {"status": "success",
+                        "sessions": d.get("sessions", {}),
+                        "adr5": d.get("adr5", 0), "adr20": d.get("adr20", 0),
+                        "avg_range_pips": d.get("avg_range_pips", 0)}
+            except Exception as e:
+                return {"status": "error", "message": str(e),
+                        "sessions": {}, "adr5": 0, "adr20": 0}
+
         @self.app.websocket("/ws")
         async def websocket_endpoint(websocket: WebSocket):
             # Security: only accept WebSocket connections from localhost origins

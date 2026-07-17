@@ -32,13 +32,23 @@ REV_TH_DEFAULT = 8.0
 
 
 def compute(symbol: str, keep_days: int = 30) -> Dict:
+    import glob
     pip = _pip_mult(symbol)
-    store = os.path.join("reports", f"engine_snapshots_{symbol}.csv")
-    if not os.path.exists(store):
+    # Include rotated stores (*_old_*, *_pre_location) so a schema-rotation on
+    # restart doesn't throw away the accumulated history the stats need.
+    paths = sorted(glob.glob(os.path.join("reports", f"engine_snapshots_{symbol}*.csv")))
+    if not paths:
         print(f"[range] no snapshot store for {symbol}")
         return {}
-    with open(store, "r", encoding="utf-8", newline="") as f:
-        rows = list(csv.DictReader(f))
+    rows: List[dict] = []
+    for p in paths:
+        try:
+            with open(p, "r", encoding="utf-8", newline="") as f:
+                rows.extend(csv.DictReader(f))
+        except Exception:
+            continue
+    rows = [r for r in rows if r.get("timestamp") and r.get("price")]
+    rows.sort(key=lambda r: r.get("timestamp") or "")
     if len(rows) < 100:
         print(f"[range] {symbol}: too few rows ({len(rows)})")
         return {}
@@ -70,6 +80,41 @@ def compute(symbol: str, keep_days: int = 30) -> Dict:
     ranges = [d["range_pips"] for d in days]
     adr5 = round(statistics.mean(ranges[-5:]), 1)
     adr20 = round(statistics.mean(ranges[-20:]), 1)
+    avg_day = statistics.mean(ranges)
+
+    # ── per-session average range + session/day ratio ──────────────
+    # UTC session windows (match the dashboard session bands). A session's
+    # range = high-low of prices inside its window on that day, averaged.
+    SESSIONS = {"ASIA": (0, 8), "LONDON": (7, 16), "NY": (12, 21)}
+    counted = {d["date"] for d in days}
+    sess_vals = {s: [] for s in SESSIONS}
+    for d, drows in by_day.items():
+        if d not in counted:
+            continue
+        for s, (a, b) in SESSIONS.items():
+            sp = []
+            for r in drows:
+                p = _f(r, "price")
+                if p <= 0:
+                    continue
+                ts = r.get("timestamp") or ""
+                try:
+                    hh = int(ts[11:13])
+                except (ValueError, IndexError):
+                    continue
+                if a <= hh < b:
+                    sp.append(p)
+            if len(sp) >= 20:
+                sess_vals[s].append((max(sp) - min(sp)) / pip)
+    sessions_out = {}
+    for s, vals in sess_vals.items():
+        if vals:
+            avg = statistics.mean(vals)
+            sessions_out[s] = {
+                "avg_pips": round(avg, 1),
+                "ratio": round(avg / avg_day, 2) if avg_day else 0.0,  # session vs full-day range
+                "days": len(vals),
+            }
 
     # ── reversal sizes + WHERE in the day range turns form ─────────
     th = REV_TH.get(symbol.upper(), REV_TH_DEFAULT)
@@ -102,6 +147,7 @@ def compute(symbol: str, keep_days: int = 30) -> Dict:
         "reversal_zone_hist": zone_hist,   # deciles low->high
         "reversal_edge_share": round(sum(zone_hist[:2]) + sum(zone_hist[8:]), 0) and round(
             (sum(zone_hist[:2]) + sum(zone_hist[8:])) / max(1, sum(zone_hist)), 2),
+        "sessions": sessions_out,          # per-session avg range + session/day ratio
         "days": days,
     }
     path_out = os.path.join("reports", f"range_stats_{symbol}.json")
