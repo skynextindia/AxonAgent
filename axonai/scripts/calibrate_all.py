@@ -15,6 +15,7 @@ session rolls over, then restart the daemons (or let them reload on next start):
 from __future__ import annotations
 
 from axonai.scripts.eod_reversal_analysis import analyze, _default_reversal_pips
+from axonai.scripts.range_stats import compute as compute_range_stats
 
 SYMBOLS = ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "XAUUSD"]
 
@@ -27,6 +28,10 @@ def main() -> None:
             analyze(sym, reversal_pips=rev_pips, pre=10, min_events=8)
         except Exception as e:  # never let one pair abort the batch
             print(f"[calibrate_all] {sym} FAILED: {e}")
+        try:
+            compute_range_stats(sym)  # daily range / ADR / reversal-zone stats
+        except Exception as e:
+            print(f"[calibrate_all] {sym} range_stats FAILED: {e}")
 
 
 if __name__ == "__main__":

@@ -110,6 +110,21 @@ class AxonDaemon:
                 logger.info("Loaded %d calibration params from %s", len(_params), _cp)
         except Exception as _e:
             logger.warning("Calibration params load failed (%s); using defaults", _e)
+        # Daily-range stats (ADR, reversal sizes/zones) from range_stats.py —
+        # powers live range_pos / range_used features. Fail-open like above.
+        self._range_stats = {}
+        try:
+            import json as _json2, os as _os2
+            _rs = _os2.path.join("reports", f"range_stats_{self.mt5_symbol}.json")
+            if _os2.path.exists(_rs):
+                with open(_rs, "r", encoding="utf-8") as _f2:
+                    self._range_stats = _json2.load(_f2) or {}
+                logger.info("Loaded range stats: ADR5=%s med_rev=%sp edge_share=%s",
+                            self._range_stats.get("adr5"),
+                            self._range_stats.get("reversal_median_pips"),
+                            self._range_stats.get("reversal_edge_share"))
+        except Exception as _e:
+            logger.warning("Range stats load failed (%s)", _e)
         # Per-pair raw-scale calibration. Velocity/displacement are measured in
         # raw pips (price-delta / pip_mult). For XAUUSD pip_mult=0.01 but gold
         # moves whole dollars, so raw pip counts run ~10x an FX pair's — every
@@ -2443,6 +2458,24 @@ class AxonDaemon:
             "near_level_type": getattr(lc, "nearest_level_type", "") or "",
             "near_level_price": round(float(getattr(lc, "nearest_level_price", 0.0) or 0.0), 5),
         }
+        # Daily-range position features: where price sits in today's range
+        # (0=day low, 1=day high) and how much of a normal day (ADR) is used.
+        # Feeds the reversal-zone model — turns cluster at range edges on
+        # EUR/AUD/JPY (edge_share 0.46-0.80 measured).
+        try:
+            _hi = getattr(self.live_evidence, "_today_high", None)
+            _lo = getattr(self.live_evidence, "_today_low", None)
+            _pipm = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+            _adr = float(self._range_stats.get("adr5") or self._range_stats.get("adr20") or 0.0)
+            if _hi and _lo and _hi > _lo:
+                row["range_pos"] = round((float(price) - _lo) / (_hi - _lo), 3)
+                row["range_used"] = round(((_hi - _lo) / _pipm) / _adr, 3) if _adr else 0.0
+            else:
+                row["range_pos"] = 0.5
+                row["range_used"] = 0.0
+        except Exception:
+            row["range_pos"] = 0.5
+            row["range_used"] = 0.0
         if self._snap_store_fh is None and not self._snap_store_ready:
             os.makedirs("reports", exist_ok=True)
             path = os.path.join("reports", f"engine_snapshots_{self.mt5_symbol}.csv")
@@ -2453,8 +2486,12 @@ class AxonDaemon:
                     with open(path, "r", encoding="utf-8") as _hf:
                         existing_cols = _hf.readline().strip().split(",")
                     if existing_cols != list(row.keys()):
-                        os.rename(path, path.replace(".csv", "_pre_location.csv"))
-                        logger.info("Snapshot store schema changed — rotated old file to *_pre_location.csv")
+                        # Unique rotation target: a fixed name collides on the
+                        # SECOND schema change (os.rename onto an existing file
+                        # fails on Windows -> ragged CSV).
+                        _stamp = int(os.path.getmtime(path))
+                        os.rename(path, path.replace(".csv", f"_old_{_stamp}.csv"))
+                        logger.info("Snapshot store schema changed — rotated old file to *_old_%d.csv", _stamp)
                 except Exception as _re:
                     logger.warning("Snapshot store rotation check failed: %s", _re)
             need_header = not os.path.exists(path) or os.path.getsize(path) == 0
