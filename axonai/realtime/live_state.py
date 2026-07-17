@@ -595,6 +595,9 @@ class LiveMarketEvidence:
         sym_clean = symbol.strip().upper().replace("/", "").replace("=X", "")
         is_jpy = sym_clean.endswith("JPY") or (len(sym_clean) >= 6 and sym_clean[3:6] == "JPY") or "XAU" in sym_clean
         self._pip_mult = 0.01 if is_jpy else 0.0001
+        # Level-geometry scale (gold moves in dollars): used by the ROUND grid,
+        # swing floors and touch tolerances. FX/JPY = 1.
+        self._lvl_scale = float((config or {}).get("pair_move_scale") or (10.0 if "XAU" in sym_clean else 1.0))
         
         self._broker_symbol = _to_mt5_symbol(self.symbol, self.config)
         self._offset_hours = get_broker_tz_offset(self._broker_symbol)
