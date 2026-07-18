@@ -739,7 +739,7 @@ class Axon{
       this.pushEvt(sym,{kind:"fade",dir:(s.direction||"").toUpperCase(),price:+s.price,t,ticket:"fade_"+t});});}catch(e){}}
   async loadRangeStats(){try{const sym=this.active;if(!sym)return;const r=await fetch("/api/range_stats?symbol="+sym);const j=await r.json();this._rstat=(j&&j.sessions&&Object.keys(j.sessions).length)?j:null;this.rangeHUD();}catch(e){this._rstat=null;}}
   async loadReplay(){try{const sym=this.active;if(!sym)return;const r=await fetch("/api/replay?symbol="+sym+"&buckets=600");const j=await r.json();this._replay=(j&&j.buckets)?j.buckets:[];this.drawReplay();}catch(e){this._replay=[];}}
-  async loadPatterns(){try{const sym=this.active;if(!sym)return;const r=await fetch("/api/patterns?symbol="+sym+"&days=8");const j=await r.json();this._patterns=(j&&j.patterns)?j.patterns:[];this.drawPatterns();}catch(e){this._patterns=[];}}
+  async loadPatterns(){try{const sym=this.active;if(!sym)return;const [r1,r2]=await Promise.all([fetch("/api/patterns?symbol="+sym+"&days=8"),fetch("/api/exhaustion?symbol="+sym+"&days=4")]);const j1=await r1.json(),j2=await r2.json();this._patterns=[].concat((j1&&j1.patterns)||[],(j2&&j2.patterns)||[]);this.drawPatterns();}catch(e){this._patterns=[];}}
   drawPatterns(){try{if(!this.chart||!this.series)return;const el=$("price-chart");let svg=$("pat-svg");
     if(!svg){svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.id="pat-svg";svg.style.cssText="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2";el.appendChild(svg);}
     svg.innerHTML="";const ps=this._patterns;if(!ps||!ps.length)return;const NS="http://www.w3.org/2000/svg",tsc=this.chart.timeScale();
