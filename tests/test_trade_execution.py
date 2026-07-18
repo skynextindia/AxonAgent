@@ -16,6 +16,9 @@ class TestMT5TradeExecutor(unittest.TestCase):
             "realtime_magic_number": 999999,
             "realtime_default_lot_size": 0.02,
             "realtime_deviation": 10,
+            # These tests exercise direct-mode single-terminal execution, which is
+            # the explicit opt-in case for the feed-routing safety guard.
+            "allow_direct_feed_execution": True,
         }
         self.executor = MT5TradeExecutor(self.config)
 
@@ -302,8 +305,10 @@ class TestMT5TradeExecutor(unittest.TestCase):
         self.executor.circuit_breaker = MagicMock(is_tripped=False)
 
         mock_send_cmd.side_effect = [
-            {"success": True, "positions": []},  # positions_get check
-            {"success": True, "equity": 10000.0, "balance": 10000.0},  # account_info
+            {"success": True, "equity": 10000.0, "balance": 10000.0},  # RiskGuard equity feed
+            {"success": True, "positions": []},  # PortfolioGuard positions_get
+            {"success": True, "positions": []},  # per-magic conflict positions_get
+            {"success": True, "equity": 10000.0, "balance": 10000.0},  # account_info (sizing)
             {
                 "success": True,
                 "point": 0.00001,
@@ -327,7 +332,7 @@ class TestMT5TradeExecutor(unittest.TestCase):
         self.assertIsNotNone(res)
         self.assertTrue(res["success"])
         self.assertEqual(res["order"], 99991)
-        self.assertEqual(mock_send_cmd.call_count, 4)
+        self.assertEqual(mock_send_cmd.call_count, 6)
         
         # Verify open order request sent to bridge
         open_args = mock_send_cmd.call_args[0][1]
