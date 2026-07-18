@@ -1268,6 +1268,7 @@ class AxonDaemon:
         # ~2:1 MFE/MAE. Shadow only — records signals, never trades.
         try:
             self._structure_fade_shadow(snapshot, timestamp, mid)
+            self._exhaustion_shadow(snapshot, timestamp, mid)
         except Exception:
             pass
 
@@ -2412,6 +2413,74 @@ class AxonDaemon:
             f.write(_json.dumps(rec) + "\n")
         logger.info("STRUCTURE-FADE shadow signal: %s %s @ %.5f (%s %.1fp away, revp %.2f)",
                     direction, self.mt5_symbol, price, lt, dist, revp)
+
+    def _exhaustion_shadow(self, snapshot, timestamp, price: float) -> None:
+        """SHADOW-MODE displacement-exhaustion detector (records, never trades).
+
+        The machine reversal signature: displacement collapses (disp_ratio drops
+        from >=0.18 to <=0.10) while reversal_pressure stays high (>=0.62) after
+        a directional push. Offline scoring on the snapshot store: ~83% hit on
+        XAUUSD (avg ~880p), noise on FX. Signals -> reports/pattern_signals_
+        {symbol}.jsonl for LIVE (no-hindsight) scoring before this can become an
+        entry path. Fires on all pairs so the live FX-vs-gold split is confirmed.
+        """
+        cfg = self.config
+        if not cfg.get("exhaustion_shadow", True) or snapshot is None:
+            return
+        try:
+            disp = float(getattr(getattr(snapshot, "displacement", None),
+                                 "displacement_ratio", 0.0) or 0.0)
+        except Exception:
+            return
+        m = self.reversal_model._last_mtf_state
+        revp = float(getattr(m, "reversal_pressure", 0.0) or 0.0) if m else 0.0
+        now_s = timestamp.timestamp() if hasattr(timestamp, "timestamp") else float(timestamp)
+        hist = getattr(self, "_exh_hist", None)
+        if hist is None:
+            hist = self._exh_hist = []
+        hist.append((now_s, float(price), disp))
+        cutoff = now_s - 900.0            # 15m rolling window
+        while hist and hist[0][0] < cutoff:
+            hist.pop(0)
+        if len(hist) < 5:
+            return
+        PTH, DTH, DHI = float(cfg.get("exh_revp_min", 0.62)), 0.10, 0.18
+        if disp > DTH or revp < PTH:
+            return
+        if max(h[2] for h in hist) < DHI:            # nothing to collapse from
+            return
+        pipm = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+        exp = float(self._range_stats.get("reversal_median_pips") or 0.0)
+        if exp <= 0:
+            exp = 200.0 if "XAU" in self.mt5_symbol.upper() else 8.0
+        move = float(price) - hist[0][1]             # directional push over the window
+        if abs(move) < 0.5 * exp * pipm:
+            return
+        if now_s - getattr(self, "_last_exh_signal_ts", 0.0) < 1800.0:   # 30m cooldown
+            return
+        self._last_exh_signal_ts = now_s
+        direction = "SELL" if move > 0 else "BUY"    # rose into exhaustion -> top -> SELL
+        import os, json as _json
+        os.makedirs("reports", exist_ok=True)
+        v = getattr(snapshot, "velocity", None)
+        rec = {
+            "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S.%f")[:-3] if hasattr(timestamp, "strftime") else str(timestamp),
+            "symbol": self.mt5_symbol,
+            "pattern": "exhaustion",
+            "direction": direction,
+            "price": round(float(price), 5),
+            "disp_ratio": round(disp, 3),
+            "disp_peak_15m": round(max(h[2] for h in hist), 3),
+            "reversal_pressure": round(revp, 3),
+            "push_pips": round(move / pipm, 1),
+            "exp_pips": round(exp, 0),
+            "vel_pct": round(float(getattr(v, "percentile", 0.0) or 0.0), 1) if v else 0.0,
+            "regime": str(getattr(getattr(snapshot, "regime", None), "regime", "") or ""),
+        }
+        with open(os.path.join("reports", f"pattern_signals_{self.mt5_symbol}.jsonl"), "a", encoding="utf-8") as f:
+            f.write(_json.dumps(rec) + "\n")
+        logger.info("EXHAUSTION shadow signal: %s %s @ %.5f (disp %.2f, peak %.2f, revp %.2f, push %.0fp)",
+                    direction, self.mt5_symbol, price, disp, max(h[2] for h in hist), revp, move / pipm)
 
     def _record_engine_snapshot(self, snapshot, timestamp, price: float) -> None:
         """Append the daemon-processed engine snapshot to a per-pair CSV store.
