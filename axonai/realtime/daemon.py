@@ -2070,6 +2070,13 @@ class AxonDaemon:
                                 self.trade_analytics.record_exit(
                                     p["ticket"], price, profit_pips, decision.reason, snapshot
                                 )
+                                # Record the real ExitEngine reason so _check_for_closed_positions
+                                # labels signals.jsonl correctly instead of "Manual Close / Unknown"
+                                self._active_trade_exit_reasons[p["ticket"]] = {
+                                    "reason": decision.reason,
+                                    "strategy": "exit_engine",
+                                    "urgency": getattr(decision, "urgency", 0.0),
+                                }
                                 self.reversal_model.clear_trade()
                                 with self._position_lock:
                                     if p["ticket"] in self._tracked_positions:
@@ -2110,6 +2117,13 @@ class AxonDaemon:
                                             self.trade_analytics.record_exit(
                                                 p["ticket"], price, profit_pips, decision.reason, snapshot
                                             )
+                                            # Record the real ExitEngine reason so signals.jsonl is
+                                            # labeled correctly instead of "Manual Close / Unknown"
+                                            self._active_trade_exit_reasons[p["ticket"]] = {
+                                                "reason": decision.reason,
+                                                "strategy": "exit_engine",
+                                                "urgency": getattr(decision, "urgency", 0.0),
+                                            }
                                             self.reversal_model.clear_trade()
                                             with self._position_lock:
                                                 if p["ticket"] in self._tracked_positions:
@@ -2893,8 +2907,13 @@ class AxonDaemon:
                     elif "so" in comment:
                         reason = "Stop Out (SO)"
                     else:
-                        if not reason or reason.startswith("Closed ("):
-                            reason = f"Closed ({exit_deal['comment'] if is_bridge else getattr(exit_deal, 'comment', 'Manual')})"
+                        cmt = ((exit_deal["comment"] if is_bridge else getattr(exit_deal, "comment", "")) or "").strip()
+                        # Prefer an informative broker comment (e.g. "Adaptive Exit: ...",
+                        # EOD close) over the "Manual Close / Unknown" default.
+                        if reason == "Manual Close / Unknown" and cmt and cmt.lower() not in ("manual", "cancelled"):
+                            reason = cmt
+                        elif not reason or reason.startswith("Closed ("):
+                            reason = f"Closed ({cmt or 'Manual'})"
                 else:
                     logger.warning(f"[DEAL_NOT_FOUND] Ticket {ticket}: No exit deal in {len(deals)} deals returned")
                         
