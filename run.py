@@ -305,85 +305,113 @@ def main():
         # while orders route to a SEPARATE execution bridge process bound to the
         # MetaQuotes terminal (--exec-path). One MT5 connection per process, so
         # execution must live in its own process.
-        bridge_proc = None
-        if args.exec_path:
-            if not args.feed_path:
-                print("  [!] --exec-path set without --feed-path: the data feed will "
-                      "auto-detect a terminal and may bind to MetaQuotes. Pass --feed-path "
-                      "(Exness) to keep feed and execution on separate terminals.")
-            bridge_port = 8766
-            bridge_proc = start_execution_bridge(args.exec_path, bridge_port)
-            config["realtime_execution_mode"] = "bridge"
-            config["realtime_execution_bridge_host"] = "127.0.0.1"
-            config["realtime_execution_bridge_port"] = bridge_port
-
-        # ── Multicurrency: spin up one daemon thread + one calibrator per symbol ──
         import threading
+        import time
+        import signal
 
-        daemons = {}       # symbol -> AxonDaemon
+        bridge_proc = None
+        daemons = {}         # symbol -> AxonDaemon
         daemon_threads = {}  # symbol -> Thread
         calib_procs = []     # list of calibrator subprocess handles
 
-        for sym in symbols:
-            sym_config = config.copy()
-            sym_config["symbol"] = sym
-            sym_config["mt5_symbol"] = sym
+        def _cleanup():
+            """Stop daemons, calibrators, and the execution bridge. Idempotent and
+            exception-tolerant so it is safe from the SIGINT/SIGTERM path OR a
+            startup failure — nothing gets orphaned."""
+            for sym, d in daemons.items():
+                try:
+                    print(f"  Stopping daemon {sym}...")
+                    d.stop()
+                except Exception:
+                    pass
+            for cp in calib_procs:
+                try:
+                    if cp.poll() is None:
+                        print("  Stopping calibrator...")
+                        cp.terminate()
+                        try:
+                            cp.wait(timeout=5)
+                        except Exception:
+                            cp.kill()
+                except Exception:
+                    pass
+            if bridge_proc is not None:
+                try:
+                    if bridge_proc.poll() is None:
+                        print("  Stopping execution bridge...")
+                        bridge_proc.terminate()
+                        try:
+                            bridge_proc.wait(timeout=5)
+                        except Exception:
+                            bridge_proc.kill()
+                except Exception:
+                    pass
 
-            daemon = AxonDaemon(symbol=sym, config=sym_config)
-            daemons[sym] = daemon
-
-            # Register with dashboard so it can route data per symbol
-            if server:
-                server.register_daemon(sym, daemon)
-
-            # Start daemon.start() in a background thread (it blocks internally)
-            t = threading.Thread(
-                target=daemon.start,
-                name=f"daemon-{sym}",
-                daemon=True,
-            )
-            daemon_threads[sym] = t
-
-        # Start all daemon threads
-        for sym, t in daemon_threads.items():
-            print(f"  [+] Starting daemon thread for {sym}...")
-            t.start()
-            # Small stagger to avoid MT5 API contention on startup
-            import time
-            time.sleep(2)
-
-        # Start one calibrator subprocess per symbol
-        for sym in symbols:
-            cp = start_calibrator_background(sym)
-            if cp:
-                calib_procs.append(cp)
-
-        print()
-        print(f"  Dashboard + {len(daemons)} Daemon(s) running. Press Ctrl+C to stop.")
+        # Treat SIGTERM (service manager / container / OS stop) like Ctrl+C so the
+        # shutdown path runs instead of orphaning the daemons and execution bridge.
+        def _on_sigterm(signum, frame):
+            raise KeyboardInterrupt()
         try:
-            import time
+            signal.signal(signal.SIGTERM, _on_sigterm)
+        except (ValueError, OSError, AttributeError):
+            pass  # not main thread / unsupported platform
+
+        try:
+            # Dual-terminal: data feed stays on this process (Exness via --feed-path);
+            # orders route to a SEPARATE execution bridge process bound to the
+            # MetaQuotes terminal (--exec-path). One MT5 connection per process.
+            if args.exec_path:
+                if not args.feed_path:
+                    print("  [!] --exec-path set without --feed-path: the data feed will "
+                          "auto-detect a terminal and may bind to MetaQuotes. Pass --feed-path "
+                          "(Exness) to keep feed and execution on separate terminals.")
+                bridge_port = 8766
+                bridge_proc = start_execution_bridge(args.exec_path, bridge_port)
+                config["realtime_execution_mode"] = "bridge"
+                config["realtime_execution_bridge_host"] = "127.0.0.1"
+                config["realtime_execution_bridge_port"] = bridge_port
+
+            # ── Multicurrency: one daemon thread + one calibrator per symbol ──
+            for sym in symbols:
+                sym_config = config.copy()
+                sym_config["symbol"] = sym
+                sym_config["mt5_symbol"] = sym
+
+                daemon = AxonDaemon(symbol=sym, config=sym_config)
+                daemons[sym] = daemon
+
+                # Register with dashboard so it can route data per symbol
+                if server:
+                    server.register_daemon(sym, daemon)
+
+                # Start daemon.start() in a background thread (it blocks internally)
+                t = threading.Thread(
+                    target=daemon.start,
+                    name=f"daemon-{sym}",
+                    daemon=True,
+                )
+                daemon_threads[sym] = t
+
+            # Start all daemon threads
+            for sym, t in daemon_threads.items():
+                print(f"  [+] Starting daemon thread for {sym}...")
+                t.start()
+                time.sleep(2)  # small stagger to avoid MT5 API contention on startup
+
+            # Start one calibrator subprocess per symbol
+            for sym in symbols:
+                cp = start_calibrator_background(sym)
+                if cp:
+                    calib_procs.append(cp)
+
+            print()
+            print(f"  Dashboard + {len(daemons)} Daemon(s) running. Press Ctrl+C to stop.")
             while True:
                 time.sleep(1)
         except KeyboardInterrupt:
             print("\n  Stopping...")
-            for sym, d in daemons.items():
-                print(f"  Stopping daemon {sym}...")
-                d.stop()
-            for cp in calib_procs:
-                if cp.poll() is None:
-                    print("  Stopping calibrator...")
-                    cp.terminate()
-                    try:
-                        cp.wait(timeout=5)
-                    except Exception:
-                        cp.kill()
-            if bridge_proc is not None and bridge_proc.poll() is None:
-                print("  Stopping execution bridge...")
-                bridge_proc.terminate()
-                try:
-                    bridge_proc.wait(timeout=5)
-                except Exception:
-                    bridge_proc.kill()
+        finally:
+            _cleanup()
 
 
 if __name__ == "__main__":
