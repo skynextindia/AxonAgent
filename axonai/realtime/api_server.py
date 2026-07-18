@@ -614,7 +614,8 @@ class DashboardServer:
                             a = agg[bk] = {"t": bk, "state": "IDLE", "dir": "",
                                            "rank": -1, "q": 0.0, "skips": {},
                                            "revp_s": 0.0, "revp_n": 0,
-                                           "exh": False, "rpos": None}
+                                           "exh": False, "rpos": None,
+                                           "swp": False, "void": False, "bos": False}
                         rk = RANK.get(st, 0)
                         if rk >= a["rank"]:
                             a["rank"] = rk
@@ -636,6 +637,12 @@ class DashboardServer:
                             pass
                         if (r.get("is_exhaustion_zone") or "").strip().lower() in ("1", "true", "yes"):
                             a["exh"] = True
+                        for _k, _c in (("swp", "active_sweeps"), ("void", "liquidity_void"), ("bos", "structure_break")):
+                            try:
+                                if float(r.get(_c) or 0) >= 1:
+                                    a[_k] = True
+                            except ValueError:
+                                pass
                         try:
                             a["rpos"] = float(r.get("range_pos") or 0)
                         except ValueError:
@@ -650,7 +657,7 @@ class DashboardServer:
                             "q": round(a["q"], 2),
                             "skip": sk[0][0] if sk else "",
                             "revp": round(a["revp_s"] / a["revp_n"], 2) if a["revp_n"] else 0.0,
-                            "exh": a["exh"],
+                            "exh": a["exh"], "swp": a["swp"], "void": a["void"], "bos": a["bos"],
                             "rpos": round(a["rpos"], 2) if a["rpos"] is not None else None})
             out["buckets"] = res
             return out
