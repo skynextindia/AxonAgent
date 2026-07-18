@@ -2490,6 +2490,16 @@ class AxonDaemon:
         except Exception:
             row["range_pos"] = 0.5
             row["range_used"] = 0.0
+        # dist_to_sr telemetry: lc.distance_to_sr reports 0, so derive the distance
+        # to the nearest S/R level (pips) from near_level_price, which is populated.
+        # Snapshot-only recording; does not feed live gating.
+        try:
+            _nlp = row.get("near_level_price", 0.0)
+            _pm2 = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+            if _nlp and float(price) > 0:
+                row["dist_to_sr"] = round(abs(float(price) - _nlp) / _pm2, 1)
+        except Exception:
+            pass
         if self._snap_store_fh is None and not self._snap_store_ready:
             os.makedirs("reports", exist_ok=True)
             path = os.path.join("reports", f"engine_snapshots_{self.mt5_symbol}.csv")
