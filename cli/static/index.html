@@ -157,9 +157,8 @@ main{flex:1;min-height:0;position:relative}
 <div class="rail" id="rail"></div>
 <nav>
   <button data-v="cockpit" class="on">Cockpit</button>
-  <button data-v="intel">Intelligence</button>
+  <button data-v="portfolio">Portfolio</button>
   <button data-v="journal">Journal</button>
-  <button data-v="system">System</button>
 </nav>
 
 <main>
@@ -240,22 +239,25 @@ main{flex:1;min-height:0;position:relative}
           <div class="kv">Level <b><span id="lc-level-type">--</span> <span id="lc-level-price">--</span></b></div></div>
       </div>
     </div>
-    <!-- RIGHT: risk + levels + positions -->
+    <!-- RIGHT: focused-symbol levels (risk/positions/orders live on the Portfolio tab) -->
     <div class="col">
-      <div class="card"><h3>Risk / day <span class="led on" id="risk-status-led"></span></h3>
-        <div class="kv">Day PnL <b id="risk-pnl">+0.00</b></div><div class="kv">Limit <b id="risk-limit">-500</b></div>
-        <div class="bar" style="margin:3px 0"><i id="risk-bar" style="background:var(--green);width:0%"></i></div>
-        <div class="kv">Max pos <b id="risk-pos">5</b></div><div class="kv">Q-floor <b id="risk-floor">0.50</b></div>
-        <div class="kv">Guard <b id="risk-status" class="pos">ACTIVE</b></div></div>
       <div class="card" style="flex:1;min-height:0;display:flex;flex-direction:column"><h3>Dynamic levels</h3><div id="dynamic-levels" style="flex:1;overflow:auto;min-height:120px"><span class="empty">Awaiting…</span></div></div>
-      <div class="card"><h3>Positions</h3><div style="overflow:auto"><table class="tbl"><thead><tr><th>Sym</th><th>Type</th><th>Vol</th><th>PnL</th></tr></thead><tbody id="positions-table-body"><tr><td colspan="4" class="empty">None</td></tr></tbody></table></div></div>
-      <div class="card"><h3>Resting orders</h3><div style="overflow:auto"><table class="tbl"><thead><tr><th>Sym</th><th>Type</th><th>Price</th><th>Dist</th></tr></thead><tbody id="orders-table-body"><tr><td colspan="4" class="empty">None</td></tr></tbody></table></div></div>
     </div>
   </div>
 </section>
 
-<!-- ========== INTELLIGENCE ========== -->
-<section id="v-intel" class="view">
+<!-- ========== PORTFOLIO ========== -->
+<section id="v-portfolio" class="view">
+  <div class="grid4" style="align-items:start;margin-bottom:10px">
+    <div class="card"><h3>Risk / day <span class="led on" id="risk-status-led"></span></h3>
+      <div class="kv">Day PnL <b id="risk-pnl">+0.00</b></div><div class="kv">Limit <b id="risk-limit">-500</b></div>
+      <div class="bar" style="margin:3px 0"><i id="risk-bar" style="background:var(--green);width:0%"></i></div>
+      <div class="kv">Max pos <b id="risk-pos">5</b></div><div class="kv">Q-floor <b id="risk-floor">0.50</b></div>
+      <div class="kv">Guard <b id="risk-status" class="pos">ACTIVE</b></div></div>
+    <div class="card"><h3>Positions</h3><div style="overflow:auto"><table class="tbl"><thead><tr><th>Sym</th><th>Type</th><th>Vol</th><th>PnL</th></tr></thead><tbody id="positions-table-body"><tr><td colspan="4" class="empty">None</td></tr></tbody></table></div></div>
+    <div class="card"><h3>Resting orders</h3><div style="overflow:auto"><table class="tbl"><thead><tr><th>Sym</th><th>Type</th><th>Price</th><th>Dist</th></tr></thead><tbody id="orders-table-body"><tr><td colspan="4" class="empty">None</td></tr></tbody></table></div></div>
+    <div class="card"><h3>Connections</h3><div class="kv">WebSocket <b id="health-ws">—</b></div><div class="kv">Daemon <b id="health-daemon">—</b></div><div class="kv">MT5 <b id="health-mt5">—</b></div></div>
+  </div>
   <div class="grid2" style="align-items:start">
     <div class="col">
       <div class="card"><h3>Engine pipeline <span class="pill trade" id="pipeline-status">ACTIVE</span></h3>
@@ -275,6 +277,12 @@ main{flex:1;min-height:0;position:relative}
       <div class="card"><h3>Reason stream <button id="clear-console-btn-intel" style="font-size:8px;color:var(--dim);background:none;border:1px solid var(--line);border-radius:4px;padding:2px 7px;cursor:pointer">CLEAR</button></h3><div class="feed" id="events-log-container"><div class="empty">Awaiting events…</div></div></div>
       <div class="card"><h3>Economic calendar</h3><div id="econ-calendar-container"><div class="empty">No upcoming events.</div></div></div>
     </div>
+  </div>
+  <div class="grid4" style="align-items:start;margin-top:10px">
+    <div class="card"><h3>Data feed</h3><div class="kv">Last tick <b id="health-last-tick">—</b></div><div class="kv">Active pair <b id="health-pair">—</b></div><div class="kv">Candles <b id="health-candles">0</b></div></div>
+    <div class="card"><h3>Performance</h3><div class="kv">Uptime <b id="sys-uptime">—</b></div><div class="kv">Timeframe <b id="sys-timeframe">M15</b></div></div>
+    <div class="card"><h3>Cache</h3><div class="kv">M15 <b id="sys-candles-M15">0</b></div><div class="kv">H1 <b id="sys-candles-H1">0</b></div><div class="kv">H4 <b id="sys-candles-H4">0</b></div></div>
+    <div class="card"><h3>Pure-math telemetry</h3><div class="kv">Engine <b id="sys-token-calls">—</b></div></div>
   </div>
 </section>
 
@@ -300,16 +308,6 @@ main{flex:1;min-height:0;position:relative}
   <div id="jview-system" style="display:none"><div class="card"><h3>System console</h3><pre id="jview-system-body" style="font-size:10px;color:var(--sub);white-space:pre-wrap;max-height:60vh;overflow:auto">Loading…</pre></div></div>
 </section>
 
-<!-- ========== SYSTEM ========== -->
-<section id="v-system" class="view">
-  <div class="grid4" style="align-items:start">
-    <div class="card"><h3>Connections</h3><div class="kv">WebSocket <b id="health-ws">—</b></div><div class="kv">Daemon <b id="health-daemon">—</b></div><div class="kv">MT5 <b id="health-mt5">—</b></div></div>
-    <div class="card"><h3>Data feed</h3><div class="kv">Last tick <b id="health-last-tick">—</b></div><div class="kv">Active pair <b id="health-pair">—</b></div><div class="kv">Candles <b id="health-candles">0</b></div></div>
-    <div class="card"><h3>Performance</h3><div class="kv">Uptime <b id="sys-uptime">—</b></div><div class="kv">Timeframe <b id="sys-timeframe">M15</b></div></div>
-    <div class="card"><h3>Cache</h3><div class="kv">M15 <b id="sys-candles-M15">0</b></div><div class="kv">H1 <b id="sys-candles-H1">0</b></div><div class="kv">H4 <b id="sys-candles-H4">0</b></div></div>
-    <div class="card"><h3>Pure-math telemetry</h3><div class="kv">Engine <b id="sys-token-calls">—</b></div></div>
-  </div>
-</section>
 </main>
 
 <script>
@@ -355,11 +353,11 @@ class Axon{
     $("refresh-journal-btn").onclick=()=>this.loadJournal();
     $("cal-prev").onclick=()=>this.calNav(-1);$("cal-next").onclick=()=>this.calNav(1);
     $("clear-console-btn-intel").onclick=()=>{$("events-log-container").innerHTML='<div class="empty">Cleared.</div>';};
-    window.addEventListener("keydown",e=>{if(e.target.tagName==="INPUT")return;const m={1:"cockpit",2:"intel",3:"journal",4:"system"};if(m[e.key])this.setView(m[e.key]);
-      if(e.key==="ArrowLeft"||e.key==="ArrowRight"){const v=["cockpit","intel","journal","system"];let i=v.indexOf(this.view);i=(i+(e.key==="ArrowLeft"?-1:1)+4)%4;this.setView(v[i]);}});
+    window.addEventListener("keydown",e=>{if(e.target.tagName==="INPUT")return;const m={1:"cockpit",2:"portfolio",3:"journal"};if(m[e.key])this.setView(m[e.key]);
+      if(e.key==="ArrowLeft"||e.key==="ArrowRight"){const v=["cockpit","portfolio","journal"];let i=v.indexOf(this.view);i=(i+(e.key==="ArrowLeft"?-1:1)+3)%3;this.setView(v[i]);}});
     this.view="cockpit";}
   setView(v){this.view=v;document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));document.querySelectorAll(".view").forEach(s=>s.classList.remove("on"));$("v-"+v).classList.add("on");
-    if(v==="journal")this.loadJournal();if(v==="system")this.sysHealth();if(v==="cockpit"&&this.chart)setTimeout(()=>{this.chart.resize($("price-chart").clientWidth,$("price-chart").clientHeight);this.render();},40);}
+    if(v==="journal")this.loadJournal();if(v==="portfolio")this.sysHealth();if(v==="cockpit"&&this.chart)setTimeout(()=>{this.chart.resize($("price-chart").clientWidth,$("price-chart").clientHeight);this.render();},40);}
   jsub(s){this.jtab=s;$("jtab-trades-btn").classList.toggle("on",s==="trades");$("jtab-system-btn").classList.toggle("on",s==="system");$("jview-trades").style.display=s==="trades"?"block":"none";$("jview-system").style.display=s==="system"?"block":"none";}
   arr(tf){return tf==="M15"?this.m15:tf==="H1"?this.h1:this.h4;}
   clock(){const s=Math.floor((Date.now()-this.start)/1000);const hh=Math.floor(s/3600),mm=Math.floor(s/60)%60,ss=s%60;const t=(hh?hh+":":"")+String(mm).padStart(2,"0")+":"+String(ss).padStart(2,"0");setV("header-uptime",t);setV("sys-uptime",t);this.sessionClock();}
