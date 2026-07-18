@@ -84,7 +84,6 @@ def send_execution_command(config: dict, request_dict: dict) -> dict:
             import subprocess
             import sys
             import platform
-            import os
             try:
                 if platform.system() == "Windows":
                     # Spawning execution_bridge.py directly on native Windows.
