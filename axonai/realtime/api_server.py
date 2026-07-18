@@ -637,63 +637,122 @@ class DashboardServer:
                         trend = 1
                         ext = c
                         exti = i
-            TOL = 0.4
-            LOOK = 40   # bars after 2nd peak to look for neckline break
-            OUTW = 60   # bars after break to measure actual outcome
+            LOOK = 40   # bars to look for the confirming break
+            OUTW = 60   # bars after break to measure the actual outcome
             pats = []
 
             def _pt(pv):
                 return {"t": S[pv[0]][4], "price": round(pv[2], 5)}
 
-            for i in range(2, len(piv)):
-                a, b, c = piv[i - 2], piv[i - 1], piv[i]
-                if a[1] == "TOP" and c[1] == "TOP":
-                    t1, tr, t2 = a[2], b[2], c[2]
-                    h = (t1 + t2) / 2 - tr
-                    if h <= 0 or abs(t1 - t2) > TOL * h:
-                        continue
-                    neck = tr
-                    tgt = neck - h
-                    brk = None
-                    for j in range(c[0], min(len(S), c[0] + LOOK)):
-                        if S[j][3] < neck:
-                            brk = j
-                            break
-                    if brk is None:
-                        continue
-                    seg = S[brk:brk + OUTW] or [S[brk]]
-                    lo = min(seg, key=lambda x: x[2])
-                    pats.append({"type": "double_top", "dir": "SELL",
-                                 "p1": _pt(a), "pm": _pt(b), "p2": _pt(c),
-                                 "neck": round(neck, 5), "target": round(tgt, 5),
-                                 "break_t": S[brk][4], "actual": round(lo[2], 5),
-                                 "actual_t": lo[4], "hit": bool(lo[2] <= tgt),
-                                 "exp_pips": round(h / pip, 0),
-                                 "act_pips": round((neck - lo[2]) / pip, 0)})
-                elif a[1] == "BOTTOM" and c[1] == "BOTTOM":
-                    b1, pk, b2 = a[2], b[2], c[2]
-                    h = pk - (b1 + b2) / 2
-                    if h <= 0 or abs(b1 - b2) > TOL * h:
-                        continue
-                    neck = pk
-                    tgt = neck + h
-                    brk = None
-                    for j in range(c[0], min(len(S), c[0] + LOOK)):
-                        if S[j][3] > neck:
-                            brk = j
-                            break
-                    if brk is None:
-                        continue
-                    seg = S[brk:brk + OUTW] or [S[brk]]
-                    hi = max(seg, key=lambda x: x[1])
-                    pats.append({"type": "double_bottom", "dir": "BUY",
-                                 "p1": _pt(a), "pm": _pt(b), "p2": _pt(c),
-                                 "neck": round(neck, 5), "target": round(tgt, 5),
-                                 "break_t": S[brk][4], "actual": round(hi[1], 5),
-                                 "actual_t": hi[4], "hit": bool(hi[1] >= tgt),
-                                 "exp_pips": round(h / pip, 0),
-                                 "act_pips": round((hi[1] - neck) / pip, 0)})
-            out["patterns"] = pats[-25:]
+            def _outcome(frm, level, down):
+                b = None
+                for j in range(frm, min(len(S), frm + LOOK)):
+                    if (S[j][3] < level) if down else (S[j][3] > level):
+                        b = j
+                        break
+                if b is None:
+                    return None
+                seg = S[b:b + OUTW] or [S[b]]
+                x = min(seg, key=lambda r: r[2]) if down else max(seg, key=lambda r: r[1])
+                return b, (x[2] if down else x[1]), x[4]
+
+            def _emit(typ, dr, label, pvs, level, target, down):
+                r = _outcome(pvs[-1][0], level, down)
+                if r is None:
+                    return
+                b, ap, at = r
+                pats.append({"type": typ, "dir": dr, "label": label,
+                             "points": [_pt(p) for p in pvs],
+                             "neck": round(level, 5), "break_t": S[b][4],
+                             "target": round(target, 5), "actual": round(ap, 5),
+                             "actual_t": at,
+                             "hit": (bool(ap <= target) if down else bool(ap >= target)),
+                             "exp_pips": round(abs(target - level) / pip, 0),
+                             "act_pips": round(abs(ap - level) / pip, 0)})
+
+            def _first_break(frm, up_lvl, dn_lvl):
+                for j in range(frm, min(len(S), frm + LOOK)):
+                    if S[j][3] > up_lvl:
+                        return False, up_lvl        # broke up
+                    if S[j][3] < dn_lvl:
+                        return True, dn_lvl          # broke down
+                return None
+
+            for i in range(len(piv)):
+                w3, w4, w5 = piv[i:i + 3], piv[i:i + 4], piv[i:i + 5]
+                # --- doubles (3 pivots) ---
+                if len(w3) == 3:
+                    a, b, c = w3
+                    if a[1] == "TOP" and c[1] == "TOP":
+                        h = (a[2] + c[2]) / 2 - b[2]
+                        if h > 0 and abs(a[2] - c[2]) <= 0.4 * h:
+                            _emit("double_top", "SELL", "2T", [a, b, c], b[2], b[2] - h, True)
+                    elif a[1] == "BOTTOM" and c[1] == "BOTTOM":
+                        h = b[2] - (a[2] + c[2]) / 2
+                        if h > 0 and abs(a[2] - c[2]) <= 0.4 * h:
+                            _emit("double_bottom", "BUY", "2B", [a, b, c], b[2], b[2] + h, False)
+                # --- triple / head & shoulders (5 pivots) ---
+                if len(w5) == 5:
+                    p = [x[2] for x in w5]
+                    if w5[0][1] == "TOP":                       # T B T B T
+                        t1, b1, t2, b2, t3 = p
+                        neck = (b1 + b2) / 2
+                        span = max(t1, t2, t3) - neck
+                        if span > 0:
+                            if max(abs(t1 - t2), abs(t2 - t3), abs(t1 - t3)) <= 0.3 * span:
+                                _emit("triple_top", "SELL", "3T", w5, neck, neck - span, True)
+                            elif t2 > t1 and t2 > t3 and abs(t1 - t3) <= 0.35 * (t2 - neck):
+                                _emit("head_shoulders", "SELL", "H&S", w5, neck, neck - (t2 - neck), True)
+                    else:                                        # B T B T B
+                        b1, t1, b2, t2, b3 = p
+                        neck = (t1 + t2) / 2
+                        span = neck - min(b1, b2, b3)
+                        if span > 0:
+                            if max(abs(b1 - b2), abs(b2 - b3), abs(b1 - b3)) <= 0.3 * span:
+                                _emit("triple_bottom", "BUY", "3B", w5, neck, neck + span, False)
+                            elif b2 < b1 and b2 < b3 and abs(b1 - b3) <= 0.35 * (neck - b2):
+                                _emit("inv_head_shoulders", "BUY", "iH&S", w5, neck, neck + (neck - b2), False)
+                # --- triangles / wedges / rectangle (4 alternating pivots) ---
+                if (len(w4) == 4 and w4[0][1] != w4[1][1]
+                        and w4[0][1] == w4[2][1] and w4[1][1] == w4[3][1]):
+                    pr = [x[2] for x in w4]
+                    span = max(pr) - min(pr)
+                    if span > 0:
+                        if w4[0][1] == "TOP":
+                            hi1, hi2, lo1, lo2 = pr[0], pr[2], pr[1], pr[3]
+                        else:
+                            lo1, lo2, hi1, hi2 = pr[0], pr[2], pr[1], pr[3]
+                        flat = 0.12 * span
+                        dh, dl, last = hi2 - hi1, lo2 - lo1, w4[3][0]
+                        if abs(dh) < flat and abs(dl) < flat:            # rectangle
+                            fb = _first_break(last, hi2, lo2)
+                            if fb:
+                                down, lvl = fb
+                                _emit("rectangle", "SELL" if down else "BUY", "RECT", w4,
+                                      lvl, lvl - span if down else lvl + span, down)
+                        elif abs(dh) < flat and dl > flat:               # ascending
+                            _emit("asc_triangle", "BUY", "ASC", w4, hi2, hi2 + span, False)
+                        elif abs(dl) < flat and dh < -flat:              # descending
+                            _emit("desc_triangle", "SELL", "DESC", w4, lo2, lo2 - span, True)
+                        elif dh < -flat and dl > flat:                   # symmetrical
+                            fb = _first_break(last, hi2, lo2)
+                            if fb:
+                                down, lvl = fb
+                                _emit("sym_triangle", "SELL" if down else "BUY", "SYM", w4,
+                                      lvl, lvl - span if down else lvl + span, down)
+                        elif dh > flat and dl > flat and dl > dh:        # rising wedge (bearish)
+                            _emit("rising_wedge", "SELL", "R-WEDGE", w4, lo2, lo2 - span, True)
+                        elif dh < -flat and dl < -flat and abs(dh) > abs(dl):  # falling wedge (bullish)
+                            _emit("falling_wedge", "BUY", "F-WEDGE", w4, hi2, hi2 + span, False)
+            # dedup by (type, break_t), keep the most recent 30
+            seen_k = set()
+            uniq = []
+            for pp in reversed(pats):
+                k = (pp["type"], pp["break_t"])
+                if k not in seen_k:
+                    seen_k.add(k)
+                    uniq.append(pp)
+            out["patterns"] = list(reversed(uniq))[-30:]
             return out
 
         @self.app.get("/api/replay")
