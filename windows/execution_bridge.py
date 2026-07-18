@@ -12,6 +12,8 @@ import json
 import argparse
 import sys
 import os
+import functools
+from concurrent.futures import ThreadPoolExecutor
 
 try:
     import MetaTrader5 as mt5
@@ -35,6 +37,19 @@ terminal_path = None
 login = None
 password = None
 server = None
+auth_token = None  # shared-secret; when set, every request must carry a matching token
+
+# Single-worker executor: run blocking MT5 IPC calls OFF the asyncio event loop so a
+# slow broker ACK on one order can no longer stall message processing for the other
+# daemons sharing this bridge. A single worker also SERIALIZES all MT5 access, which
+# the MetaTrader5 API requires (it is not safe to call from multiple threads at once).
+_MT5_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mt5")
+
+
+async def _mt5_call(fn, *args, **kwargs):
+    """Run a blocking MT5 call on the dedicated worker thread and await the result."""
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_MT5_EXECUTOR, functools.partial(fn, *args, **kwargs))
 
 
 # ── MT5 helpers ────────────────────────────────────────────────────
@@ -124,6 +139,12 @@ async def handle_client(websocket):
                 if req_type not in _QUIET_CMDS:
                     print(f"Execution command: {req_type} from {remote}")
 
+                # Shared-secret auth (opt-in). When AXON_BRIDGE_TOKEN / --token is set,
+                # every request must carry a matching "token" before any action runs.
+                if auth_token is not None and req.get("token") != auth_token:
+                    await websocket.send(json.dumps({"success": False, "reason": "unauthorized"}))
+                    continue
+
                 if req_type == "open":
                     # Send order request
                     symbol = req.get("symbol")
@@ -136,9 +157,9 @@ async def handle_client(websocket):
                     deviation = int(req.get("deviation", 20))
                     
                     # Ensure symbol visibility
-                    info = mt5.symbol_info(symbol)
+                    info = await _mt5_call(mt5.symbol_info, symbol)
                     if info and not info.visible:
-                        mt5.symbol_select(symbol, True)
+                        await _mt5_call(mt5.symbol_select, symbol, True)
                     
                     # Determine action and filling type dynamically based on order type
                     is_limit = order_type not in [mt5.ORDER_TYPE_BUY, mt5.ORDER_TYPE_SELL]
@@ -161,17 +182,17 @@ async def handle_client(websocket):
                     }
                     
                     print(f"Sending order to MetaTrader 5: {request}")
-                    res = safe_order_send(request)
+                    res = await _mt5_call(safe_order_send, request)
                     
                     if res and res.retcode in [10013, 10014, 10018, 10030]:
                         print("Open failed with retcode %d. Retrying with ORDER_FILLING_IOC..." % res.retcode)
                         request["type_filling"] = mt5.ORDER_FILLING_IOC
-                        res = safe_order_send(request)
+                        res = await _mt5_call(safe_order_send, request)
                     
                     if res is None:
-                        err = mt5.last_error()
+                        err = await _mt5_call(mt5.last_error)
                         response = {"success": False, "reason": f"mt5_internal_error: {err}"}
-                    elif res.retcode != mt5.TRADE_RETCODE_DONE:
+                    elif res.retcode not in (mt5.TRADE_RETCODE_DONE, getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)):
                         response = {
                             "success": False,
                             "reason": f"retcode_{res.retcode}",
@@ -205,10 +226,10 @@ async def handle_client(websocket):
                     # Fetch from MT5 if any are missing
                     if volume_raw is None or order_type_raw is None or price_raw is None or magic_raw is None:
                         print(f"Close request missing parameters, querying MT5 for ticket {ticket}")
-                        positions = mt5.positions_get(ticket=ticket)
+                        positions = await _mt5_call(mt5.positions_get, ticket=ticket)
                         if not positions and symbol:
                             # Try fallback query by symbol
-                            all_pos = mt5.positions_get(symbol=symbol) or []
+                            all_pos = (await _mt5_call(mt5.positions_get, symbol=symbol)) or []
                             positions = [p for p in all_pos if p.ticket == ticket]
                             
                         if positions:
@@ -222,11 +243,11 @@ async def handle_client(websocket):
                             # MT5: ORDER_TYPE_BUY = 0, ORDER_TYPE_SELL = 1
                             if p.type == mt5.POSITION_TYPE_BUY:
                                 order_type = mt5.ORDER_TYPE_SELL
-                                tick = mt5.symbol_info_tick(symbol)
+                                tick = await _mt5_call(mt5.symbol_info_tick, symbol)
                                 close_price = tick.bid if tick else p.price_current
                             else:
                                 order_type = mt5.ORDER_TYPE_BUY
-                                tick = mt5.symbol_info_tick(symbol)
+                                tick = await _mt5_call(mt5.symbol_info_tick, symbol)
                                 close_price = tick.ask if tick else p.price_current
                                 
                             price = float(close_price)
@@ -257,17 +278,17 @@ async def handle_client(websocket):
                     }
                     
                     print(f"Sending close order to MetaTrader 5: {request}")
-                    res = safe_order_send(request)
+                    res = await _mt5_call(safe_order_send, request)
                     
                     if res and res.retcode in [10013, 10014, 10018, 10030]:
                         print("Close failed with retcode %d. Retrying with ORDER_FILLING_IOC..." % res.retcode)
                         request["type_filling"] = mt5.ORDER_FILLING_IOC
-                        res = safe_order_send(request)
+                        res = await _mt5_call(safe_order_send, request)
                     
                     if res is None:
-                        err = mt5.last_error()
+                        err = await _mt5_call(mt5.last_error)
                         response = {"success": False, "reason": f"mt5_internal_error: {err}"}
-                    elif res.retcode != mt5.TRADE_RETCODE_DONE:
+                    elif res.retcode not in (mt5.TRADE_RETCODE_DONE, getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)):
                         response = {
                             "success": False,
                             "reason": f"retcode_{res.retcode}",
@@ -287,9 +308,9 @@ async def handle_client(websocket):
                     tp_raw = req.get("tp")
                     
                     if sl_raw is None or tp_raw is None:
-                        positions = mt5.positions_get(ticket=ticket)
+                        positions = await _mt5_call(mt5.positions_get, ticket=ticket)
                         if not positions and symbol:
-                            all_pos = mt5.positions_get(symbol=symbol) or []
+                            all_pos = (await _mt5_call(mt5.positions_get, symbol=symbol)) or []
                             positions = [p for p in all_pos if p.ticket == ticket]
                         if positions:
                             p = positions[0]
@@ -311,10 +332,10 @@ async def handle_client(websocket):
                     }
                     
                     print(f"Modifying SL/TP: {request}")
-                    res = safe_order_send(request)
+                    res = await _mt5_call(safe_order_send, request)
                     
                     if res is None:
-                        err = mt5.last_error()
+                        err = await _mt5_call(mt5.last_error)
                         response = {"success": False, "reason": f"mt5_internal_error: {err}"}
                     elif res.retcode != mt5.TRADE_RETCODE_DONE:
                         response = {
@@ -336,10 +357,10 @@ async def handle_client(websocket):
                         "order": ticket
                     }
                     print(f"Cancelling pending order: {request}")
-                    res = safe_order_send(request)
+                    res = await _mt5_call(safe_order_send, request)
                     
                     if res is None:
-                        err = mt5.last_error()
+                        err = await _mt5_call(mt5.last_error)
                         response = {"success": False, "reason": f"mt5_internal_error: {err}"}
                     elif res.retcode != mt5.TRADE_RETCODE_DONE:
                         response = {
@@ -359,9 +380,9 @@ async def handle_client(websocket):
                     magic = req.get("magic")
                     
                     if symbol:
-                        positions = mt5.positions_get(symbol=symbol)
+                        positions = await _mt5_call(mt5.positions_get, symbol=symbol)
                     else:
-                        positions = mt5.positions_get()
+                        positions = await _mt5_call(mt5.positions_get)
                         
                     pos_list = []
                     if positions:
@@ -374,7 +395,7 @@ async def handle_client(websocket):
 
                 elif req_type == "history_deals_get":
                     ticket = int(req.get("position"))
-                    deals = mt5.history_deals_get(position=ticket)
+                    deals = await _mt5_call(mt5.history_deals_get, position=ticket)
                     deal_list = []
                     if deals:
                         for d in deals:
@@ -393,7 +414,7 @@ async def handle_client(websocket):
                     await websocket.send(json.dumps(response))
                     
                 elif req_type == "account_info":
-                    acct = mt5.account_info()
+                    acct = await _mt5_call(mt5.account_info)
                     if acct:
                         response = {
                             "success": True,
@@ -410,7 +431,7 @@ async def handle_client(websocket):
 
                 elif req_type == "symbol_info":
                     sym = req.get("symbol")
-                    s_info = mt5.symbol_info(sym) if sym else None
+                    s_info = (await _mt5_call(mt5.symbol_info, sym)) if sym else None
                     if s_info:
                         response = {
                             "success": True,
@@ -435,6 +456,18 @@ async def handle_client(websocket):
                     
             except json.JSONDecodeError:
                 print("Error: JSON decode failed for received message")
+                try:
+                    await websocket.send(json.dumps({"success": False, "reason": "bad_json"}))
+                except Exception:
+                    pass
+            except (ValueError, TypeError, KeyError) as e:
+                # A malformed/missing field (type/volume/price/position/magic) must not
+                # tear down the whole connection — reply with an error and keep serving.
+                print(f"Error: malformed request ({e})")
+                try:
+                    await websocket.send(json.dumps({"success": False, "reason": f"bad_request: {e}"}))
+                except Exception:
+                    pass
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
@@ -450,7 +483,7 @@ async def http_handler(reader, writer):
         response += json.dumps({
             "status": "ok",
             "type": "execution_bridge",
-            "mt5_connected": mt5.terminal_info() is not None,
+            "mt5_connected": (await _mt5_call(mt5.terminal_info)) is not None,
         })
     else:
         response = "HTTP/1.1 404 Not Found\r\n\r\n"
@@ -475,14 +508,25 @@ async def main():
     parser.add_argument("--login", type=int, default=None, help="MT5 login")
     parser.add_argument("--password", type=str, default=None, help="MT5 password")
     parser.add_argument("--server", type=str, default=None, help="MT5 server name")
-    parser.add_argument("--host", type=str, default="0.0.0.0", help="Bind address")
+    # Loopback by default: the production topology runs the bridge and the daemon on
+    # the same Windows host (client connects to 127.0.0.1). Binding to all interfaces
+    # would expose live order execution to the whole network. Opt in with --host for
+    # cross-host (e.g. WSL) setups, and set a token when you do.
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Bind address (default loopback)")
+    parser.add_argument("--token", type=str, default=None,
+                        help="Shared secret required on every request (or set AXON_BRIDGE_TOKEN)")
     args = parser.parse_args()
 
-    global terminal_path, login, password, server
+    global terminal_path, login, password, server, auth_token
     terminal_path = args.path
     login = args.login
     password = args.password
     server = args.server
+    auth_token = args.token or os.environ.get("AXON_BRIDGE_TOKEN")
+
+    if args.host not in ("127.0.0.1", "localhost", "::1") and not auth_token:
+        print("  [!] WARNING: binding execution bridge to %s with NO auth token — "
+              "anyone on this network can place live orders. Set --token / AXON_BRIDGE_TOKEN." % args.host)
 
     if sys.platform == "win32":
         try:

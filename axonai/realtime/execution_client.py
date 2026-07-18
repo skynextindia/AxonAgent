@@ -1,4 +1,5 @@
 # File: axonai/realtime/execution_client.py
+import os
 import json
 import asyncio
 import logging
@@ -48,6 +49,11 @@ async def _ws_send_cmd(url, request_dict):
 
 def send_execution_command(config: dict, request_dict: dict) -> dict:
     """Send command to execution_bridge.py and return the response."""
+    # Attach the shared-secret token when configured, so the bridge's opt-in auth
+    # accepts the request. No-op when neither side sets a token (backward compatible).
+    token = config.get("realtime_execution_bridge_token") or os.environ.get("AXON_BRIDGE_TOKEN")
+    if token and "token" not in request_dict:
+        request_dict = {**request_dict, "token": token}
     # Try to auto-detect Windows host IP if running in WSL
     host = config.get("realtime_execution_bridge_host")
     if not host:
