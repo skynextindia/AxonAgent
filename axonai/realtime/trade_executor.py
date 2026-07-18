@@ -30,6 +30,9 @@ ORDER_TIME_GTC = 0 if mt5 is None else mt5.ORDER_TIME_GTC
 ORDER_FILLING_FOK = 0 if mt5 is None else mt5.ORDER_FILLING_FOK
 ORDER_FILLING_IOC = 1 if mt5 is None else mt5.ORDER_FILLING_IOC
 TRADE_RETCODE_DONE = 10009 if mt5 is None else mt5.TRADE_RETCODE_DONE
+# A partial fill means a REAL position was opened on the broker — it must be
+# treated as success, not failure, or the system leaves an unmanaged live position.
+TRADE_RETCODE_DONE_PARTIAL = 10010 if mt5 is None else getattr(mt5, "TRADE_RETCODE_DONE_PARTIAL", 10010)
 TRADE_RETCODE_INVALID_FILL = 10014 if mt5 is None else mt5.TRADE_RETCODE_INVALID_FILL
 TRADE_RETCODE_LIMIT_VOLUME = 10018 if mt5 is None else mt5.TRADE_RETCODE_LIMIT_VOLUME
 ORDER_TYPE_BUY_LIMIT = 2 if mt5 is None else mt5.ORDER_TYPE_BUY_LIMIT
@@ -72,9 +75,27 @@ class MT5TradeExecutor:
         """
         logger.info("TradeExecutor: Evaluating signal: %s for %s", signal, symbol)
 
-        # Drawdown circuit breaker check
+        # Drawdown circuit breaker check — feed the breaker live equity in BOTH
+        # execution modes. Previously equity was only sourced in direct mode, so in
+        # bridge mode (the production mode) current_equity stayed 0.0 and the daily
+        # drawdown breaker was permanently disarmed on the live account.
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
-        if not is_bridge:
+        if is_bridge:
+            try:
+                from axonai.realtime.execution_client import send_execution_command
+                acc_res = send_execution_command(self.config, {"action": "account_info"})
+                if acc_res.get("success"):
+                    eq = acc_res.get("equity")
+                    bal = acc_res.get("balance", eq)
+                    if eq is not None:
+                        self.risk_guard.update_equity(
+                            float(eq), float(bal if bal is not None else eq)
+                        )
+            except Exception as e:
+                logger.error(
+                    "RiskGuard: bridge equity fetch failed (%s) — breaker may be disarmed", e
+                )
+        else:
             mt5_inst = self._get_mt5()
             if mt5_inst and mt5_inst.terminal_info():
                 acc = mt5_inst.account_info()
@@ -139,24 +160,51 @@ class MT5TradeExecutor:
         # Check connection & symbol info if running directly
         if is_bridge:
             from axonai.realtime.execution_client import send_execution_command
+            bid = ask = None
             if live_state:
                 if hasattr(live_state, "current_bid") and live_state.current_bid:
                     bid = live_state.current_bid
-                    ask = live_state.current_ask
-                elif isinstance(live_state, dict):
-                    bid = live_state.get("bid", 1.1000)
-                    ask = live_state.get("ask", 1.1005)
-                else:
-                    bid = 1.1000
-                    ask = 1.1005
-            else:
-                bid = 1.1000
-                ask = 1.1005
+                    ask = getattr(live_state, "current_ask", None)
+                elif isinstance(live_state, dict) and live_state.get("bid"):
+                    bid = live_state.get("bid")
+                    ask = live_state.get("ask")
+            # NEVER price off a hardcoded EURUSD-shaped placeholder. current_bid is
+            # 0.0 until the first tick; composing a JPY (~150) or XAU (~2400) order
+            # from 1.1000/1.1005 would place entry/SL/TP at nonsensical absolute
+            # levels. Refuse the order instead.
+            if not bid or not ask:
+                logger.error(
+                    "TradeExecutor: no live price for %s (current_bid unset) — order "
+                    "refused to avoid placeholder pricing", symbol,
+                )
+                return {"success": False, "reason": "no_live_price"}
         else:
             mt5_inst = self._get_mt5()
             if mt5_inst is None or not mt5_inst.terminal_info():
                 logger.error("TradeExecutor: Not connected to MT5 terminal.")
                 return None
+
+            # Refuse to route a LIVE order through the FEED (data) terminal. In direct
+            # mode _get_mt5() falls back to the feed-bound MT5 singleton whenever no
+            # dedicated trade terminal is initialized (get_mt5_trade() is None), which
+            # would execute real orders on the Exness/data account. Production uses
+            # bridge mode; this is a guardrail for a --feed-path/no-exec-path misstart.
+            is_live_order = not (
+                self.paper_trade
+                or self.config.get("paper_trade", False)
+                or self.config.get("realtime_dry_run", False)
+            )
+            if (
+                is_live_order
+                and get_mt5_trade() is None
+                and not self.config.get("allow_direct_feed_execution", False)
+            ):
+                logger.error(
+                    "TradeExecutor: direct-mode live order BLOCKED — no dedicated trade "
+                    "terminal, order would route through the feed/data terminal. Launch "
+                    "with bridge execution (--exec-path) or set allow_direct_feed_execution=True."
+                )
+                return {"success": False, "reason": "no_trade_terminal"}
 
             symbol_info = mt5_inst.symbol_info(symbol)
             if symbol_info is None:
@@ -187,11 +235,15 @@ class MT5TradeExecutor:
                 return None
         else:
             mt5_inst = self._get_mt5()
-            existing = mt5_inst.positions_get()
+            # Scope by SYMBOL as well as magic. The magic number is shared across all
+            # symbols, so an unfiltered positions_get() would make this a portfolio-wide
+            # cap (one open EURUSD blocking a new XAUUSD entry). The bridge path already
+            # scopes by symbol; mirror it here.
+            existing = mt5_inst.positions_get(symbol=symbol)
             if existing:
                 system_existing = [p for p in existing if p.magic == self.magic]
                 if len(system_existing) >= 1:
-                    logger.info("TradeExecutor: Position already open for magic %d. Skipping new order.", self.magic)
+                    logger.info("TradeExecutor: Position already open for magic %d on %s. Skipping new order.", self.magic, symbol)
                     return None
 
         # 1. Fetch H1 ATR for SL/TP calculations
@@ -460,8 +512,9 @@ class MT5TradeExecutor:
                 logger.error("TradeExecutor: order_send returned None")
                 return None
 
-            # Track PnL if trade fails or succeeds
-            if result.retcode != mt5.TRADE_RETCODE_DONE:
+            # Track PnL if trade fails or succeeds. A partial fill (DONE_PARTIAL)
+            # opened a real position and must be treated as success, not failure.
+            if result.retcode not in (TRADE_RETCODE_DONE, TRADE_RETCODE_DONE_PARTIAL):
                 logger.error("TradeExecutor: Order failed. Retcode: %d, Comment: %s",
                              result.retcode, result.comment)
                 
@@ -476,7 +529,7 @@ class MT5TradeExecutor:
                     logger.info("TradeExecutor: Retrying with ORDER_FILLING_IOC...")
                     request["type_filling"] = mt5.ORDER_FILLING_IOC
                     result = mt5.order_send(request)
-                    if result and result.retcode == mt5.TRADE_RETCODE_DONE:
+                    if result and result.retcode in (TRADE_RETCODE_DONE, TRADE_RETCODE_DONE_PARTIAL):
                         logger.info("TradeExecutor: Order successful on retry! Ticket: %d", result.order)
                         send_alert(
                             f"Trade Executed on Retry: {symbol} | Type: {'BUY' if order_type == ORDER_TYPE_BUY else 'SELL'} "
@@ -527,7 +580,7 @@ class MT5TradeExecutor:
     def _result_to_dict(self, result, sl: float = 0.0) -> dict:
         """Helper to convert OrderSendResult to a dictionary."""
         return {
-            "success": result.retcode == TRADE_RETCODE_DONE,
+            "success": result.retcode in (TRADE_RETCODE_DONE, TRADE_RETCODE_DONE_PARTIAL),
             "retcode": result.retcode,
             "comment": result.comment,
             "volume": result.volume,
