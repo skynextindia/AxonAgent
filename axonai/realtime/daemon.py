@@ -1215,6 +1215,15 @@ class AxonDaemon:
         self.current_bid = bid
         self.current_ask = ask
         mid = (bid + ask) / 2.0
+
+        # Synthetic ticks (weekend / dead feed) exist only to keep the UI heartbeat
+        # alive. Do NOT run them through the engine: doing so pollutes engine snapshots,
+        # the shadow-signal logs, and the session velocity baselines with random-walk
+        # data, and could attempt entries on fake prices. Update the display price and
+        # stop here. (Real ticks reset the flag before this callback fires.)
+        if getattr(self.tick_engine, "is_synthetic", False):
+            return
+
         self.live_state.on_tick(bid, ask, timestamp)
 
         # EOD force-close: when the live session rolls from an active day session

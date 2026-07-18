@@ -146,6 +146,9 @@ class TickEngine(threading.Thread):
         # Callbacks
         self.on_tick_callback: Optional[Callable] = None
         self.on_candle_close_callback: Optional[Callable] = None
+        # True while the loop is emitting SYNTHETIC ticks (weekend / dead feed) purely
+        # for UI liveness. Consumers must not run synthetic ticks through the engine.
+        self.is_synthetic: bool = False
 
         # Internal state for polling
         self._last_tick_time_msc: Optional[int] = None
@@ -562,11 +565,13 @@ class TickEngine(threading.Thread):
                     'volume': random.randint(1, 4),
                     'time_msc': int(time.time() * 1000)
                 }
+                self.is_synthetic = True   # flag: UI-only, must not reach the engine
                 self._process_tick(mock_tick)
                 # Sleep a dynamic tick rate (e.g. between 0.5s and 1.5s)
                 time.sleep(random.uniform(0.5, 1.5))
                 continue
 
+            self.is_synthetic = False   # real feed path
             new_ticks = self._poll_ticks()
             if new_ticks:
                 for tick in new_ticks:
