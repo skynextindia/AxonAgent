@@ -563,6 +563,139 @@ class DashboardServer:
                 return {"status": "error", "message": str(e),
                         "sessions": {}, "adr5": 0, "adr20": 0}
 
+        @self.app.get("/api/patterns")
+        def get_patterns(symbol: str = None, days: int = 8):
+            """Read-only: classic reversal chart patterns (double top / double
+            bottom) from M15 bars built off the snapshot price series, each with
+            the measured-move EXPECTED target and the ACTUAL post-break outcome
+            (hit/miss). Price-only; no engine/account data. Powers the chart
+            pattern overlay (expected vs actual)."""
+            import os, glob as _glob, csv as _csv, calendar as _cal, time as _time
+            out = {"status": "success", "patterns": []}
+            if not symbol:
+                return out
+            paths = _glob.glob(os.path.join("reports", f"engine_snapshots_{symbol}*.csv"))
+            if not paths:
+                return out
+            paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
+            pip = 0.01 if ("JPY" in symbol.upper() or "XAU" in symbol.upper()) else 0.0001
+            bars = {}
+            seen = 0
+            for fp in paths:
+                with open(fp, "r", encoding="utf-8", errors="ignore", newline="") as f:
+                    for r in _csv.DictReader(f):
+                        ts = (r.get("timestamp") or "")[:19]
+                        if len(ts) < 19:
+                            continue
+                        try:
+                            ep = _cal.timegm(_time.strptime(ts, "%Y-%m-%d %H:%M:%S"))
+                            p = float(r.get("price") or 0)
+                        except (ValueError, TypeError):
+                            continue
+                        if p <= 0:
+                            continue
+                        bk = (ep // 900) * 900
+                        b = bars.get(bk)
+                        if b is None:
+                            bars[bk] = [p, p, p, p, bk]
+                        else:
+                            if p > b[1]:
+                                b[1] = p
+                            if p < b[2]:
+                                b[2] = p
+                            b[3] = p
+                        seen += 1
+                if seen > 400000:
+                    break
+            ks = sorted(bars.keys())[-(int(days) * 96):]
+            S = [bars[k] for k in ks]
+            if len(S) < 20:
+                return out
+            thr = {"XAUUSD": 120.0, "USDJPY": 12.0}.get(symbol.upper(), 8.0) * pip
+            # zigzag pivots on M15 closes (mutually-exclusive trend tracking)
+            piv = []
+            ext = S[0][3]
+            exti = 0
+            trend = 0
+            for i in range(1, len(S)):
+                c = S[i][3]
+                if trend >= 0:
+                    if c > ext:
+                        ext = c
+                        exti = i
+                    elif ext - c >= thr:
+                        piv.append((exti, "TOP", S[exti][1]))
+                        trend = -1
+                        ext = c
+                        exti = i
+                else:
+                    if c < ext:
+                        ext = c
+                        exti = i
+                    elif c - ext >= thr:
+                        piv.append((exti, "BOTTOM", S[exti][2]))
+                        trend = 1
+                        ext = c
+                        exti = i
+            TOL = 0.4
+            LOOK = 40   # bars after 2nd peak to look for neckline break
+            OUTW = 60   # bars after break to measure actual outcome
+            pats = []
+
+            def _pt(pv):
+                return {"t": S[pv[0]][4], "price": round(pv[2], 5)}
+
+            for i in range(2, len(piv)):
+                a, b, c = piv[i - 2], piv[i - 1], piv[i]
+                if a[1] == "TOP" and c[1] == "TOP":
+                    t1, tr, t2 = a[2], b[2], c[2]
+                    h = (t1 + t2) / 2 - tr
+                    if h <= 0 or abs(t1 - t2) > TOL * h:
+                        continue
+                    neck = tr
+                    tgt = neck - h
+                    brk = None
+                    for j in range(c[0], min(len(S), c[0] + LOOK)):
+                        if S[j][3] < neck:
+                            brk = j
+                            break
+                    if brk is None:
+                        continue
+                    seg = S[brk:brk + OUTW] or [S[brk]]
+                    lo = min(seg, key=lambda x: x[2])
+                    pats.append({"type": "double_top", "dir": "SELL",
+                                 "p1": _pt(a), "pm": _pt(b), "p2": _pt(c),
+                                 "neck": round(neck, 5), "target": round(tgt, 5),
+                                 "break_t": S[brk][4], "actual": round(lo[2], 5),
+                                 "actual_t": lo[4], "hit": bool(lo[2] <= tgt),
+                                 "exp_pips": round(h / pip, 0),
+                                 "act_pips": round((neck - lo[2]) / pip, 0)})
+                elif a[1] == "BOTTOM" and c[1] == "BOTTOM":
+                    b1, pk, b2 = a[2], b[2], c[2]
+                    h = pk - (b1 + b2) / 2
+                    if h <= 0 or abs(b1 - b2) > TOL * h:
+                        continue
+                    neck = pk
+                    tgt = neck + h
+                    brk = None
+                    for j in range(c[0], min(len(S), c[0] + LOOK)):
+                        if S[j][3] > neck:
+                            brk = j
+                            break
+                    if brk is None:
+                        continue
+                    seg = S[brk:brk + OUTW] or [S[brk]]
+                    hi = max(seg, key=lambda x: x[1])
+                    pats.append({"type": "double_bottom", "dir": "BUY",
+                                 "p1": _pt(a), "pm": _pt(b), "p2": _pt(c),
+                                 "neck": round(neck, 5), "target": round(tgt, 5),
+                                 "break_t": S[brk][4], "actual": round(hi[1], 5),
+                                 "actual_t": hi[4], "hit": bool(hi[1] >= tgt),
+                                 "exp_pips": round(h / pip, 0),
+                                 "act_pips": round((hi[1] - neck) / pip, 0)})
+            out["patterns"] = pats[-25:]
+            return out
+
         @self.app.get("/api/replay")
         def get_replay(symbol: str = None, buckets: int = 600):
             """Read-only Decision Replay: the engine's per-tick black-box

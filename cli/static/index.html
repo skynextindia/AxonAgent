@@ -340,7 +340,8 @@ class Axon{
     setInterval(()=>this.clock(),1000);this.loadJournal();setInterval(()=>{if(this.view==="journal")this.loadJournal()},20000);
     setTimeout(()=>this.loadFades(),3000);setInterval(()=>{if(this.active)this.loadFades()},30000);
     setTimeout(()=>this.loadRangeStats(),3200);setInterval(()=>{if(this.active)this.loadRangeStats()},120000);
-    setTimeout(()=>this.loadReplay(),3600);setInterval(()=>{if(this.active)this.loadReplay()},60000);}
+    setTimeout(()=>this.loadReplay(),3600);setInterval(()=>{if(this.active)this.loadReplay()},60000);
+    setTimeout(()=>this.loadPatterns(),4000);setInterval(()=>{if(this.active)this.loadPatterns()},120000);}
   bindUI(){
     document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>this.setView(b.dataset.v));
     document.querySelectorAll(".tfs button").forEach(b=>b.onclick=()=>{this.tf=b.dataset.tf;document.querySelectorAll(".tfs button").forEach(x=>x.classList.toggle("on",x===b));setV("sys-timeframe",this.tf);this.render();});
@@ -391,7 +392,7 @@ class Axon{
     [this._dhL,this._dlL,this._adrHi,this._adrLo].forEach(l=>{if(l)try{this.series.removePriceLine(l)}catch(e){}});this._dhL=this._dlL=this._adrHi=this._adrLo=null;
     if(this.series)this.series.setData([]);if(this.hist)this.hist.setData([]);
     if(this.ws&&this.ws.readyState===1)this.ws.send(JSON.stringify({type:"switch_pair",pair:sym,mt5:sym}));
-    this._rstat=null;this._replay=[];this.loadFades();this.loadRangeStats();this.loadReplay();
+    this._rstat=null;this._replay=[];this._patterns=[];this.loadFades();this.loadRangeStats();this.loadReplay();this.loadPatterns();
     // instant repaint from cached snapshot; live pushes overwrite as they arrive
     const sn=this.snap&&this.snap[sym];
     if(sn){["candles_M15","candles_H1","candles_H4"].forEach(k=>{if(sn[k])this.onCandles(sn[k]);});
@@ -671,11 +672,11 @@ class Axon{
     this.chart=LightweightCharts.createChart(el,{layout:{attributionLogo:false,background:{color:"transparent"},textColor:"#9fb0c3",fontFamily:'"Cascadia Mono",monospace'},grid:{vertLines:{color:"rgba(255,255,255,.04)"},horzLines:{color:"rgba(255,255,255,.04)"}},crosshair:{vertLine:{color:"rgba(255,255,255,.15)",style:LightweightCharts.LineStyle.Dashed},horzLine:{color:"rgba(255,255,255,.15)",style:LightweightCharts.LineStyle.Dashed}},rightPriceScale:{borderColor:"rgba(255,255,255,.08)",scaleMargins:{top:.06,bottom:.26}},timeScale:{borderColor:"rgba(255,255,255,.08)",timeVisible:true,secondsVisible:false,barSpacing:8,rightOffset:12}});
     this.series=this.chart.addSeries(LightweightCharts.CandlestickSeries,{upColor:"#3ee08a",downColor:"#ff5d73",borderUpColor:"#3ee08a",borderDownColor:"#ff5d73",wickUpColor:"#3ee08a",wickDownColor:"#ff5d73",priceFormat:{type:"custom",minMove:.00001,formatter:GOLD}});
     this.hist=this.chart.addSeries(LightweightCharts.HistogramSeries,{priceScaleId:"m",priceFormat:{type:"volume"}});this.chart.priceScale("m").applyOptions({scaleMargins:{top:.72,bottom:.19}});
-    this.chart.timeScale().subscribeVisibleLogicalRangeChange(()=>{this.drawSessions();this.drawReplay();});
-    new ResizeObserver(es=>{const r=es[0]&&es[0].contentRect;if(r&&r.width>0){this.chart.resize(r.width,r.height);setTimeout(()=>{this.drawSessions();this.drawReplay();},40);}}).observe(el);
+    this.chart.timeScale().subscribeVisibleLogicalRangeChange(()=>{this.drawSessions();this.drawReplay();this.drawPatterns();});
+    new ResizeObserver(es=>{const r=es[0]&&es[0].contentRect;if(r&&r.width>0){this.chart.resize(r.width,r.height);setTimeout(()=>{this.drawSessions();this.drawReplay();this.drawPatterns();},40);}}).observe(el);
   }catch(e){console.warn("chart",e);}}
   render(){if(!this.series)return;const a=this.arr(this.tf);this.series.setData(a.map(c=>({time:+c.time,open:+c.open,high:+c.high,low:+c.low,close:+c.close})));
-    if(this.hist)this.hist.setData(a.map(c=>{const bv=this._barVel[+c.time],clx=bv&&(bv.u||bv.z>=1.0);return {time:+c.time,value:Math.abs(c.close-c.open),color:clx?"rgba(232,184,102,.8)":(c.close>=c.open?"rgba(62,224,138,.28)":"rgba(255,93,115,.28)")};}));if(!this._fit){this.chart.timeScale().fitContent();this._fit=true;}this.drawSessions();this.drawReplay();this.dayLines();this.renderMarkers();this.rangeHUD();}
+    if(this.hist)this.hist.setData(a.map(c=>{const bv=this._barVel[+c.time],clx=bv&&(bv.u||bv.z>=1.0);return {time:+c.time,value:Math.abs(c.close-c.open),color:clx?"rgba(232,184,102,.8)":(c.close>=c.open?"rgba(62,224,138,.28)":"rgba(255,93,115,.28)")};}));if(!this._fit){this.chart.timeScale().fitContent();this._fit=true;}this.drawSessions();this.drawReplay();this.drawPatterns();this.dayLines();this.renderMarkers();this.rangeHUD();}
   dayLines(){try{if(!this.series||!this.m15.length)return;const n=new Date(),k=Date.UTC(n.getUTCFullYear(),n.getUTCMonth(),n.getUTCDate())/1000;
     const today=this.m15.filter(c=>+c.time>=k);if(!today.length)return;
     const hi=Math.max(...today.map(c=>+c.high)),lo=Math.min(...today.map(c=>+c.low));
@@ -738,6 +739,23 @@ class Axon{
       this.pushEvt(sym,{kind:"fade",dir:(s.direction||"").toUpperCase(),price:+s.price,t,ticket:"fade_"+t});});}catch(e){}}
   async loadRangeStats(){try{const sym=this.active;if(!sym)return;const r=await fetch("/api/range_stats?symbol="+sym);const j=await r.json();this._rstat=(j&&j.sessions&&Object.keys(j.sessions).length)?j:null;this.rangeHUD();}catch(e){this._rstat=null;}}
   async loadReplay(){try{const sym=this.active;if(!sym)return;const r=await fetch("/api/replay?symbol="+sym+"&buckets=600");const j=await r.json();this._replay=(j&&j.buckets)?j.buckets:[];this.drawReplay();}catch(e){this._replay=[];}}
+  async loadPatterns(){try{const sym=this.active;if(!sym)return;const r=await fetch("/api/patterns?symbol="+sym+"&days=8");const j=await r.json();this._patterns=(j&&j.patterns)?j.patterns:[];this.drawPatterns();}catch(e){this._patterns=[];}}
+  drawPatterns(){try{if(!this.chart||!this.series)return;const el=$("price-chart");let svg=$("pat-svg");
+    if(!svg){svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.id="pat-svg";svg.style.cssText="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2";el.appendChild(svg);}
+    svg.innerHTML="";const ps=this._patterns;if(!ps||!ps.length)return;const NS="http://www.w3.org/2000/svg",tsc=this.chart.timeScale();
+    const X=t=>tsc.timeToCoordinate(t),Y=p=>this.series.priceToCoordinate(p);
+    const ln=(x1,y1,x2,y2,col,w,dash)=>{const l=document.createElementNS(NS,"line");l.setAttribute("x1",x1);l.setAttribute("y1",y1);l.setAttribute("x2",x2);l.setAttribute("y2",y2);l.setAttribute("stroke",col);l.setAttribute("stroke-width",w);if(dash)l.setAttribute("stroke-dasharray",dash);svg.appendChild(l);};
+    const tx=(x,y,s,col)=>{const t=document.createElementNS(NS,"text");t.setAttribute("x",x);t.setAttribute("y",y);t.setAttribute("fill",col);t.style.font="700 8px monospace";t.textContent=s;svg.appendChild(t);};
+    ps.forEach(p=>{const x1=X(p.p1.t),xm=X(p.pm.t),x2=X(p.p2.t),y1=Y(p.p1.price),ym=Y(p.pm.price),y2=Y(p.p2.price);
+      if([x1,xm,x2,y1,ym,y2].some(v=>v==null))return;
+      const top=p.type==="double_top",base=top?"255,93,115":"62,224,138";
+      ln(x1,y1,xm,ym,"rgba("+base+",.7)",1.4);ln(xm,ym,x2,y2,"rgba("+base+",.7)",1.4);
+      const xb=X(p.break_t),yn=Y(p.neck),ya=Y(p.actual),yt=Y(p.target),xR=Math.max(x2,xb==null?x2:xb);
+      if(yn!=null)ln(x1,yn,xR,yn,"rgba("+base+",.4)",1,"3 3");
+      if(yt!=null&&xb!=null){ln(xb,yt,xR+24,yt,"rgba(168,155,236,.7)",1,"2 2");tx(xR+26,yt+3,"exp "+(top?"-":"+")+Math.abs(p.exp_pips),"rgba(168,155,236,.85)");}
+      if(ya!=null&&xb!=null){const hc=p.hit?"62,224,138":"255,93,115";ln(xb,ya,xR+24,ya,"rgba("+hc+",.85)",1.4);tx(xR+26,ya+3,(p.hit?"HIT ":"miss ")+Math.abs(p.act_pips),"rgba("+hc+",.95)");}
+      tx(x2+2,y2+(top?-4:11),top?"2T":"2B","rgba("+base+",.95)");});
+  }catch(e){}}
   _skAbbr(s){s=(s||"").toLowerCase();
     if(s.includes("regime"))return"REGIME";if(s.includes("confluence")||s.includes("quality")||s.includes("floor"))return"CONFL";
     if(s.includes("room")||s.includes("space"))return"NO-ROOM";if(s.includes("location")||s.includes("level"))return"LOC";
