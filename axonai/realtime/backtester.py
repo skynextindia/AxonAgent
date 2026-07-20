@@ -70,6 +70,9 @@ class BacktestEngine:
             self.config.setdefault("entry_max_velocity_pct", self.config.get("entry_max_velocity_pct_gold", 30.0))
             self.config.setdefault("entry_min_decay_ratio", self.config.get("entry_min_decay_ratio_gold", 0.40))
             self.config.setdefault("entry_max_tick_efficiency", self.config.get("entry_max_tick_efficiency_gold", 0.30))
+            # Self-calibrating climax credit (mirror daemon): rank gold efficiency
+            # against gold's own distribution instead of the absolute eff<0.2.
+            self.config.setdefault("entry_climax_eff_percentile", self.config.get("entry_climax_eff_percentile_gold", 28.0))
         else:
             self.config.setdefault("entry_max_velocity_pct", 100.0)
             self.config.setdefault("entry_min_decay_ratio", 0.0)

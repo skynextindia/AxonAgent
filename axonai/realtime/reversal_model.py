@@ -148,7 +148,18 @@ def _unified_confluence_score(
         vel_score += 0.5
     if decay < 0.5:
         vel_score += min(0.5, (0.5 - decay))
-    if eff < 0.2:
+    # Climax credit: low efficiency at the extreme = exhausted move worth fading.
+    # `entry_climax_eff_percentile` (set for gold) ranks efficiency against the
+    # symbol's OWN distribution so the credit is not handed out every tick on
+    # instruments whose raw efficiency sits structurally low. Unset (FX) keeps
+    # the original absolute `eff < 0.2` cutoff byte-for-byte.
+    _eff_pct_cut = cfg.get("entry_climax_eff_percentile")
+    if _eff_pct_cut is not None:
+        _eff_pct = getattr(vel, "tick_efficiency_percentile", None)
+        _is_climax = _eff_pct is not None and _eff_pct < float(_eff_pct_cut)
+    else:
+        _is_climax = eff < float(cfg.get("entry_climax_eff_abs", 0.2))
+    if _is_climax:
         vel_score += 0.3
     score += 0.25 * min(1.0, vel_score)
 

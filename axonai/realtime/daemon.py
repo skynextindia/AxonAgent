@@ -156,6 +156,11 @@ class AxonDaemon:
             config.setdefault("entry_max_velocity_pct", config.get("entry_max_velocity_pct_gold", 30.0))
             config.setdefault("entry_min_decay_ratio", config.get("entry_min_decay_ratio_gold", 0.40))
             config.setdefault("entry_max_tick_efficiency", config.get("entry_max_tick_efficiency_gold", 0.30))
+            # Gold's raw tick_efficiency sits structurally low (~700x tick
+            # granularity), so the absolute `eff < 0.2` climax credit fired every
+            # tick and over-entered gold. Rank against gold's OWN efficiency
+            # distribution instead (bottom ~28% == FX's eff<0.2 fire-rate).
+            config.setdefault("entry_climax_eff_percentile", config.get("entry_climax_eff_percentile_gold", 28.0))
         else:
             # Standard FX defaults (allow normal triggers to process)
             config.setdefault("entry_max_velocity_pct", 100.0)

@@ -35,6 +35,10 @@ class NormalizedVelocity:
 
     # ── Efficiency ──────────────────────────────────────────────
     tick_efficiency: float = 0.0    # 0.0 (chop) to 1.0 (pure impulse)
+    # Self-calibrating rank of tick_efficiency within this symbol's own rolling
+    # distribution (0-100). Makes efficiency comparable across symbols whose raw
+    # scale differs (gold ~0.09 vs FX ~0.33 due to ~700x tick granularity).
+    tick_efficiency_percentile: float = 50.0
 
     # ── Acceleration / Decay ────────────────────────────────────
     acceleration: float = 0.0      # Δ velocity / Δ time  (pips/s²)
@@ -94,6 +98,11 @@ class VelocityNormalizer:
         self._velocity_history: deque[float] = deque(maxlen=window)
         self._abs_velocity_history: deque[float] = deque(maxlen=window)
         self._sorted_abs_velocities: list[float] = []
+
+        # Rolling tick-efficiency history for the self-calibrating efficiency
+        # percentile (global window only; no per-session buckets by design).
+        self._efficiency_history: deque[float] = deque(maxlen=window)
+        self._sorted_efficiencies: list[float] = []
 
         # Peak tracking for decay ratio
         self._peak_velocity: float = 0.0
@@ -276,6 +285,15 @@ class VelocityNormalizer:
         bisect.insort(self._sorted_abs_velocities, abs_vel)
         self._velocity_history.append(abs_vel)
 
+        # Maintain the tick-efficiency rolling window (same evict/insert pattern)
+        if len(self._efficiency_history) >= self._window:
+            ev_eff = self._efficiency_history.popleft()
+            e_idx = bisect.bisect_left(self._sorted_efficiencies, ev_eff)
+            if e_idx < len(self._sorted_efficiencies) and self._sorted_efficiencies[e_idx] == ev_eff:
+                self._sorted_efficiencies.pop(e_idx)
+        self._efficiency_history.append(efficiency)
+        bisect.insort(self._sorted_efficiencies, efficiency)
+
         # ── Session-bucketed baseline accumulation (production path only) ──
         # Mirrors the global maintenance above but as running stats (z) + a
         # bounded in-memory percentile window, per session. Fallback-safe:
@@ -316,6 +334,9 @@ class VelocityNormalizer:
         # ── Percentile (rank among last N velocities) ───────────
         # Global (blended) values are the default / warm-up fallback.
         pct = self._percentile(abs_vel)
+
+        # ── Efficiency percentile (self-calibrating, global window) ──
+        eff_pct = self._efficiency_percentile(efficiency)
 
         # ── Z-score against session baseline ────────────────────
         z = self._z_score(abs_vel)
@@ -361,6 +382,7 @@ class VelocityNormalizer:
             displacement_velocity=round(disp_vel, 4),
             abs_velocity=round(abs_vel, 4),
             tick_efficiency=round(efficiency, 4),
+            tick_efficiency_percentile=round(eff_pct, 1),
             acceleration=round(accel, 6),
             decay_ratio=round(decay_ratio, 4),
             percentile=round(pct, 1),
@@ -447,6 +469,19 @@ class VelocityNormalizer:
         import bisect
         below = bisect.bisect_left(self._sorted_abs_velocities, value)
         return 100.0 * below / len(self._sorted_abs_velocities)
+
+    def _efficiency_percentile(self, value: float) -> float:
+        """Rank `value` among the rolling tick-efficiency window (0-100).
+
+        Same guard/semantics as `_percentile` (returns 50.0 for < 10 samples).
+        Self-calibrating: makes tick_efficiency comparable across symbols whose
+        raw scale differs by ranking against the symbol's own distribution.
+        """
+        if len(self._sorted_efficiencies) < 10:
+            return 50.0
+        import bisect
+        below = bisect.bisect_left(self._sorted_efficiencies, value)
+        return 100.0 * below / len(self._sorted_efficiencies)
 
     def _z_score(self, value: float) -> float:
         """Standard deviations from the session mean."""

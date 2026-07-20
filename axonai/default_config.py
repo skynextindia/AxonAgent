@@ -139,6 +139,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "entry_max_velocity_pct_gold": 55.0,
     "entry_min_decay_ratio_gold": 0.25,
     "entry_max_tick_efficiency_gold": 0.30,
+    # Climax credit (reversal_model): FX uses the absolute cutoff; gold ranks
+    # efficiency against its own distribution so the credit isn't handed out
+    # every tick. eff<0.2 on FX == ~bottom 28% of FX efficiency historically.
+    "entry_climax_eff_abs": 0.2,
+    "entry_climax_eff_percentile_gold": 28.0,
     "entry_min_stall_duration": 15.0,
     "paper_trade": True,           # True = simulate fills internally, never call mt5.order_send (safe for tests / funded accounts)
     "peak_detector_rule_c_enabled": False,
