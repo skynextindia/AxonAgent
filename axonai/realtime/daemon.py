@@ -259,6 +259,14 @@ class AxonDaemon:
         self._account_info_cache = None
         self._position_cache = None
         self._order_cache = None
+        # Tickets the engine has confirmed closed. The slow-poll only refreshes
+        # _position_cache on a SUCCESSFUL bridge fetch, so if that poll fails (or
+        # returns a stale snapshot) after a close, the dashboard keeps showing the
+        # dead position with a frozen PnL. This guard lets the close path evict a
+        # ticket authoritatively and keeps the slow-poll from re-introducing it.
+        # MT5 tickets are never reused, so membership is permanent-safe; capped to
+        # bound memory. ticket -> close monotonic time.
+        self._closed_ticket_guard: dict[int, float] = {}
         self._slow_poll_running = True
 
         import threading
@@ -295,7 +303,14 @@ class AxonDaemon:
 
                 pos = get_positions_via_bridge(self._trade_terminal_path, self.mt5_symbol)
                 if pos and pos.get("success"):
-                    self._position_cache = pos.get("positions", [])
+                    fresh = pos.get("positions", [])
+                    # Drop any ticket the engine already booked as closed. A stale bridge
+                    # snapshot can still list a just-closed position; without this the
+                    # dashboard phantom would reappear on the next poll.
+                    if self._closed_ticket_guard:
+                        fresh = [p for p in fresh
+                                 if int(p.get("ticket", 0)) not in self._closed_ticket_guard]
+                    self._position_cache = fresh
                     logger.debug("SlowPollLoop: Positions cached - count=%d", len(self._position_cache))
 
                 ords = get_orders_via_bridge(self._trade_terminal_path, self.mt5_symbol)
@@ -769,7 +784,15 @@ class AxonDaemon:
                 if not pos_res:
                     logger.debug("Bridge positions_get returned None")
                     return self._bridge_account_cache
-                pos_list = self._enrich_positions(pos_res.get("positions", []))
+                _raw_pos = pos_res.get("positions", [])
+                # Drop tickets the engine already booked as closed. A post-close bridge
+                # snapshot can still list the just-closed position (MT5 settle lag); without
+                # this the dashboard caches it and shows a phantom open trade with frozen PnL
+                # for as long as no new trade opens on this symbol.
+                if self._closed_ticket_guard:
+                    _raw_pos = [p for p in _raw_pos
+                                if int(p.get("ticket", 0)) not in self._closed_ticket_guard]
+                pos_list = self._enrich_positions(_raw_pos)
                 # Resting/pending limit orders from the slow-poll cache (populated
                 # regardless of execution mode). Bridge account_info doesn't carry
                 # them, so include them here or the dashboard shows no resting orders.
@@ -1730,9 +1753,15 @@ class AxonDaemon:
                     pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
 
                 spread = ask - bid
-                atr = self.live_state._state.atr_14_h1 if (self.live_state and self.live_state._state) else 0.0012
+                # Symbol-scaled ATR fallback. The FX 0.0012 (~12 FX-pips) on a $4000 gold
+                # instrument makes min_sl_distance = max(0.0012, 8*0.01) = $0.08, i.e. an
+                # instant stop-out. Only reached when atr_14_h1 is cold (H1 seeding failed);
+                # normally live_state seeds it from history within ~1h. Scale the fallback so
+                # a cold gold start still sizes a sane stop.
+                _atr_fb = 2.5 if "XAU" in self.mt5_symbol.upper() else (0.12 if "JPY" in self.mt5_symbol.upper() else 0.0012)
+                atr = self.live_state._state.atr_14_h1 if (self.live_state and self.live_state._state) else _atr_fb
                 if not isinstance(atr, (int, float)) or atr <= 0:
-                    atr = 0.0012
+                    atr = _atr_fb
                 buffer = 1.0 * pip
 
                 # Dynamic SL floor: 1.0 * H1 ATR (ensures Gold gets $2.50+ and AUDUSD gets 8-10 pips)
@@ -1860,9 +1889,15 @@ class AxonDaemon:
                     pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
 
                 spread = ask - bid
-                atr = self.live_state._state.atr_14_h1 if (self.live_state and self.live_state._state) else 0.0012
+                # Symbol-scaled ATR fallback. The FX 0.0012 (~12 FX-pips) on a $4000 gold
+                # instrument makes min_sl_distance = max(0.0012, 8*0.01) = $0.08, i.e. an
+                # instant stop-out. Only reached when atr_14_h1 is cold (H1 seeding failed);
+                # normally live_state seeds it from history within ~1h. Scale the fallback so
+                # a cold gold start still sizes a sane stop.
+                _atr_fb = 2.5 if "XAU" in self.mt5_symbol.upper() else (0.12 if "JPY" in self.mt5_symbol.upper() else 0.0012)
+                atr = self.live_state._state.atr_14_h1 if (self.live_state and self.live_state._state) else _atr_fb
                 if not isinstance(atr, (int, float)) or atr <= 0:
-                    atr = 0.0012
+                    atr = _atr_fb
                 buffer = 1.0 * pip
 
                 direction = getattr(self.reversal_model.entry, "_anomaly_direction", None) or snapshot.entry_decision.direction
@@ -3144,6 +3179,18 @@ class AxonDaemon:
             # Remove from tracking cache
             with self._position_lock:
                 self._tracked_positions.discard(ticket)
+                # Evict from the dashboard position cache NOW. The engine has just
+                # confirmed this ticket closed; do not wait for the slow-poll (which
+                # only updates on a successful fetch) or the dashboard shows a phantom
+                # open position with frozen PnL. Guard set stops the poll re-adding it.
+                self._closed_ticket_guard[int(ticket)] = time.monotonic()
+                if len(self._closed_ticket_guard) > 512:
+                    for _old in sorted(self._closed_ticket_guard,
+                                       key=self._closed_ticket_guard.get)[:256]:
+                        self._closed_ticket_guard.pop(_old, None)
+                if self._position_cache:
+                    self._position_cache = [p for p in self._position_cache
+                                            if int(p.get("ticket", 0)) != int(ticket)]
             self.reversal_model.clear_trade()  # Reset model and state machine so it can trade again!
             self._active_trade_initial_sl.pop(ticket, None)
             self.velocity_trailing.reset(ticket)  # Clean up velocity trail state
