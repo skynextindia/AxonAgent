@@ -318,6 +318,24 @@ class LiveWorldState:
                 abs(candle.high - self._prev_close_h1),
                 abs(candle.low - self._prev_close_h1)
             )
+            # Sanity clamp on true range. A single H1 bar cannot legitimately have a
+            # range many multiples of the established ATR. Without this, ONE garbage
+            # bar (a bad feed tick, a spurious gap, or a price on the wrong scale)
+            # poisons the 14-bar mean and inflates ATR ~40x — observed live as
+            # 719-pip AUDUSD stops and 1400-pip TPs that never bind, which also made
+            # r_multiple meaningless and produced 0/105 SL/TP exits. Winsorize (cap)
+            # rather than drop, so genuine volatility expansion is still captured,
+            # just bounded. Once 14 bars establish an ATR, clamp to 8x it; during
+            # warm-up, clamp to a generous absolute per-instrument ceiling (~500 pips).
+            _atr = self._state.atr_14_h1
+            _cap = (8.0 * _atr) if (_atr and _atr > 0) else (500.0 * self._pip_mult)
+            if tr > _cap:
+                logger.warning(
+                    "LiveState ATR guard: clamped H1 true range %.5f -> %.5f "
+                    "(atr=%.5f). Rejecting a likely bad/spike candle from ATR.",
+                    tr, _cap, _atr or 0.0
+                )
+                tr = _cap
             self._tr_window.append(tr)
             if len(self._tr_window) >= 14:
                 self._state.atr_14_h1 = float(np.mean(list(self._tr_window)))
