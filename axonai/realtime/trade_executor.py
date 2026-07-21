@@ -10,6 +10,7 @@ from typing import Dict, Any, Optional
 
 from axonai.realtime.risk_guard import RiskGuard
 from axonai.realtime.alerts import send_alert
+from axonai.dataflows.mt5_data import mt5_lock
 
 logger = logging.getLogger(__name__)
 
@@ -17,18 +18,23 @@ logger = logging.getLogger(__name__)
 class MT5TradeExecutor:
     """Handles sending order requests to MetaTrader 5."""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, risk_guard=None):
         self.config = config
         self.magic = config.get("realtime_magic_number", 123456)
         self.deviation = config.get("realtime_deviation", 20)
         self.default_lot_size = config.get("realtime_default_lot_size", 0.01)
-        self.risk_guard = RiskGuard(config)
+        # Shared, account-global RiskGuard when the supervisor provides one (a
+        # single daily-drawdown breaker across all pairs); otherwise build ours.
+        self.risk_guard = risk_guard if risk_guard is not None else RiskGuard(config)
         self.circuit_breaker = self.risk_guard
 
-    def execute_signal(self, symbol: str, signal: str, live_state: Optional[Any] = None) -> Optional[dict]:
+    def execute_signal(self, symbol: str, signal: str, live_state: Optional[Any] = None,
+                       size_scale: float = 1.0) -> Optional[dict]:
         """Convert a 5-tier signal into an MT5 order action.
 
         Signals: Buy, Overweight, Hold, Underweight, Sell
+        ``size_scale`` (1.0 = unchanged) multiplies the final lot; the
+        correlation engine uses it to shrink correlated exposure (Phase 4).
         """
         import MetaTrader5 as mt5
 
@@ -45,14 +51,15 @@ class MT5TradeExecutor:
             return {"success": False, "reason": "circuit_breaker_tripped"}
 
         if signal in ["Buy", "Overweight"]:
-            return self.send_order(symbol, mt5.ORDER_TYPE_BUY, live_state)
+            return self.send_order(symbol, mt5.ORDER_TYPE_BUY, live_state, size_scale)
         elif signal in ["Sell", "Underweight"]:
-            return self.send_order(symbol, mt5.ORDER_TYPE_SELL, live_state)
+            return self.send_order(symbol, mt5.ORDER_TYPE_SELL, live_state, size_scale)
         else:
             logger.info("TradeExecutor: Signal is %s. No order action taken (HOLD).", signal)
             return None
 
-    def send_order(self, symbol: str, order_type: int, live_state: Optional[Any] = None) -> Optional[dict]:
+    def send_order(self, symbol: str, order_type: int, live_state: Optional[Any] = None,
+                   size_scale: float = 1.0) -> Optional[dict]:
         """Send a market order with dynamic SL/TP and position sizing to MT5."""
         import MetaTrader5 as mt5
 
@@ -79,8 +86,9 @@ class MT5TradeExecutor:
 
         price = tick.ask if order_type == mt5.ORDER_TYPE_BUY else tick.bid
 
-        # Position conflict guard: enforce cap of maximum 1 open position per strategy (by magic number)
-        existing = mt5.positions_get()
+        # Position conflict guard: cap at 1 open position per strategy. Filter by
+        # symbol AND magic so concurrent per-pair daemons never cross-block.
+        existing = mt5.positions_get(symbol=symbol)
         if existing:
             # Filter by magic number to allow concurrent systems to trade independently
             system_existing = [p for p in existing if p.magic == self.magic]
@@ -158,6 +166,10 @@ class MT5TradeExecutor:
             lot = self.default_lot_size
             logger.info("TradeExecutor: Using default lot size: %.2f", lot)
 
+        # Correlation-driven position-size scaling (Phase 4); 1.0 = unchanged.
+        if size_scale != 1.0:
+            lot = max(0.01, round(lot * size_scale, 2))
+
         # Prepare request
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -174,9 +186,10 @@ class MT5TradeExecutor:
             "type_filling": mt5.ORDER_FILLING_FOK,
         }
 
-        # Send request
+        # Send request (serialized across daemon threads via the shared MT5 lock)
         logger.info("TradeExecutor: Sending order request with SL/TP: %s", request)
-        result = mt5.order_send(request)
+        with mt5_lock:
+            result = mt5.order_send(request)
         if result is None:
             logger.error("TradeExecutor: order_send returned None")
             return None
@@ -197,7 +210,8 @@ class MT5TradeExecutor:
             if result.retcode in [mt5.TRADE_RETCODE_INVALID_FILL, mt5.TRADE_RETCODE_LIMIT_VOLUME]:
                 logger.info("TradeExecutor: Retrying with ORDER_FILLING_IOC...")
                 request["type_filling"] = mt5.ORDER_FILLING_IOC
-                result = mt5.order_send(request)
+                with mt5_lock:
+                    result = mt5.order_send(request)
                 if result and result.retcode == mt5.TRADE_RETCODE_DONE:
                     logger.info("TradeExecutor: Order successful on retry! Ticket: %d", result.order)
                     send_alert(

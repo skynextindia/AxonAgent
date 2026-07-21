@@ -72,6 +72,9 @@ def main():
                         help="Dashboard port")
     parser.add_argument("--symbol", type=str, default="EURUSD",
                         help="Symbol to trade")
+    parser.add_argument("--symbols", type=str, default=None,
+                        help="Comma-separated pairs for multi-pair mode, e.g. "
+                             "EURUSD,USDJPY (overrides --symbol; one daemon per pair)")
     parser.add_argument("--mt5-path", type=str, default=None,
                         help="Path to MT5 terminal executable")
     parser.add_argument("--login", type=int, default=None,
@@ -85,6 +88,9 @@ def main():
     parser.add_argument("--max-daily-loss-amount", type=float, default=None,
                         help="Maximum daily loss amount limit (e.g. 5000.0 for FTMO)")
     args = parser.parse_args()
+
+    symbols = [s.strip() for s in args.symbols.split(",")] if args.symbols else [args.symbol]
+    symbols = [s for s in symbols if s]
 
     env = "wsl" if is_wsl() else "windows" if is_windows() else "linux"
     bridge_mode = args.bridge or (env == "wsl" and not args.direct)
@@ -139,7 +145,7 @@ def main():
     else:
         # Windows / Direct mode: start daemon + dashboard
         print(f"  Dashboard: http://{args.host}:{args.port}")
-        print(f"  Symbol: {args.symbol}")
+        print(f"  Symbol(s): {', '.join(symbols)}")
         print()
 
         # Import and start dashboard
@@ -150,7 +156,7 @@ def main():
         from axonai.realtime.daemon import AxonDaemon
         from axonai.default_config import DEFAULT_CONFIG
         config = DEFAULT_CONFIG.copy()
-        config["symbol"] = args.symbol
+        config["symbol"] = symbols[0]
         config["realtime_dry_run"] = True
         
         # Override config settings with CLI arguments if provided
@@ -181,17 +187,25 @@ def main():
         if config.get("risk_max_daily_loss_amount") is not None:
             os.environ["AXONAI_RISK_MAX_DAILY_LOSS_AMOUNT"] = str(config["risk_max_daily_loss_amount"])
 
-        daemon = AxonDaemon(symbol=args.symbol, config=config)
-        daemon.start()
+        if len(symbols) > 1:
+            # Multi-pair: one daemon thread per pair over a shared MT5 connection.
+            from axonai.realtime.supervisor import DaemonSupervisor
+            print(f"  Multi-pair mode: {', '.join(symbols)}")
+            print("  Dashboard + Daemons running. Press Ctrl+C to stop.")
+            supervisor = DaemonSupervisor(symbols, config)
+            supervisor.start()  # blocks until stopped, then tears down MT5
+        else:
+            daemon = AxonDaemon(symbol=symbols[0], config=config)
+            daemon.start()
 
-        print("  Dashboard + Daemon running. Press Ctrl+C to stop.")
-        try:
-            import time
-            while True:
-                time.sleep(1)
-        except KeyboardInterrupt:
-            print("\n  Stopping...")
-            daemon.stop()
+            print("  Dashboard + Daemon running. Press Ctrl+C to stop.")
+            try:
+                import time
+                while True:
+                    time.sleep(1)
+            except KeyboardInterrupt:
+                print("\n  Stopping...")
+                daemon.stop()
 
 
 if __name__ == "__main__":

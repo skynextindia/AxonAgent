@@ -50,10 +50,22 @@ class DashboardServer:
         self.active_connections: Set[WebSocket] = set()
         self._lock = threading.Lock()
 
-        self.daemon = None
+        # Multi-pair registry: one daemon per symbol, one marked active for the
+        # HUD. The `daemon` and `history` properties below alias the active
+        # symbol so the many existing single-pair call sites keep working.
+        self.daemons: Dict[str, Any] = {}
+        self.active_symbol = None
 
-        # In-memory history for hydrating newly connected clients instantly
-        self.history: Dict[str, Any] = {
+        # Per-symbol in-memory history for instantly hydrating new clients.
+        self._history_by_symbol: Dict[str, Dict[str, Any]] = {}
+
+        # Setup routing
+        self._setup_routes()
+        self._load_session()
+
+    @staticmethod
+    def _default_history() -> Dict[str, Any]:
+        return {
             "tick": None,
             "regime": None,
             "levels": None,
@@ -65,9 +77,41 @@ class DashboardServer:
             "decision": None,    # Latest final decision
         }
 
-        # Setup routing
-        self._setup_routes()
-        self._load_session()
+    @staticmethod
+    def _canon(symbol) -> str:
+        """Bare 6-letter pair from any broker/yfinance form (EURUSDm → EURUSD)."""
+        letters = "".join(ch for ch in (symbol or "").upper() if ch.isalpha())
+        return letters[:6] if len(letters) >= 6 else letters
+
+    def _history_for(self, symbol) -> Dict[str, Any]:
+        """History bucket for a symbol (active symbol when unspecified)."""
+        key = self._canon(symbol) or (self.active_symbol or "__pending__")
+        if key not in self._history_by_symbol:
+            self._history_by_symbol[key] = self._default_history()
+        return self._history_by_symbol[key]
+
+    @property
+    def history(self) -> Dict[str, Any]:
+        """Active symbol's history (back-compat alias for single-pair code)."""
+        return self._history_for(self.active_symbol)
+
+    @property
+    def daemon(self):
+        """Currently-active daemon (back-compat alias)."""
+        return self.daemons.get(self.active_symbol) if self.active_symbol else None
+
+    def register_daemon(self, symbol, daemon) -> None:
+        """Register a per-pair daemon; the first one registered becomes active."""
+        with self._lock:
+            key = self._canon(symbol)
+            self.daemons[key] = daemon
+            if self.active_symbol is None:
+                self.active_symbol = key
+                # Adopt any session history loaded before a daemon registered.
+                pending = self._history_by_symbol.pop("__pending__", None)
+                if pending is not None and key not in self._history_by_symbol:
+                    self._history_by_symbol[key] = pending
+        logger.info("Dashboard: registered daemon %s (active=%s)", key, self.active_symbol)
 
     def _setup_routes(self):
         """Bind endpoints to FastAPI app."""
@@ -558,7 +602,12 @@ class DashboardServer:
                                 mt5_symbol = data.get("mt5")
                                 is_active = False
                                 with self._lock:
-                                    if self.daemon:
+                                    target = self._canon(mt5_symbol or pair)
+                                    if target and target in self.daemons:
+                                        # Multi-pair: make the requested pair active.
+                                        self.active_symbol = target
+                                        is_active = True
+                                    elif self.daemon:
                                         d_clean = self.daemon.mt5_symbol.replace("=X", "").replace("=x", "").upper()
                                         p_clean = mt5_symbol.replace("=X", "").replace("=x", "").upper() if mt5_symbol else ""
                                         yf_clean = self.daemon.yf_symbol.replace("=X", "").replace("=x", "").upper()
@@ -578,12 +627,12 @@ class DashboardServer:
                                     logger.info("Dashboard WS: client switched back to active symbol, re-hydrating")
                                     await self._hydrate_client(websocket)
                                 else:
-                                    daemon_sym = self.daemon.yf_symbol if self.daemon else "EURUSD=X"
+                                    running = ", ".join(sorted(self.daemons)) or "EURUSD"
                                     await websocket.send_json({
                                         "type": "agent",
                                         "agent_name": "SYSTEM",
                                         "status": "active",
-                                        "message": f"[WARNING] The trading daemon is currently locked to {daemon_sym}. Live telemetry and cognitive execution are active for that pair only. To monitor or trade {pair}, restart the daemon using: python cli/main.py live --ticker \"{pair}\"",
+                                        "message": f"[WARNING] {pair} is not among the running pairs ({running}). To trade it, restart with: python run.py --symbols \"{running},{pair}\"",
                                         "tool_calls": [],
                                         "timestamp": datetime.now().strftime("%H:%M:%S")
                                     })
@@ -662,26 +711,27 @@ class DashboardServer:
             return
 
         with self._lock:
-            # Update cache history
+            # Update cache history, routed to the message's per-symbol bucket.
+            hist = self._history_for(message.get("symbol"))
             save_needed = False
             if msg_type in ["tick", "regime", "levels", "account", "decision", "news_data"]:
                 # The calendar poller broadcasts type "news_data"; store it under calendar_data.
-                self.history["calendar_data" if msg_type == "news_data" else msg_type] = message
+                hist["calendar_data" if msg_type == "news_data" else msg_type] = message
                 if msg_type in ["decision", "news_data"]:
                     save_needed = True
             elif msg_type in ["candle", "candles"]:
                 tf = message.get("timeframe")
                 if tf:
-                    self.history["candles"][tf] = message
+                    hist["candles"][tf] = message
             elif msg_type == "event":
-                self.history["events"].append(message)
-                if len(self.history["events"]) > 30:
-                    self.history["events"].pop(0)
+                hist["events"].append(message)
+                if len(hist["events"]) > 30:
+                    hist["events"].pop(0)
                 save_needed = True
             elif msg_type == "agent":
-                self.history["agent_trace"].append(message)
-                if len(self.history["agent_trace"]) > 50:
-                    self.history["agent_trace"].pop(0)
+                hist["agent_trace"].append(message)
+                if len(hist["agent_trace"]) > 50:
+                    hist["agent_trace"].pop(0)
                 save_needed = True
 
             if save_needed:

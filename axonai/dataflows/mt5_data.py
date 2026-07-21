@@ -12,6 +12,7 @@ from __future__ import annotations
 import atexit
 import logging
 import os
+import threading
 from datetime import datetime, timedelta
 from typing import Annotated, Dict, List, Optional, Tuple
 
@@ -23,6 +24,12 @@ logger = logging.getLogger(__name__)
 # Lazy import so the module loads even when MetaTrader5 isn't installed
 _mt5 = None
 _initialized = False
+
+# The MetaTrader5 library is not documented as thread-safe. When several daemon
+# threads (one per pair) share one terminal connection, serialize *write* ops
+# (order_send / SLTP modify / close) through this lock. Reads (copy_rates_*) are
+# left unlocked for latency; wrap them too if the terminal proves flaky.
+mt5_lock = threading.RLock()
 
 # ── MT5 timeframe constants ──────────────────────────────────────────────
 # Mapping from human-readable labels to MT5 TIMEFRAME_* constants.

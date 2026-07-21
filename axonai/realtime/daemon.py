@@ -47,7 +47,8 @@ class AxonDaemon:
     5. On shutdown: gracefully stop threads, close MT5
     """
 
-    def __init__(self, symbol: str, config: dict):
+    def __init__(self, symbol: str, config: dict, risk_guard=None,
+                 correlation_engine=None, supervisor=None):
         # Initialize MT5 early so symbol resolution can query active terminal info
         mt5_initialize(
             terminal_path=config.get("mt5_terminal_path"),
@@ -63,6 +64,9 @@ class AxonDaemon:
         # calibrated values (pip size, magic, risk %, SL/TP, trailing mults).
         config = resolve_symbol_config(config, self.mt5_symbol)
         self.config = config
+        # Multi-pair wiring (all optional; None → standalone single-pair mode).
+        self.supervisor = supervisor
+        self.correlation_engine = correlation_engine
         self.offset_hours = 0
         self.tz = timezone.utc
         self.event_queue: queue.Queue = queue.Queue(maxsize=100)
@@ -79,8 +83,9 @@ class AxonDaemon:
             self.event_queue, config,
         )
 
-        # Layer 4: Trade Executor (magic + sizing come from the calibrated config)
-        self.trade_executor_opt = MT5TradeExecutor(self.config)
+        # Layer 4: Trade Executor (magic + sizing from calibrated config; shares
+        # the supervisor's account-global RiskGuard when running multi-pair).
+        self.trade_executor_opt = MT5TradeExecutor(self.config, risk_guard=risk_guard)
         self.trade_executor = self.trade_executor_opt  # Default fallback reference
 
         # Trailing stop and trade outcome tracking
@@ -470,7 +475,7 @@ class AxonDaemon:
         # Register daemon with dashboard server if available
         dashboard = get_dashboard()
         if dashboard:
-            dashboard.daemon = self
+            dashboard.register_daemon(self.mt5_symbol, self)
 
         # 1. Initialize MT5
         if not mt5_initialize():
@@ -531,19 +536,19 @@ class AxonDaemon:
         if dashboard:
             logger.info("Broadcasting initial telemetry states to dashboard...")
             # 1. Swing Levels
-            dashboard.broadcast(self._get_levels_payload())
+            self._broadcast(self._get_levels_payload())
             
             # 2. Regime
-            dashboard.broadcast(self._get_regime_payload())
+            self._broadcast(self._get_regime_payload())
             
             # 3. Candles (M15 & H1)
-            dashboard.broadcast(self._get_candles_payload("M15"))
-            dashboard.broadcast(self._get_candles_payload("H1"))
+            self._broadcast(self._get_candles_payload("M15"))
+            self._broadcast(self._get_candles_payload("H1"))
             
             # 4. Account Details
             acc_payload = self._get_account_payload()
             if acc_payload:
-                dashboard.broadcast(acc_payload)
+                self._broadcast(acc_payload)
             
             # 5. Latest Tick
             tick = mt5.symbol_info_tick(self.mt5_symbol) if mt5 else None
@@ -552,7 +557,7 @@ class AxonDaemon:
                 ask = tick.ask
                 spread = (ask - bid) / (0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001)
                 timestamp = datetime.utcfromtimestamp(tick.time)
-                dashboard.broadcast({
+                self._broadcast({
                     "type": "tick",
                     "symbol": self.mt5_symbol,
                     "bid": bid,
@@ -571,6 +576,22 @@ class AxonDaemon:
         logger.info("="*60)
 
         self._event_loop()
+
+    def _broadcast(self, message: dict) -> None:
+        """Broadcast a dashboard message tagged with this daemon's symbol.
+
+        In multi-pair mode the dashboard routes/filters telemetry by ``symbol``;
+        a single-pair daemon is unaffected.
+        """
+        dashboard = get_dashboard()
+        if not dashboard:
+            return
+        try:
+            if isinstance(message, dict):
+                message.setdefault("symbol", self.mt5_symbol)
+            dashboard.broadcast(message)
+        except Exception as e:
+            logger.debug("dashboard broadcast failed: %s", e)
 
     def _on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Called by TickEngine on every new tick."""
@@ -662,7 +683,7 @@ class AxonDaemon:
                 pip_unit = 0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001
                 absorption = len(t_30s) >= 20 and velocity > 1.5 and abs(t_30s[-1]['mid'] - t_30s[0]['mid']) < (2.0 * pip_unit)
 
-            dashboard.broadcast({
+            self._broadcast({
                 "type": "tick",
                 "symbol": self.mt5_symbol,
                 "bid": bid,
@@ -689,12 +710,12 @@ class AxonDaemon:
             
             # Throttle heavier updates to once every 5 ticks
             if self.tick_engine._tick_count % 5 == 1:
-                dashboard.broadcast(self._get_regime_payload())
+                self._broadcast(self._get_regime_payload())
                 
                 # Fetch and broadcast MetaTrader 5 account info
                 acc_payload = self._get_account_payload()
                 if acc_payload:
-                    dashboard.broadcast(acc_payload)
+                    self._broadcast(acc_payload)
 
     def _on_candle_close(self, candle: LiveCandle):
         """Called by TickEngine when any timeframe candle closes."""
@@ -705,7 +726,7 @@ class AxonDaemon:
         # Broadcast closed candle
         dashboard = get_dashboard()
         if dashboard:
-            dashboard.broadcast({
+            self._broadcast({
                 "type": "candle",
                 "timeframe": candle.timeframe,
                 "open": candle.open,
@@ -719,9 +740,9 @@ class AxonDaemon:
             
             # Send updated candles array for structural timeframes
             if candle.timeframe in ("M15", "H1"):
-                dashboard.broadcast(self._get_candles_payload(candle.timeframe))
-                dashboard.broadcast(self._get_levels_payload())
-                dashboard.broadcast(self._get_regime_payload())
+                self._broadcast(self._get_candles_payload(candle.timeframe))
+                self._broadcast(self._get_levels_payload())
+                self._broadcast(self._get_regime_payload())
                 
                 # Periodically refresh news calendar cache in the background
                 try:
@@ -810,7 +831,7 @@ class AxonDaemon:
             if not self.config.get("test_mode", False) and not (is_peak and is_exhaustion and is_gate_passed):
                 self._events_skipped += 1
                 if dashboard:
-                    dashboard.broadcast({
+                    self._broadcast({
                         "type": "event",
                         "id": self._events_detected,
                         "event_type": event.event_type.value,
@@ -838,7 +859,7 @@ class AxonDaemon:
                 self._events_skipped += 1
                 logger.info("ENTRY BLOCKED by News Guard: %s", news_reason)
                 if dashboard:
-                    dashboard.broadcast({
+                    self._broadcast({
                         "type": "event",
                         "id": self._events_detected,
                         "event_type": event.event_type.value,
@@ -856,7 +877,7 @@ class AxonDaemon:
 
             dashboard = get_dashboard()
             if dashboard:
-                dashboard.broadcast({
+                self._broadcast({
                     "type": "event",
                     "id": self._events_detected,
                     "event_type": event.event_type.value,
@@ -887,7 +908,7 @@ class AxonDaemon:
                 self._events_skipped += 1
                 logger.info("SKIPPED (session gate: current=%s not in %s)", ws.session, active_sessions)
                 if dashboard:
-                    dashboard.broadcast({
+                    self._broadcast({
                         "type": "event",
                         "id": self._events_detected,
                         "event_type": event.event_type.value,
@@ -908,7 +929,7 @@ class AxonDaemon:
                 self._events_skipped += 1
                 logger.info("SKIPPED (SL lockout active until new trading day)")
                 if dashboard:
-                    dashboard.broadcast({
+                    self._broadcast({
                         "type": "event",
                         "id": self._events_detected,
                         "event_type": event.event_type.value,
@@ -929,7 +950,7 @@ class AxonDaemon:
                 self._events_skipped += 1
                 logger.info("SKIPPED (EOD hard-flat window; entries blocked until new trading day)")
                 if dashboard:
-                    dashboard.broadcast({
+                    self._broadcast({
                         "type": "event",
                         "id": self._events_detected,
                         "event_type": event.event_type.value,
@@ -957,7 +978,7 @@ class AxonDaemon:
             
             # Broadcast decision status
             if dashboard:
-                dashboard.broadcast({
+                self._broadcast({
                     "type": "decision",
                     "signal": signal,
                     "system": system_name,
@@ -1306,7 +1327,10 @@ class AxonDaemon:
             self.tick_engine.join(timeout=5)
         except RuntimeError:
             pass
-        mt5_shutdown()
+        # The MT5 connection is process-wide and shared across pairs; only tear
+        # it down when standalone. Under a supervisor, the supervisor owns it.
+        if getattr(self, "supervisor", None) is None:
+            mt5_shutdown()
         self._log_stats()
         logger.info("AxonDaemon stopped.")
 
@@ -1574,7 +1598,7 @@ class AxonDaemon:
             # Broadcast to dashboard
             dashboard = get_dashboard()
             if dashboard:
-                dashboard.broadcast({
+                self._broadcast({
                     "type": "event",
                     "id": f"close-{ticket}",
                     "event_type": "TRADE_CLOSED",
