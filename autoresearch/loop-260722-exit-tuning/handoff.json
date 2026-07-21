@@ -1,0 +1,20 @@
+{
+  "version": "2.1.0",
+  "source": "loop",
+  "status": "ARMED_NOT_STARTED",
+  "armed_date": "2026-07-22",
+  "precondition": "requires >=3 FX-only days with execution telemetry (commit 07a598a) before iteration 0",
+  "findings": [
+    "07-21 FX: entries momentum-aligned (fine); leak is exits (adverse_impulse cuts continuation)",
+    "protect floor 4.0*clamp(vol_pips,0.5,3.0) sits above chop-day MFE (~2.6p) so trades never reach trailing manager",
+    "USDJPY 0.60 floor blocked 620/688 armed setups; would-clear@0.50=127 vs @0.60=1; likely protective (JPY trended)"
+  ],
+  "config": {
+    "goal": "raise FX-only net-pips expectancy via exit-gate rework; entries out of scope",
+    "scope": ["axonai/realtime/exit_engine.py", "axonai/default_config.py (exit_* keys only)"],
+    "metric": "net pips per trade from offline backtester over FX snapshots",
+    "direction": "higher_is_better",
+    "verify": "backtester replay over reports/engine_snapshots_*.csv -> net pips/trade (exact CLI TBD, do not guess)",
+    "guard": "python -m pytest tests/ -q"
+  }
+}
