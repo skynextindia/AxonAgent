@@ -142,6 +142,17 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_tick_buffer_size": 10_000,
     "realtime_candle_history": 500,
     "realtime_suppress_asian": False,
+    # Sessions in which new entries are allowed (used when auto mode is OFF).
+    # Valid: "asian", "london", "overlap", "newyork", "rollover".
+    "realtime_active_sessions": ["asian", "london", "overlap", "newyork", "rollover"],
+    # Self-configuring session selector: learns per-session movement of the pair
+    # and enables only the sessions worth trading. Falls back to the manual list
+    # above until enough samples are collected.
+    "realtime_auto_sessions": False,
+    "realtime_auto_sessions_window": 10,        # rolling days of history per session
+    "realtime_auto_sessions_min_samples": 3,    # samples needed before auto kicks in
+    "realtime_auto_sessions_spread_mult": 25.0, # range must be >= this * avg spread
+    "realtime_auto_sessions_rel_floor": 0.40,   # range must be >= this * best session
     "realtime_level_reset_atr_multiple": 2.0,
     "realtime_log_events": True,
     "realtime_magic_number": 123456,

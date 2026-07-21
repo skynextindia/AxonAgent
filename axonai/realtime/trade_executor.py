@@ -134,9 +134,13 @@ class MT5TradeExecutor:
             account_equity = acc.equity if acc else 10000.0
             risk_pct = self.config.get("realtime_risk_pct", 0.01)  # risk_pct from config default 0.01
             risk_amount = account_equity * risk_pct
-            sl_pips = atr_pips * 2
-            lot_size = round(risk_amount / (sl_pips * 0.10), 2)
-            lot_size = max(0.01, min(lot_size, 0.10))  # hard limits
+            # Actual stop distance in pips (SL was computed above as sl_distance).
+            sl_pips = max(sl_distance / pip, 1.0)
+            # ~$10 per pip per 1.0 lot on a USD-quote pair; lot = risk / (pips * $/pip/lot).
+            pip_value_per_lot = self.config.get("realtime_pip_value_per_lot", 10.0)
+            lot_size = round(risk_amount / (sl_pips * pip_value_per_lot), 2)
+            max_lot = self.config.get("realtime_max_lot", 0.10)
+            lot_size = max(0.01, min(lot_size, max_lot))  # hard limits
             lot = lot_size
             
             logger.info(

@@ -30,6 +30,9 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
 .tab-btn{border:1px solid var(--border);background:transparent;color:var(--text-secondary);font-size:9px;font-weight:700;padding:4px 12px;cursor:pointer;letter-spacing:.08em;transition:all .15s;font-family:'JetBrains Mono',monospace}
 .tab-btn:hover{border-color:var(--cyan);color:var(--cyan)}
 .tab-btn.active{border-color:var(--cyan);background:rgba(0,184,212,.08);color:var(--cyan)}
+.ses-pill{padding:2px 5px;border:1px solid var(--border);color:var(--text-dim);background:transparent;border-radius:2px;transition:all .2s;white-space:nowrap}
+.ses-pill.active{color:#0a0a0f;background:var(--cyan);border-color:var(--cyan)}
+.ses-pill.current{outline:1px solid #fff;box-shadow:0 0 7px var(--cyan)}
 .btn-override{border:1px solid transparent;color:var(--text-secondary);font-family:'JetBrains Mono',monospace;font-size:7px;font-weight:700;padding:3px 6px;cursor:pointer;letter-spacing:.06em;transition:all .12s}
 .btn-override:hover{filter:brightness(1.3)}
 .hazard-bg-buy{background:repeating-linear-gradient(-45deg,rgba(0,200,83,.04),rgba(0,200,83,.04) 10px,transparent 10px,transparent 20px)}
@@ -104,6 +107,15 @@ body{background:var(--bg-0);color:var(--text-primary);font-family:'JetBrains Mon
      <span id="mini-cal-next-lbl" style="font-weight:900;letter-spacing:.08em;margin-right:6px;">NEXT:</span>
      <span id="mini-cal-next-title" style="font-weight:700;max-width:150px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-right:6px;">--</span>
      <span id="mini-cal-next-time" style="font-weight:700;">--:--</span>
+  </div>
+  <!-- ACTIVE SESSIONS (beside the event bar) -->
+  <div id="session-pills" style="margin-left:8px;display:flex;align-items:center;gap:3px;font-family:'JetBrains Mono',monospace;font-size:7px;font-weight:900;letter-spacing:.06em;">
+     <span id="session-pills-lbl" style="color:var(--text-dim);margin-right:2px;">SES</span>
+     <span class="ses-pill" data-ses="asian">ASIA</span>
+     <span class="ses-pill" data-ses="london">LDN</span>
+     <span class="ses-pill" data-ses="overlap">OVL</span>
+     <span class="ses-pill" data-ses="newyork">NY</span>
+     <span class="ses-pill" data-ses="rollover">ROLL</span>
   </div>
 </nav>
 <!-- ═══ MAIN VIEWPORT ═══ -->
@@ -714,6 +726,17 @@ class DashboardController {
   }
   handleRegime(d) {
     if(d.symbol&&this.ticker)this.ticker.textContent=d.symbol;
+    // Active-session pills beside the event bar
+    if(d.active_sessions){
+      const act=new Set(d.active_sessions);
+      document.querySelectorAll('.ses-pill').forEach(p=>{
+        const s=p.getAttribute('data-ses');
+        p.classList.toggle('active', act.has(s));
+        p.classList.toggle('current', s===d.session);
+      });
+      const lbl=document.getElementById('session-pills-lbl');
+      if(lbl)lbl.textContent=d.auto_sessions?'AUTO':'SES';
+    }
     if(this.beliefVal){
         this.beliefVal.textContent=this.sf(d.belief,2);
         this.beliefVal.style.color=d.belief>=0?"var(--green)":"var(--red)";

@@ -193,16 +193,9 @@ class DashboardServer:
 
         @self.app.get("/api/logs/decisions")
         def get_decisions_log():
-            import os
-            from axonai.agents.utils.memory import TradingMemoryLog
-            from axonai.default_config import DEFAULT_CONFIG
-            config = self.daemon.config if (self.daemon and hasattr(self.daemon, "config")) else DEFAULT_CONFIG
-            mem_path = config.get("memory_log_path", os.path.expanduser("~/.axonai/memory/trading_memory.md"))
-            try:
-                log = TradingMemoryLog({"memory_log_path": mem_path})
-                return {"status": "success", "entries": log.load_entries()}
-            except Exception as e:
-                return {"status": "error", "message": str(e)}
+            # The LLM trading-memory layer was removed; this pure-math build has no
+            # decision-memory log. Return an empty set instead of a 500.
+            return {"status": "success", "entries": [], "message": "decision memory disabled"}
 
         @self.app.get("/api/logs/trades")
         def get_trades_log():

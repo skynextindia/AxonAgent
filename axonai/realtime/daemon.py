@@ -29,6 +29,7 @@ from axonai.realtime.trade_executor import MT5TradeExecutor
 from axonai.realtime.api_server import get_dashboard
 from cli.stats_handler import StatsCallbackHandler
 from axonai.realtime.news_guard import NewsGuard
+from axonai.realtime.session_tuner import SessionTuner
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,10 @@ class AxonDaemon:
         # Layer 5: Economic news calendar guard
         self.news_guard = NewsGuard(config)
         self._last_session: Optional[str] = None
+
+        # Self-configuring session selector (learns per-session movement of this pair)
+        self.auto_sessions = bool(config.get("realtime_auto_sessions", False))
+        self.session_tuner = SessionTuner(config, self.mt5_symbol) if self.auto_sessions else None
 
         # Stats
         self._events_detected: int = 0
@@ -168,6 +173,16 @@ class AxonDaemon:
                 "color": s["color"],
             })
         return result
+
+    def _current_active_sessions(self) -> list:
+        """Effective tradable sessions: tuner (if warmed up) else config list."""
+        learned = self.session_tuner.active_sessions() if self.session_tuner is not None else None
+        if learned is not None:
+            return learned
+        return self.config.get(
+            "realtime_active_sessions",
+            ["asian", "london", "overlap", "newyork", "rollover"],
+        )
 
     def _get_regime_payload(self) -> dict:
         ws = self.live_state.snapshot()
@@ -275,6 +290,8 @@ class AxonDaemon:
             "session": ws.session,
             "session_quality": ws.session_quality,
             "session_details": session_details,
+            "active_sessions": self._current_active_sessions(),
+            "auto_sessions": self.auto_sessions,
             "market_closed": market_closed,
             "market_resume_timestamp": market_resume_timestamp,
             # --- Daemon Status and Stats ---
@@ -562,6 +579,16 @@ class AxonDaemon:
         self.event_detector.is_in_trade = len(self._tracked_positions) > 0
         self.event_detector.on_tick(bid, ask, timestamp)
 
+        # Feed the self-configuring session selector (learns per-session movement)
+        if self.session_tuner is not None:
+            try:
+                st = self.live_state._state
+                sess = st.session if st else None
+                pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+                self.session_tuner.update_tick(sess, (bid + ask) / 2.0, (ask - bid) / pip)
+            except Exception as e:
+                logger.debug("SessionTuner update failed: %s", e)
+
         # Handle trailing stops and closed position logging for dryrun
         if self.config.get("realtime_dry_run", False):
             try:
@@ -816,38 +843,21 @@ class AxonDaemon:
                 })
 
             is_dry_run = self.config.get("realtime_dry_run", False)
-
-            if not is_dry_run and not self.graph_executor.should_execute(event):
-                self._events_skipped += 1
-                remaining = self.graph_executor.seconds_until_ready
-                logger.info("SKIPPED (cooldown=%.0fs remaining | priority=%s)",
-                            remaining, event.priority.name)
-                
-                if dashboard:
-                    dashboard.broadcast({
-                        "type": "event",
-                        "id": self._events_detected,
-                        "event_type": event.event_type.value,
-                        "priority": event.priority.name,
-                        "price": event.price,
-                        "details": event.details,
-                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                        "status": "skipped",
-                        "reason": f"cooldown={remaining:.0f}s remaining" if remaining > 0 else "priority threshold",
-                        "events_detected": self._events_detected,
-                        "events_fired": self._events_fired,
-                        "events_skipped": self._events_skipped,
-                    })
-                continue
+            # NOTE: cooldown/priority gating is already enforced by EventDetector._emit
+            # (set via event_detector.set_cooldown after each execution below), so no
+            # separate execution-controller gate is needed here.
 
             # Snapshot current state
             ws = self.live_state.snapshot()
             me = self.live_evidence.snapshot()
 
-            # Enforce Session Gate: only trade London and NY sessions
-            if ws and ws.session not in ("london", "overlap", "newyork"):
+            # Session Gate — self-configuring when realtime_auto_sessions is on
+            # (the tuner learns which sessions this pair actually moves in);
+            # otherwise the manual "realtime_active_sessions" list is used.
+            active_sessions = self._current_active_sessions()
+            if ws and ws.session not in active_sessions:
                 self._events_skipped += 1
-                logger.info("SKIPPED (session gate: current=%s not in london/overlap/newyork)", ws.session)
+                logger.info("SKIPPED (session gate: current=%s not in %s)", ws.session, active_sessions)
                 if dashboard:
                     dashboard.broadcast({
                         "type": "event",
@@ -858,13 +868,12 @@ class AxonDaemon:
                         "details": event.details,
                         "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                         "status": "skipped",
-                        "reason": f"outside London/NY session ({ws.session})",
+                        "reason": f"session '{ws.session}' not in active_sessions",
                         "events_detected": self._events_detected,
                         "events_fired": self._events_fired,
                         "events_skipped": self._events_skipped,
                     })
                 continue
-
 
             self._events_fired += 1
             dir_str = event.details.get("direction", "")
