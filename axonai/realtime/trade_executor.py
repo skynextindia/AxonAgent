@@ -107,10 +107,15 @@ class MT5TradeExecutor:
         # 2. Calculate ATR-based Stop Loss & Take Profit exactly as requested
         entry = price
         direction = "BUY" if order_type == mt5.ORDER_TYPE_BUY else "SELL"
-        pip = 0.01 if "JPY" in symbol.upper() else 0.0001
-        
-        sl_distance = max(atr * 2.0, 16 * pip)
-        tp_distance = max(atr * 2.0, 16 * pip)
+        pip = self.config.get("pip_size") or (
+            0.01 if ("JPY" in symbol.upper() or "XAU" in symbol.upper()) else 0.0001
+        )
+
+        sl_mult = self.config.get("sl_atr_mult", 2.0)
+        tp_mult = self.config.get("tp_atr_mult", 2.0)
+        min_stop_pips = self.config.get("min_stop_pips", 16.0)
+        sl_distance = max(atr * sl_mult, min_stop_pips * pip)
+        tp_distance = max(atr * tp_mult, min_stop_pips * pip)
         
         sl = entry - sl_distance if direction == "BUY" else entry + sl_distance
         tp = entry + tp_distance if direction == "BUY" else entry - tp_distance
@@ -136,8 +141,9 @@ class MT5TradeExecutor:
             risk_amount = account_equity * risk_pct
             # Actual stop distance in pips (SL was computed above as sl_distance).
             sl_pips = max(sl_distance / pip, 1.0)
-            # ~$10 per pip per 1.0 lot on a USD-quote pair; lot = risk / (pips * $/pip/lot).
-            pip_value_per_lot = self.config.get("realtime_pip_value_per_lot", 10.0)
+            # $/pip/lot: pinned by config for USD-quote pairs (~$10), or derived
+            # from the live price for USD-base pairs (e.g. USDJPY ≈ $6–7).
+            pip_value_per_lot = self._pip_value_per_lot(symbol_info, price, pip)
             lot_size = round(risk_amount / (sl_pips * pip_value_per_lot), 2)
             max_lot = self.config.get("realtime_max_lot", 0.10)
             lot_size = max(0.01, min(lot_size, max_lot))  # hard limits
@@ -209,6 +215,23 @@ class MT5TradeExecutor:
             self.config
         )
         return self._result_to_dict(result, sl)
+
+    def _pip_value_per_lot(self, symbol_info, price: float, pip: float) -> float:
+        """Return $/pip for a 1.0-lot position, in the account currency (USD).
+
+        Config key ``realtime_pip_value_per_lot`` pins the value when truthy
+        (USD-quote pairs like EURUSD ≈ $10). When None/0 (USD-base pairs like
+        USDJPY, whose pip value is price-dependent) it is derived from the
+        contract size and current price: contract * pip / price.
+        """
+        configured = self.config.get("realtime_pip_value_per_lot", 10.0)
+        if configured:
+            return float(configured)
+        contract = getattr(symbol_info, "trade_contract_size", 100000) or 100000
+        val = contract * pip
+        if price and price > 0:
+            val = val / price  # USD-base pair: convert quote-currency pip → USD
+        return max(val, 0.01)
 
     def _result_to_dict(self, result, sl: float = 0.0) -> dict:
         """Helper to convert OrderSendResult to a dictionary."""

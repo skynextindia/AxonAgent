@@ -153,6 +153,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_auto_sessions_min_samples": 3,    # samples needed before auto kicks in
     "realtime_auto_sessions_spread_mult": 25.0, # range must be >= this * avg spread
     "realtime_auto_sessions_rel_floor": 0.40,   # range must be >= this * best session
+    # EOD hard-flat: close ALL positions near the NY liquidity-end each trading day
+    # and bar re-entry through the tight pre-close window.
+    "eod_hard_flat_enabled": True,
+    "eod_hard_flat_minutes_before": 10,         # minutes before ny_close to flatten
     "realtime_level_reset_atr_multiple": 2.0,
     "realtime_log_events": True,
     "realtime_magic_number": 123456,
@@ -160,6 +164,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_deviation": 20,
     "realtime_min_confluence_conditions": 1,
     "realtime_dry_run": True,
+    # Run trailing-stop management + closed-position (SL/TP) detection in live
+    # mode too — required for live trailing stops, post-trade cooldowns, and the
+    # per-pair SL lockout. Turn off to revert to dry-run-only monitoring.
+    "realtime_manage_positions_live": True,
     "peak_detector_rule_c_enabled": False,
     "trade_risk_pct": 0.01,
     "realtime_use_pinpoint_price": False,
@@ -169,3 +177,99 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "indicator_ema_fast": 12,
     "indicator_ema_slow": 26,
 })
+
+
+# ── Per-pair calibration ─────────────────────────────────────────────────────
+# The daemon runs one instance per symbol. SYMBOL_CALIBRATION overlays
+# pair-specific values onto the flat DEFAULT_CONFIG via resolve_symbol_config(),
+# which maps each spec onto the ``realtime_*`` keys the trade executor and daemon
+# already read — so downstream components need no changes. A symbol not listed
+# here falls back to DEFAULT_CONFIG values plus an auto-derived pip size.
+#
+# magic_number MUST be distinct per pair: the executor's position-conflict guard
+# filters open positions by magic, so a shared magic would cross-block pairs.
+SYMBOL_CALIBRATION = {
+    "EURUSD": {
+        "magic_number": 123457,      # preserves the historical EURUSD magic
+        "pip_size": 0.0001,
+        "pip_value_per_lot": 10.0,   # USD-quote pair: ~$10 / pip / 1.0 lot
+        "risk_pct": 0.01,
+        "max_lot": 0.10,
+        "sl_atr_mult": 2.0,
+        "tp_atr_mult": 2.0,
+        "min_stop_pips": 16.0,
+        "be_atr_mult": 0.60,
+        "trail_trigger_atr_mult": 0.80,
+        "trail_dist_atr_mult": 0.35,
+    },
+    "USDJPY": {
+        "magic_number": 123458,      # distinct from EURUSD
+        "pip_size": 0.01,
+        # USD-BASE pair: $/pip/lot is price-dependent (~contract*pip/price ≈ $6–7),
+        # not a constant. None → compute dynamically at order time from live price.
+        "pip_value_per_lot": None,
+        "risk_pct": 0.01,
+        "max_lot": 0.10,
+        "sl_atr_mult": 2.0,
+        "tp_atr_mult": 2.0,
+        "min_stop_pips": 16.0,
+        "be_atr_mult": 0.60,
+        "trail_trigger_atr_mult": 0.80,
+        "trail_dist_atr_mult": 0.35,
+    },
+}
+
+
+def _canonical_symbol(symbol: str) -> str:
+    """Bare 6-letter pair from any broker/yfinance form.
+
+    'EURUSDm' / 'EURUSD.i' / 'EURUSD=X' → 'EURUSD'.
+    """
+    letters = "".join(ch for ch in (symbol or "").upper() if ch.isalpha())
+    return letters[:6] if len(letters) >= 6 else letters
+
+
+def resolve_symbol_config(base: dict, symbol: str) -> dict:
+    """Return a copy of *base* with per-symbol calibration applied.
+
+    Maps the SYMBOL_CALIBRATION spec onto the ``realtime_*`` keys the trade
+    executor and daemon already read, so no downstream code changes are needed.
+    Also repairs the historical dead-key bug: the executor reads
+    ``realtime_risk_pct`` while the flat config only defined ``trade_risk_pct``.
+    Unlisted symbols get sensible auto-derived defaults (JPY/XAU → 0.01 pip).
+    """
+    cfg = dict(base)
+    canon = _canonical_symbol(symbol)
+    spec = SYMBOL_CALIBRATION.get(canon)
+
+    # Auto-derived pip size fallback (JPY/XAU quote → 0.01, else 0.0001).
+    auto_pip = 0.01 if ("JPY" in canon or "XAU" in canon) else 0.0001
+
+    if spec is None:
+        cfg.setdefault("pip_size", auto_pip)
+        cfg["realtime_risk_pct"] = base.get(
+            "realtime_risk_pct", base.get("trade_risk_pct", 0.01)
+        )
+        # Sensible pip-value default for unlisted pairs: USD-quote (XXXUSD) ≈ $10;
+        # USD-base / crosses → None so the executor derives it from the live price.
+        if "realtime_pip_value_per_lot" not in cfg:
+            cfg["realtime_pip_value_per_lot"] = 10.0 if canon.endswith("USD") else None
+        return cfg
+
+    cfg["realtime_magic_number"] = spec.get(
+        "magic_number", base.get("realtime_magic_number", 123456)
+    )
+    cfg["realtime_max_lot"] = spec.get("max_lot", base.get("realtime_max_lot", 0.10))
+    cfg["realtime_risk_pct"] = spec.get("risk_pct", base.get("trade_risk_pct", 0.01))
+    cfg["pip_size"] = spec.get("pip_size", auto_pip)
+    # None => compute dynamically at order time (USD-base pairs like USDJPY).
+    cfg["realtime_pip_value_per_lot"] = spec.get(
+        "pip_value_per_lot", base.get("realtime_pip_value_per_lot", 10.0)
+    )
+    cfg["sl_atr_mult"] = spec.get("sl_atr_mult", 2.0)
+    cfg["tp_atr_mult"] = spec.get("tp_atr_mult", 2.0)
+    cfg["min_stop_pips"] = spec.get("min_stop_pips", 16.0)
+    cfg["be_atr_mult"] = spec.get("be_atr_mult", 0.60)
+    cfg["trail_trigger_atr_mult"] = spec.get("trail_trigger_atr_mult", 0.80)
+    cfg["trail_dist_atr_mult"] = spec.get("trail_dist_atr_mult", 0.35)
+    return cfg

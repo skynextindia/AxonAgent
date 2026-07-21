@@ -1,8 +1,8 @@
 """AxonAI real-time trading daemon.
 
-Always-alive process that monitors MT5 tick data, detects
-structural market events, and fires the multi-agent LLM graph
-only when conditions demand it.
+Always-alive process that monitors MT5 tick data, detects structural market
+events with pure math, and routes actionable events straight to the MT5 trade
+executor — one daemon instance per currency pair.
 """
 
 from __future__ import annotations
@@ -23,13 +23,14 @@ except ImportError:
 from axonai.dataflows.mt5_data import mt5_initialize, mt5_shutdown, _to_mt5_symbol, get_broker_tz_offset
 from axonai.realtime.event_types import EventPriority, LiveCandle, MarketEvent, EventType
 from axonai.realtime.tick_engine import TickEngine
-from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
+from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence, get_dst_session_hours
 from axonai.realtime.event_detector import EventDetector
 from axonai.realtime.trade_executor import MT5TradeExecutor
 from axonai.realtime.api_server import get_dashboard
 from cli.stats_handler import StatsCallbackHandler
 from axonai.realtime.news_guard import NewsGuard
 from axonai.realtime.session_tuner import SessionTuner
+from axonai.default_config import resolve_symbol_config
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,10 @@ class AxonDaemon:
         clean_sym = symbol.replace("=X", "").replace("=x", "").strip()
         self.yf_symbol = clean_sym + "=X"  # e.g. "EURUSD=X"
         self.mt5_symbol = _to_mt5_symbol(symbol, config)
+        # Overlay per-pair calibration so every component built below (executor,
+        # live state, event detector, session tuner) sees this symbol's
+        # calibrated values (pip size, magic, risk %, SL/TP, trailing mults).
+        config = resolve_symbol_config(config, self.mt5_symbol)
         self.config = config
         self.offset_hours = 0
         self.tz = timezone.utc
@@ -74,11 +79,8 @@ class AxonDaemon:
             self.event_queue, config,
         )
 
-        # Layer 4: Trade Executor
-        config_opt = config.copy()
-        config_opt["realtime_magic_number"] = 123457
-        self.trade_executor_opt = MT5TradeExecutor(config_opt)
-
+        # Layer 4: Trade Executor (magic + sizing come from the calibrated config)
+        self.trade_executor_opt = MT5TradeExecutor(self.config)
         self.trade_executor = self.trade_executor_opt  # Default fallback reference
 
         # Trailing stop and trade outcome tracking
@@ -91,6 +93,14 @@ class AxonDaemon:
         # Layer 5: Economic news calendar guard
         self.news_guard = NewsGuard(config)
         self._last_session: Optional[str] = None
+
+        # EOD hard-flat + daily-reset state. The trading day is treated as
+        # rolling at the NY liquidity-end boundary (ny_close); both the EOD
+        # re-entry block and the per-pair SL lockout key off this.
+        self._last_trading_day = None       # trading day currently in effect
+        self._eod_flat_tradeday = None      # trading day we last hard-flatted
+        self._eod_flat_blocked = False      # bar entries during the pre-close window
+        self._sl_locked_out = False         # per-pair SL lockout (Phase 2, live)
 
         # Self-configuring session selector (learns per-session movement of this pair)
         self.auto_sessions = bool(config.get("realtime_auto_sessions", False))
@@ -564,7 +574,22 @@ class AxonDaemon:
 
     def _on_tick(self, bid: float, ask: float, timestamp: datetime, volume: int = 1):
         """Called by TickEngine on every new tick."""
-        # EOD force-close check on session transition
+        now_utc = datetime.now(timezone.utc)
+
+        # Daily reset (trading day rolls at the NY liquidity-end boundary):
+        # clears the EOD re-entry block and the per-pair SL lockout.
+        try:
+            self._check_daily_reset(now_utc)
+        except Exception as e:
+            logger.error("Error in daily reset check: %s", e, exc_info=True)
+
+        # EOD hard-flat: close ALL positions near the NY-session liquidity end.
+        try:
+            self._check_eod_hard_flat(now_utc)
+        except Exception as e:
+            logger.error("Error in EOD hard-flat check: %s", e, exc_info=True)
+
+        # EOD (legacy profit-only) force-close check on session transition
         try:
             self._check_eod_close(bid, ask)
         except Exception as e:
@@ -589,8 +614,11 @@ class AxonDaemon:
             except Exception as e:
                 logger.debug("SessionTuner update failed: %s", e)
 
-        # Handle trailing stops and closed position logging for dryrun
-        if self.config.get("realtime_dry_run", False):
+        # Manage trailing stops + detect closed positions (SL/TP). This drives
+        # live trailing-stop edits, the post-trade cooldown, and the per-pair SL
+        # lockout, so it MUST run in live mode too — gated behind a safety toggle
+        # (default on) so the newly-live trailing behavior can be soaked in dry-run.
+        if self.config.get("realtime_manage_positions_live", True):
             try:
                 self._manage_trailing_stops(bid, ask)
                 self._check_for_closed_positions(bid, ask)
@@ -875,6 +903,48 @@ class AxonDaemon:
                     })
                 continue
 
+            # Per-pair SL lockout: bar new entries until the next trading day.
+            if self._sl_locked_out:
+                self._events_skipped += 1
+                logger.info("SKIPPED (SL lockout active until new trading day)")
+                if dashboard:
+                    dashboard.broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": "SL lockout (until new trading day)",
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
+
+            # EOD hard-flat window: bar new entries until the trading day rolls.
+            if self._eod_flat_blocked:
+                self._events_skipped += 1
+                logger.info("SKIPPED (EOD hard-flat window; entries blocked until new trading day)")
+                if dashboard:
+                    dashboard.broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": "EOD hard-flat window",
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
+
             self._events_fired += 1
             dir_str = event.details.get("direction", "")
             if "bullish" in dir_str or "low" in peak_type:
@@ -986,6 +1056,78 @@ class AxonDaemon:
         if prev in active and current in trigger:
             logger.info("AxonDaemon: EOD transition %s → %s; flattening profitable positions", prev, current)
             self._close_all_profitable_positions(bid, ask, "End of Day (Session Close)")
+
+    def _trading_day(self, now_utc: datetime):
+        """Calendar date of the current trading day.
+
+        The forex day is treated as rolling at the NY liquidity-end boundary
+        (``ny_close``): ticks at/after ny_close belong to the next trading day.
+        Both the EOD hard-flat re-entry block and the per-pair SL lockout key
+        off this so "once per day" and "until a new trading day" stay consistent.
+        """
+        _, _, _, ny_close = get_dst_session_hours(now_utc)
+        utc_hour = now_utc.hour + now_utc.minute / 60.0
+        d = now_utc.date()
+        if utc_hour >= ny_close:
+            d = d + timedelta(days=1)
+        return d
+
+    def _check_daily_reset(self, now_utc: datetime) -> None:
+        """Clear per-day guards when the trading day rolls (at ny_close)."""
+        td = self._trading_day(now_utc)
+        if self._last_trading_day is None:
+            self._last_trading_day = td
+            return
+        if td != self._last_trading_day:
+            self._last_trading_day = td
+            if self._eod_flat_blocked or self._sl_locked_out:
+                logger.info("Daily reset: new trading day %s; clearing EOD block + SL lockout", td)
+            self._eod_flat_blocked = False
+            self._sl_locked_out = False
+
+    def _maybe_engage_sl_lockout(self, reason: str) -> None:
+        """Engage the per-pair SL lockout on a real stop-loss / stop-out loss.
+
+        Trailing-SL exits (usually profitable) and TP/manual closes do NOT lock
+        out. Cleared by ``_check_daily_reset`` when the trading day rolls.
+        """
+        if reason in ("Stop Loss (SL) Hit", "Stop Out (SO)"):
+            if not self._sl_locked_out:
+                logger.info(
+                    "SL lockout ENGAGED for %s (%s); no new entries until the next trading day",
+                    self.mt5_symbol, reason,
+                )
+            self._sl_locked_out = True
+
+    def _check_eod_hard_flat(self, now_utc: datetime) -> None:
+        """Force-close ALL open positions near the NY-session liquidity end.
+
+        Fires once per trading day inside ``[ny_close - minutes_before, ny_close)``
+        and then bars new entries until the trading day rolls, so the pair goes
+        flat into the thin post-NY liquidity window regardless of P&L.
+        """
+        if not self.config.get("eod_hard_flat_enabled", True):
+            return
+        minutes_before = float(self.config.get("eod_hard_flat_minutes_before", 10))
+        _, _, _, ny_close = get_dst_session_hours(now_utc)
+        utc_hour = now_utc.hour + now_utc.minute / 60.0
+        cutoff = ny_close - minutes_before / 60.0
+        if not (cutoff <= utc_hour < ny_close):
+            return
+
+        td = self._trading_day(now_utc)
+        if td == self._eod_flat_tradeday:
+            # Already flatted for this trading day; keep the entry block on.
+            self._eod_flat_blocked = True
+            return
+
+        closed = self._close_all_positions("EOD Hard Flat (NY liquidity end)")
+        self._eod_flat_tradeday = td
+        self._eod_flat_blocked = True
+        logger.info(
+            "AxonDaemon: EOD hard-flat at %.2fh UTC (ny_close=%.2f): closed %d position(s); "
+            "entries blocked until new trading day", utc_hour, ny_close, closed,
+        )
 
     def _check_pre_news_close(self, bid: float, ask: float) -> None:
         """Flatten ALL open positions (profit or loss) within 5 minutes before a
@@ -1388,7 +1530,10 @@ class AxonDaemon:
             # If history failed, fallback to basic estimates
             if entry_price == 0.0:
                 entry_price = bid  # fallback
-                
+
+            # Per-pair SL lockout (F4): engage on a real stop-loss / stop-out loss.
+            self._maybe_engage_sl_lockout(reason)
+
             outcome = "WIN" if pips > 0 else "LOSS" if pips < 0 else "BREAKEVEN"
             
             system_name = self._active_trade_system.pop(ticket, "optimized")
