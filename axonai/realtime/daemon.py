@@ -48,7 +48,7 @@ class AxonDaemon:
     """
 
     def __init__(self, symbol: str, config: dict, risk_guard=None,
-                 correlation_engine=None, supervisor=None):
+                 correlation_engine=None, supervisor=None, config_overrides=None):
         # Initialize MT5 early so symbol resolution can query active terminal info
         mt5_initialize(
             terminal_path=config.get("mt5_terminal_path"),
@@ -63,6 +63,9 @@ class AxonDaemon:
         # live state, event detector, session tuner) sees this symbol's
         # calibrated values (pip size, magic, risk %, SL/TP, trailing mults).
         config = resolve_symbol_config(config, self.mt5_symbol)
+        if config_overrides:
+            # Supervisor-supplied per-pair overrides (e.g. vol-ratio stop floor).
+            config = {**config, **config_overrides}
         self.config = config
         # Multi-pair wiring (all optional; None → standalone single-pair mode).
         self.supervisor = supervisor
@@ -985,10 +988,39 @@ class AxonDaemon:
                     "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
                 })
             
+            # Correlation-engine gate: veto or size-scale a follower-pair entry
+            # based on cross-pair net-USD exposure, the lead pair's bias, and
+            # rolling correlation. The lead pair (EURUSD) is never gated.
+            size_scale = 1.0
+            if self.correlation_engine is not None:
+                try:
+                    allow, size_scale, corr_reason = self.correlation_engine.evaluate_entry(
+                        self.mt5_symbol, signal, self.live_state, self.live_evidence)
+                except Exception as ce:
+                    allow, size_scale, corr_reason = True, 1.0, f"engine error: {ce}"
+                if not allow:
+                    self._events_skipped += 1
+                    logger.info("SKIPPED (correlation: %s)", corr_reason)
+                    self._broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": f"correlation: {corr_reason}",
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                    continue
+
             # Execute order on MT5 terminal using the correct trade executor
             trade_result = None
             try:
-                trade_result = self.trade_executor.execute_signal(self.mt5_symbol, signal, self.live_state)
+                trade_result = self.trade_executor.execute_signal(self.mt5_symbol, signal, self.live_state, size_scale)
                 if trade_result:
                     logger.info("AxonDaemon: Order execution complete for %s system: %s", system_name, trade_result)
                     ticket = trade_result.get("order")
@@ -999,6 +1031,11 @@ class AxonDaemon:
                         atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
                         self._active_trade_atr[ticket] = atr
                         self._active_trade_peak_price[ticket] = trade_result.get("price", 0.0)
+                        if self.correlation_engine is not None:
+                            self.correlation_engine.register_position(
+                                self.mt5_symbol, signal,
+                                trade_result.get("volume", 0.0) or 0.0,
+                                trade_result.get("price", 0.0) or 0.0, ticket)
             except Exception as ex_err:
                 logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
             
@@ -1557,6 +1594,8 @@ class AxonDaemon:
 
             # Per-pair SL lockout (F4): engage on a real stop-loss / stop-out loss.
             self._maybe_engage_sl_lockout(reason)
+            if self.correlation_engine is not None:
+                self.correlation_engine.unregister_position(ticket)
 
             outcome = "WIN" if pips > 0 else "LOSS" if pips < 0 else "BREAKEVEN"
             

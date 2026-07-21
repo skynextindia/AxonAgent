@@ -168,6 +168,15 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # mode too — required for live trailing stops, post-trade cooldowns, and the
     # per-pair SL lockout. Turn off to revert to dry-run-only monitoring.
     "realtime_manage_positions_live": True,
+    # Cross-pair correlation engine (multi-pair only; see correlation_engine.py).
+    "corr_engine_enabled": True,
+    "corr_lead_symbol": "EURUSD",       # the pair that trades ungated; others follow
+    "corr_window_bars": 100,            # H1 bars for rolling correlation
+    "corr_refresh_seconds": 300,        # how often to recompute corr / bias / vol
+    "corr_max_net_usd": 200000.0,       # cap on combined net-USD exposure across pairs
+    "corr_bias_lookback_bars": 10,      # H1 bars for the lead-pair bias
+    "corr_veto_bias_threshold": 0.0015, # |lead return| that vetoes a contradicting entry
+    "corr_size_scale_min": 0.25,        # floor for correlation/exposure size scaling
     "peak_detector_rule_c_enabled": False,
     "trade_risk_pct": 0.01,
     "realtime_use_pinpoint_price": False,

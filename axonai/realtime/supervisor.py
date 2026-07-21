@@ -21,6 +21,7 @@ from typing import Dict, List
 from axonai.dataflows.mt5_data import mt5_initialize, mt5_shutdown
 from axonai.realtime.risk_guard import RiskGuard
 from axonai.realtime.daemon import AxonDaemon
+from axonai.realtime.correlation_engine import CorrelationEngine
 
 logger = logging.getLogger(__name__)
 
@@ -47,12 +48,12 @@ class DaemonSupervisor:
         # and the reports/daily_pnl.json file has a single writer.
         self.risk_guard = RiskGuard(base_config)
 
-        # The cross-pair correlation engine is wired in Phase 4; None keeps
-        # independent per-pair behavior until then.
-        self.correlation_engine = None
+        # The cross-pair correlation engine (shared, lock-guarded). Computes an
+        # initial calibration snapshot from H1 bars at construction.
+        self.correlation_engine = CorrelationEngine(self.symbols, base_config)
 
         # Build one daemon per pair. Each AxonDaemon resolves its own per-pair
-        # calibration internally, so we pass the shared base config.
+        # calibration internally; the engine adds vol-ratio-derived overrides.
         self.daemons: Dict[str, AxonDaemon] = {}
         for sym in self.symbols:
             self.daemons[sym] = AxonDaemon(
@@ -61,6 +62,7 @@ class DaemonSupervisor:
                 risk_guard=self.risk_guard,
                 correlation_engine=self.correlation_engine,
                 supervisor=self,
+                config_overrides=self.correlation_engine.calibrated_overrides(sym),
             )
 
         self._threads: List[threading.Thread] = []
