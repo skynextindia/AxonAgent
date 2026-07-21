@@ -207,6 +207,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # cut. Flip back to True to restore the exhaustion exit.
     "exit_engine_enable_exhaustion": False,
 
+    # ── Entry: retest directional-approach gate ─────────────────────────────
+    # True = a retest trigger requires price to pull away from the anomaly level and then
+    # come BACK toward it before firing (fixes SELL-at-bottom / BUY-at-top mistimed entries).
+    # False = legacy symmetric-zone behaviour (fire on first momentum stall in the zone).
+    "entry_retest_require_approach": True,
+
     # ── HTF Coherence Dampening ────────────────────────────────────────────
     "htf_opposing_sensitivity_multiplier": 1.5,       # more aggressive exits when HTF opposes
     "htf_aligned_sensitivity_multiplier": 0.7,        # less aggressive exits when HTF aligns

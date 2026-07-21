@@ -100,6 +100,11 @@ class EntryStateMachine:
         self._spread_history: deque[float] = deque(maxlen=5)
         self._smoothed_spread_pips: float = 1.0
         self._retest_start_time: float = 0.0
+        # Furthest reversal-side excursion (in pips, signed) reached during the current
+        # retest. Used by the directional-approach gate so a SELL only triggers after
+        # price pulled away from the top and rallied BACK toward it (a real retest),
+        # not on the first momentum stall on the way down (which fired at the bottom).
+        self._retest_extreme: float = 0.0
         
         # Stall tracking
         self._arm_start_time: float = 0.0
@@ -510,6 +515,7 @@ class EntryStateMachine:
                 self._transition(STATE_TRIGGERED, f"Reversal inflection confirmed ({disp.classification}, flip={flip_favorable}). Trigger.")
             else:
                 self._retest_start_time = ts
+                self._retest_extreme = 0.0
                 self._transition(STATE_RETEST_WAIT, f"Breakaway impulse ({disp.classification}); awaiting velocity-decay retest confirmation.")
 
     def _evaluate_retest_wait(
@@ -537,6 +543,30 @@ class EntryStateMachine:
         zone_width = max(2.0, vol_pips)
         in_zone = abs(dist) <= zone_width
 
+        # Track the furthest reversal-side excursion so far. For a SELL the reversal
+        # side is below the anomaly top (dist < 0); for a BUY it is above the low.
+        if self._anomaly_direction == "SELL":
+            self._retest_extreme = min(self._retest_extreme, dist)
+        else:
+            self._retest_extreme = max(self._retest_extreme, dist)
+
+        # Directional-approach gate. The old symmetric `abs(dist) <= zone_width` fired on
+        # the FIRST momentum stall anywhere in the zone — including a stall part-way down
+        # the initial impulse — so a SELL could trigger at the bottom of the drop (and a
+        # BUY at the top of the pop). A genuine retest is: price pulls AWAY from the level,
+        # then comes BACK toward it and fails. Require both before allowing the trigger.
+        require_approach = self._config.get("entry_retest_require_approach", True)
+        approached = True
+        if require_approach:
+            pulled_away = abs(self._retest_extreme) >= zone_width
+            if self._anomaly_direction == "SELL":
+                # price must be rallying back UP toward the top, off its retest low
+                coming_back = dist > self._retest_extreme + 0.2 * zone_width
+            else:
+                # price must be falling back DOWN toward the low, off its retest high
+                coming_back = dist < self._retest_extreme - 0.2 * zone_width
+            approached = pulled_away and coming_back
+
         if in_zone:
             decay = getattr(velocity, "decay_ratio", 1.0) or 1.0
 
@@ -547,11 +577,13 @@ class EntryStateMachine:
 
             # Trigger confirm: relaxed to just decay < 0.6 (candle setup already filtered noise)
             # Old: decay < 0.4 AND tr_10 < tr_300 * 0.6 (dual condition — too strict)
-            if decay < 0.6:
+            if decay < 0.6 and approached:
                 if (ts - self._arm_start_time) >= self._min_stall_duration:
-                    self._transition(STATE_TRIGGERED, f"Retest confirmed (decay={decay:.2f}). Reversal trigger.")
+                    self._transition(STATE_TRIGGERED, f"Retest confirmed (decay={decay:.2f}, dist={dist:+.1f}p off extreme {self._retest_extreme:+.1f}p). Reversal trigger.")
                 else:
                     logger.debug("EntryRETEST: Stall delay active on retest trigger. Spent %.1fs / %.1fs", ts - self._arm_start_time, self._min_stall_duration)
+            elif decay < 0.6 and not approached:
+                logger.debug("EntryRETEST: decay ok but no directional retest yet (dist=%.1fp extreme=%.1fp). Awaiting return to level.", dist, self._retest_extreme)
 
 
     def _calculate_quality(self, regime: "RegimeState", mtf: MTFState) -> float:
