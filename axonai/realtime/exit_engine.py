@@ -163,6 +163,11 @@ class ExitEngine:
             )
 
         # --- PRIORITY 3: EXHAUSTION (medium-high urgency) ---
+        # Gated by config. When disabled, an exhaustion stall no longer closes the trade;
+        # the position is handed to VelocityTrailingManager / the defined SL+TP to book
+        # profit instead. Disabled deliberately (2026-07-20) to test whether trades ride
+        # further without the exhaustion cut.
+        exhaustion_enabled = self.config.get("exit_engine_enable_exhaustion", True)
         exhaustion_vel_max = self.config.get("exhaustion_detection_velocity_max", 30)
         exhaustion_disp_max = self.config.get("exhaustion_detection_displacement_max", 0.3)
 
@@ -172,7 +177,8 @@ class ExitEngine:
             decay_ratio = getattr(snapshot.velocity, "decay_ratio", 0.0)
 
         if (
-            trade_state.current_phase == "EXHAUSTION"
+            exhaustion_enabled
+            and trade_state.current_phase == "EXHAUSTION"
             and velocity_pct < exhaustion_vel_max
             and decay_ratio >= 0.80
             and abs(trade_state.current_profit_pips / max(mfe, 1.0)) < exhaustion_disp_max

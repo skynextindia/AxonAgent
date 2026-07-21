@@ -202,6 +202,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "adverse_impulse_min_ticks": 30,                  # min-hold before adverse-impulse CLOSE_NOW can fire
     "exhaustion_urgency": 0.7,
     "trailing_stop_urgency": 0.3,                     # lowest (legacy fallback)
+    # Exhaustion CLOSE_NOW disabled 2026-07-20: profit is booked only via the velocity
+    # trail + defined SL/TP, to test whether trades ride further without the exhaustion
+    # cut. Flip back to True to restore the exhaustion exit.
+    "exit_engine_enable_exhaustion": False,
 
     # ── HTF Coherence Dampening ────────────────────────────────────────────
     "htf_opposing_sensitivity_multiplier": 1.5,       # more aggressive exits when HTF opposes
