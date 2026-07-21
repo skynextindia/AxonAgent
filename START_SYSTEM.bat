@@ -26,7 +26,7 @@ echo Waiting 5 seconds for MT5 terminal connection to initialize...
 timeout /t 5 /nobreak >nul
 
 REM Step 3: Run the main trading loop
-echo [3/3] Launching Live Trading Daemons (EURUSD, GBPUSD, USDJPY, AUDUSD, XAUUSD)...
+echo [3/3] Launching Live Trading Daemons (EURUSD, GBPUSD, USDJPY, AUDUSD - Gold DISABLED)...
 echo.
 echo ════════════════════════════════════════════════════════════════
 echo system running. Close this window to stop trading.
@@ -34,7 +34,7 @@ echo ═════════════════════════
 echo.
 
 python run.py --direct --live ^
-  --symbol "EURUSD,GBPUSD,USDJPY,AUDUSD,XAUUSD" ^
+  --symbol "EURUSD,GBPUSD,USDJPY,AUDUSD" ^
   --feed-path "C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe" ^
   --exec-path "C:\Program Files\MetaTrader 5\terminal64.exe"
 

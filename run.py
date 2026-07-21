@@ -268,6 +268,16 @@ def main():
         # Windows / Direct mode: start daemon + dashboard
         # Parse comma-separated symbols
         symbols = [s.strip().upper() for s in args.symbol.split(",") if s.strip()]
+        # ── XAUUSD temporarily disabled (FX-only focus) ──────────────────────
+        # Gold's feed is synthetic-anchored so its P&L is unmeasurable; hold it
+        # out of live trading while the FX book is validated. This filter drops
+        # gold even if it is passed via --symbol, so no gold daemon, calibrator,
+        # or dashboard panel starts. Clear DISABLED_SYMBOLS to re-enable gold.
+        DISABLED_SYMBOLS = {"XAUUSD"}
+        _dropped = [s for s in symbols if s in DISABLED_SYMBOLS]
+        if _dropped:
+            symbols = [s for s in symbols if s not in DISABLED_SYMBOLS]
+            print(f"  [!] Skipping disabled symbols (not traded): {', '.join(_dropped)}")
         if not symbols:
             symbols = ["EURUSD"]
 

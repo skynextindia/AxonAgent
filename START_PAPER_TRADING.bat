@@ -22,7 +22,7 @@ echo ║                                                                ║
 echo ╚════════════════════════════════════════════════════════════════╝
 echo.
 echo Configuration:
-echo   • Symbol:              MULTICURRENCY (5 Pairs + Gold)
+echo   • Symbol:              MULTICURRENCY (4 FX Pairs, Gold DISABLED)
 echo   • Mode:                PAPER (Simulated fills, no real orders)
 echo   • Feed Terminal:       Exness
 echo   • Execution Terminal:  MetaQuotes
@@ -40,7 +40,7 @@ echo.
 REM Start the paper trading system with dual terminals
 REM Feed: Exness (data) | Execution: MetaQuotes (simulated)
 python run.py --direct --paper ^
-  --symbol "EURUSD,GBPUSD,USDJPY,AUDUSD,XAUUSD" ^
+  --symbol "EURUSD,GBPUSD,USDJPY,AUDUSD" ^
   --feed-path "C:\Program Files\MetaTrader 5 EXNESS\terminal64.exe" ^
   --exec-path "C:\Program Files\MetaTrader 5\terminal64.exe"
 
