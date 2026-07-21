@@ -40,10 +40,10 @@ class AxonDaemon:
     Lifecycle:
     1. Initialize MT5 connection
     2. Cold-start LiveWorldState + LiveMarketEvidence from historical bars
-    3. Compile LangGraph once
-    4. Start TickEngine thread (Layer 1)
-    5. Main loop: consume events from queue, fire GraphExecutor (Layer 3)
-    6. On shutdown: gracefully stop threads, close MT5
+    3. Start TickEngine thread (Layer 1)
+    4. Main loop: consume detected events from the queue and execute
+       trade signals via MT5TradeExecutor (Layer 3)
+    5. On shutdown: gracefully stop threads, close MT5
     """
 
     def __init__(self, symbol: str, config: dict):
