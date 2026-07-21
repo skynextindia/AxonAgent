@@ -1847,7 +1847,9 @@ class AxonDaemon:
                         )
                         self.trade_analytics.record_entry(
                             ticket, self.mt5_symbol, snapshot.entry_decision.direction,
-                            snapshot.price, trade_result.get("sl"), trade_result.get("tp"), snapshot
+                            snapshot.price, trade_result.get("sl"), trade_result.get("tp"), snapshot,
+                            spread_pips=(getattr(_entry_ws, "spread_pips", None) if _entry_ws else None),
+                            fill_price=trade_result.get("price"),
                         )
                 except Exception as ex_err:
                     logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
@@ -2003,7 +2005,9 @@ class AxonDaemon:
                             self.reversal_model.candle_setup.clear()
                             self.trade_analytics.record_entry(
                                 ticket, self.mt5_symbol, direction,
-                                snapshot.price, trade_result.get("sl"), trade_result.get("tp"), snapshot
+                                snapshot.price, trade_result.get("sl"), trade_result.get("tp"), snapshot,
+                                spread_pips=(getattr(_entry_ws, "spread_pips", None) if _entry_ws else None),
+                                fill_price=trade_result.get("price"),
                             )
                     except Exception as ex_err:
                         logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)

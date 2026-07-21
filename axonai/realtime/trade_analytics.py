@@ -90,6 +90,13 @@ class TradeRecord:
     entry_style: str = ""
     initial_sl_pips: float = 0.0
 
+    # ── Execution quality (fill telemetry) ─────────────────────────────────
+    entry_requested_price: float = 0.0      # signal price the order was sent at
+    entry_fill_price: float = 0.0           # actual broker fill price
+    entry_spread_pips: float = 0.0          # spread paid at entry
+    entry_slippage_pips: float = 0.0        # signed adverse pips: + = filled worse than signal
+    profit_protect_pips_ref: float = 0.0    # exit floor ref = 4.0*clamp(vol_pips,0.5,3.0)
+
     # ── Exit: outcome + criteria + engine state at the cut ─────────────────
     exit_time: str = ""
     exit_price: float = 0.0
@@ -127,8 +134,15 @@ class TradeAnalytics:
         tp: float,
         snapshot: EngineSnapshot,
         entry_style: str = "",
+        spread_pips: float | None = None,
+        fill_price: float | None = None,
     ) -> None:
-        """Create a trade record capturing the full entry decision."""
+        """Create a trade record capturing the full entry decision.
+
+        entry_price is the requested/signal price. Pass fill_price (actual broker
+        fill) and spread_pips to capture execution quality; both are optional so
+        existing callers keep working unchanged.
+        """
         liq = getattr(snapshot, "liquidity", None)
         v = getattr(snapshot, "velocity", None)
         d = getattr(snapshot, "displacement", None)
@@ -180,6 +194,22 @@ class TradeAnalytics:
         record.signal_quality = round(float(_g(ed, "signal_quality", 0.0)), 3)
         record.entry_style = entry_style
         record.initial_sl_pips = round(abs(entry_price - sl) / pip, 1) if pip else 0.0
+
+        # Execution quality: requested vs fill, spread, and the exit protection floor
+        record.entry_requested_price = round(float(entry_price), 6)
+        if spread_pips is not None:
+            record.entry_spread_pips = round(float(spread_pips), 2)
+        if fill_price is not None:
+            fp = float(fill_price)
+            record.entry_fill_price = round(fp, 6)
+            # signed adverse slippage: positive = filled worse than the signal price
+            slip = (fp - entry_price) if str(direction).upper().startswith("B") else (entry_price - fp)
+            record.entry_slippage_pips = round(slip / pip, 2) if pip else 0.0
+        # Exit floor reference — mirrors exit_engine profit_protect_pips (4.0 * vol_scale).
+        # Lets the exit diagnosis compare the cut-gate floor against each trade's MFE offline.
+        vp = record.vel_vol_pips
+        vol_scale = max(0.5, min(vp / 1.0, 3.0))
+        record.profit_protect_pips_ref = round(4.0 * vol_scale, 2)
 
         self._active_trades[ticket] = record
 
