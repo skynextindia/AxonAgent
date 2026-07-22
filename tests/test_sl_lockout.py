@@ -29,42 +29,55 @@ def _jul(day, h, m):
 
 
 class TestSlLockout(unittest.TestCase):
-    def test_engages_on_stop_loss(self):
+    def test_engages_on_losing_stop_loss(self):
         d = _make_daemon()
-        d._maybe_engage_sl_lockout("Stop Loss (SL) Hit")
+        d._maybe_engage_sl_lockout("Stop Loss (SL) Hit", pips=-8.0)
         self.assertTrue(d._sl_locked_out)
 
-    def test_engages_on_stop_out(self):
+    def test_engages_on_losing_stop_out(self):
         d = _make_daemon()
-        d._maybe_engage_sl_lockout("Stop Out (SO)")
+        d._maybe_engage_sl_lockout("Stop Out (SO)", pips=-12.0)
         self.assertTrue(d._sl_locked_out)
+
+    def test_does_not_engage_on_profitable_stop_label(self):
+        # The classifier tags profitable *trailing* stops as "Stop Loss (SL) Hit"
+        # too (broker "sl" comment). A winning stop must NOT lock the pair out —
+        # this is the real-money bug this gate fixes.
+        d = _make_daemon()
+        d._maybe_engage_sl_lockout("Stop Loss (SL) Hit", pips=7.2)
+        self.assertFalse(d._sl_locked_out)
+
+    def test_does_not_engage_on_breakeven_stop(self):
+        d = _make_daemon()
+        d._maybe_engage_sl_lockout("Stop Loss (SL) Hit", pips=0.0)
+        self.assertFalse(d._sl_locked_out)
 
     def test_does_not_engage_on_trailing_sl(self):
         # Trailing-SL exits are usually profitable and must NOT lock out.
         d = _make_daemon()
-        d._maybe_engage_sl_lockout("Trailing SL Hit")
+        d._maybe_engage_sl_lockout("Trailing SL Hit", pips=1.0)
         self.assertFalse(d._sl_locked_out)
 
     def test_does_not_engage_on_tp_or_manual(self):
         d = _make_daemon()
         for r in ("Take Profit (TP) Hit", "Manual Close / Unknown", "Closed (X)"):
-            d._maybe_engage_sl_lockout(r)
+            d._maybe_engage_sl_lockout(r, pips=-5.0)  # even a loss on these must not lock
             self.assertFalse(d._sl_locked_out, r)
 
     def test_daily_reset_clears_lockout(self):
         d = _make_daemon()
-        d._check_daily_reset(_jul(22, 9, 0))       # seed trading day (london)
-        d._maybe_engage_sl_lockout("Stop Loss (SL) Hit")
+        d._check_daily_reset(_jul(22, 9, 0))                    # seed trading day (london)
+        d._maybe_engage_sl_lockout("Stop Loss (SL) Hit", pips=-8.0)
         self.assertTrue(d._sl_locked_out)
-        d._check_daily_reset(_jul(22, 12, 0))      # same trading day → still locked
+        d._check_daily_reset(_jul(22, 12, 0))                   # same trading day → still locked
         self.assertTrue(d._sl_locked_out)
-        d._check_daily_reset(_jul(22, 18, 30))     # rolled past ny_close → cleared
+        d._check_daily_reset(_jul(22, 18, 30))                  # rolled past ny_close → cleared
         self.assertFalse(d._sl_locked_out)
 
     def test_lockout_survives_until_roll(self):
         d = _make_daemon()
         d._check_daily_reset(_jul(22, 9, 0))
-        d._maybe_engage_sl_lockout("Stop Loss (SL) Hit")
+        d._maybe_engage_sl_lockout("Stop Loss (SL) Hit", pips=-8.0)
         for h in (10, 13, 16, 17):
             d._check_daily_reset(_jul(22, h, 0))
             self.assertTrue(d._sl_locked_out, f"cleared too early at {h}:00")

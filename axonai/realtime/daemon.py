@@ -1143,17 +1143,26 @@ class AxonDaemon:
             self._eod_flat_blocked = False
             self._sl_locked_out = False
 
-    def _maybe_engage_sl_lockout(self, reason: str) -> None:
-        """Engage the per-pair SL lockout on a real stop-loss / stop-out loss.
+    def _maybe_engage_sl_lockout(self, reason: str, pips: float = 0.0) -> None:
+        """Engage the per-pair SL lockout only on a genuine *losing* stop-out.
 
-        Trailing-SL exits (usually profitable) and TP/manual closes do NOT lock
-        out. Cleared by ``_check_daily_reset`` when the trading day rolls.
+        The exit reason alone is NOT sufficient: a trailing stop that has been
+        moved into profit is still reported by the broker with an "sl" comment,
+        so it gets the same "Stop Loss (SL) Hit" label as a real loss (the
+        classifier only tags "Trailing SL Hit" when the exit sits near
+        breakeven). In practice most "Stop Loss (SL) Hit" exits are actually
+        profitable trailed stops, so keying the lockout on the label alone
+        barred the pair after winning trades. Gate on the actual outcome:
+        price must have moved against the entry (``pips < 0``).
+
+        Trailing/TP/manual closes and any profitable stop do NOT lock out.
+        Cleared by ``_check_daily_reset`` when the trading day rolls.
         """
-        if reason in ("Stop Loss (SL) Hit", "Stop Out (SO)"):
+        if reason in ("Stop Loss (SL) Hit", "Stop Out (SO)") and pips < 0:
             if not self._sl_locked_out:
                 logger.info(
-                    "SL lockout ENGAGED for %s (%s); no new entries until the next trading day",
-                    self.mt5_symbol, reason,
+                    "SL lockout ENGAGED for %s (%s, %.1f pips loss); no new entries until the next trading day",
+                    self.mt5_symbol, reason, pips,
                 )
             self._sl_locked_out = True
 
@@ -1592,8 +1601,9 @@ class AxonDaemon:
             if entry_price == 0.0:
                 entry_price = bid  # fallback
 
-            # Per-pair SL lockout (F4): engage on a real stop-loss / stop-out loss.
-            self._maybe_engage_sl_lockout(reason)
+            # Per-pair SL lockout (F4): engage only on a real *losing* stop-out
+            # (pips < 0), never on a profitable trailed stop wearing the same label.
+            self._maybe_engage_sl_lockout(reason, pips)
             if self.correlation_engine is not None:
                 self.correlation_engine.unregister_position(ticket)
 
