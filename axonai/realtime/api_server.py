@@ -745,11 +745,31 @@ class DashboardServer:
         if hasattr(self, "_loop") and self._loop:
             asyncio.run_coroutine_threadsafe(self._async_broadcast(message), self._loop)
 
+    def _should_stream(self, message: Dict[str, Any]) -> bool:
+        """Whether a message should be pushed to connected clients right now.
+
+        The dashboard renders one pair at a time. In multi-pair mode every
+        daemon broadcasts over the same WebSocket, so a symbol-tagged message
+        for a pair that is NOT the active one must be dropped from the live
+        stream — otherwise a background pair's ticks/candles bleed into the
+        active view and fight over the chart. The message is still cached into
+        its own per-symbol bucket by broadcast(), so switching pairs re-hydrates
+        it. Symbol-agnostic messages (e.g. market-wide news) always pass; so
+        does everything in single-pair mode.
+        """
+        with self._lock:
+            multi = len(self.daemons) > 1
+            active = self.active_symbol
+        sym = self._canon(message.get("symbol"))
+        return not (multi and sym and active and sym != active)
+
     async def _async_broadcast(self, message: Dict[str, Any]):
         """Asynchronously send message to all sockets."""
+        if not self._should_stream(message):
+            return
         with self._lock:
             targets = list(self.active_connections)
-        
+
         for ws in targets:
             try:
                 await ws.send_json(message)

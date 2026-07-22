@@ -70,6 +70,35 @@ class TestDashboardMultiplex(unittest.TestCase):
         self.s.broadcast({"type": "regime", "conf": 0.9})  # no symbol tag
         self.assertEqual(self.s.history["regime"]["conf"], 0.9)
 
+    # ── live-stream filtering (multi-pair display isolation) ──────────────────
+    def test_stream_filters_background_pair_in_multi(self):
+        self.s.register_daemon("EURUSD", _Obj())
+        self.s.register_daemon("USDJPY", _Obj())  # active stays EURUSD
+        # Active pair streams; the background pair is dropped from the live feed.
+        self.assertTrue(self.s._should_stream({"type": "tick", "symbol": "EURUSD"}))
+        self.assertFalse(self.s._should_stream({"type": "tick", "symbol": "USDJPY"}))
+        # Broker-suffixed tags canonicalize before the comparison.
+        self.assertTrue(self.s._should_stream({"type": "tick", "symbol": "EURUSDm"}))
+        self.assertFalse(self.s._should_stream({"type": "tick", "symbol": "USDJPY.i"}))
+
+    def test_stream_passes_symbol_agnostic_in_multi(self):
+        self.s.register_daemon("EURUSD", _Obj())
+        self.s.register_daemon("USDJPY", _Obj())
+        # Market-wide messages (no symbol) always reach every client.
+        self.assertTrue(self.s._should_stream({"type": "news_data"}))
+
+    def test_stream_follows_active_after_switch(self):
+        self.s.register_daemon("EURUSD", _Obj())
+        self.s.register_daemon("USDJPY", _Obj())
+        self.s.active_symbol = "USDJPY"  # user clicked USD/JPY
+        self.assertTrue(self.s._should_stream({"type": "tick", "symbol": "USDJPY"}))
+        self.assertFalse(self.s._should_stream({"type": "tick", "symbol": "EURUSD"}))
+
+    def test_stream_unfiltered_in_single_pair(self):
+        self.s.register_daemon("EURUSD", _Obj())  # only one daemon → no filtering
+        # A non-active symbol still streams so single-pair (any symbol) follows it.
+        self.assertTrue(self.s._should_stream({"type": "tick", "symbol": "USDJPY"}))
+
 
 if __name__ == "__main__":
     unittest.main()

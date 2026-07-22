@@ -568,6 +568,7 @@ class DashboardController {
       this.m15Candles = []; this.h1Candles = []; this.h4Candles = [];
       this.timeframeLoaded = {M15:false,H1:false,H4:false};
       this.currentBid = 0; this.currentAsk = 0;
+      this._msgQueue = [];  // drop other pair's buffered ticks so they can't flash before the server switches
       if(this.chart) this.candleSeries.setData([]);
       if(this.ws&&this.ws.readyState===WebSocket.OPEN) this.ws.send(JSON.stringify({type:"switch_pair",pair:b.dataset.pair,mt5:b.dataset.mt5}));
     }});
