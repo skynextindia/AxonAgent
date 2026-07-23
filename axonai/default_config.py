@@ -292,6 +292,16 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # live money.
     "entry_min_room_pips": 0.0,
 
+    # Regime-avoidance veto for reversal entries. Signal-level feature importance
+    # over 809k old-engine snapshot ticks: fading in TREND_EXPANSION netted -0.62p
+    # and COMPRESSION -0.18p forward-30m reversal return, while every continuous
+    # feature scored ~0 (|rho|<=0.03) -- the discriminating structure is regime/
+    # state, not the continuous indicators. Avoidance filter, not an entry signal.
+    # Empty = disabled. Candidate values ["TREND_EXPANSION", "COMPRESSION"], kept
+    # off until a restarted session confirms these regimes stay negative under the
+    # corrected entry engine (old-engine snapshots computed the evidence).
+    "entry_avoid_regimes": [],
+
     # ── HTF Coherence Dampening ────────────────────────────────────────────
     "htf_opposing_sensitivity_multiplier": 1.5,       # more aggressive exits when HTF opposes
     "htf_aligned_sensitivity_multiplier": 0.7,        # less aggressive exits when HTF aligns

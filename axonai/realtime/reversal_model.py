@@ -91,6 +91,7 @@ def _unified_confluence_score(
     candle_setup_score: float = 0.0,
     config: Optional[dict] = None,
     location_context=None,
+    regime: str = "",
 ):
     """Unified confluence gate replacing _reversal_confluence_grade.
 
@@ -119,6 +120,16 @@ def _unified_confluence_score(
         return (False, 0.0, "structural break in progress (falling knife)")
     if getattr(vel, "is_unusual", False) and getattr(liq, "liquidity_void_active", False):
         return (False, 0.0, "velocity spike in liquidity void")
+
+    # Regime-avoidance veto (default off). Signal-level feature importance over
+    # 809k old-engine snapshot ticks: fading in TREND_EXPANSION netted -0.62p and
+    # COMPRESSION -0.18p forward-30m reversal return, while every continuous
+    # feature scored ~0 (|rho|<=0.03). This is an avoidance filter, not an entry
+    # signal. entry_avoid_regimes is an empty list by default; kept off until a
+    # restarted session confirms these regimes stay negative under the new engine.
+    _avoid = cfg.get("entry_avoid_regimes") or []
+    if regime and _avoid and str(regime).upper() in {str(a).upper() for a in _avoid}:
+        return (False, 0.0, f"avoided regime ({regime})")
 
     # Room-to-next-level veto, measured in the PROFIT direction. A reversal fade
     # profits toward the opposite level: a BUY (fade support) runs up toward the
@@ -509,6 +520,7 @@ class ReversalModel:
                 candle_setup_score=_ss,
                 config=self._config,
                 location_context=location_context,
+                regime=(self._last_regime_state.regime if self._last_regime_state else ""),
             )
             # Carry the confluence score for sizing/observability regardless.
             entry_decision.signal_quality = max(entry_decision.signal_quality, round(score, 2))

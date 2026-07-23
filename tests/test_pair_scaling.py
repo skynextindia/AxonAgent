@@ -249,3 +249,37 @@ def test_displacement_trend_threshold_is_pair_scaled():
     for _ in range(20):
         eng_fx._displacement_history.append(0.25)
     assert eng_fx.get_recent_trend(lookback=20) == "bullish"
+
+
+# ── Regime-avoidance veto ────────────────────────────────────────────────────
+
+def _grade_regime(regime, avoid):
+    # A with-trend BUY that otherwise clears the gate (mirrors the allow case),
+    # so any reject is attributable to the regime veto.
+    cfg = {} if avoid is None else {"entry_avoid_regimes": avoid}
+    return _reversal_confluence_grade(
+        "BUY", 1.1000, 0.0001, 0.0010, _mtf(h4=0.6, h1=0.4),
+        _liq(sweeps=1), _vel(decaying=True, tick_efficiency=0.1), _disp(), None,
+        candle_setup_score=1.0, config=cfg, regime=regime)
+
+
+def test_regime_veto_blocks_avoided_regime():
+    allow, _, reason = _grade_regime("TREND_EXPANSION", ["TREND_EXPANSION", "COMPRESSION"])
+    assert allow is False and "avoided regime" in reason
+
+
+def test_regime_veto_case_insensitive():
+    allow, _, reason = _grade_regime("compression", ["TREND_EXPANSION", "COMPRESSION"])
+    assert allow is False and "avoided regime" in reason
+
+
+def test_regime_veto_allows_non_listed_regime():
+    # RANGE_CHOP is not in the avoid list -> the base allow case still allows.
+    allow, _, reason = _grade_regime("RANGE_CHOP", ["TREND_EXPANSION", "COMPRESSION"])
+    assert allow is True, reason
+
+
+def test_regime_veto_disabled_by_default():
+    # No entry_avoid_regimes key -> even an "avoided" regime passes the veto.
+    allow, _, reason = _grade_regime("TREND_EXPANSION", None)
+    assert allow is True, reason
