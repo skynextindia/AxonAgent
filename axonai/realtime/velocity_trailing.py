@@ -152,6 +152,23 @@ class VelocityTrailingManager:
             if "peak_price" not in state or ask < state["peak_price"]:
                 state["peak_price"] = ask
 
+        # Breakeven / peak-lock ratchet. Manages the profit band BELOW the momentum
+        # trail's activation (0..activation_pips), which the trail never touches, so
+        # a winner that peaks and reverses no longer round-trips to the initial SL.
+        # One-way (only tightens toward profit) and never emits a stop on the wrong
+        # side of price. Default OFF (be_lock_enabled). Computed here so every exit
+        # path below can fall back to it.
+        be_floor_sl = self._breakeven_floor_sl(
+            state, position_type, entry_price, current_sl, bid, ask, pip
+        )
+        if be_floor_sl is not None:
+            _pl = ((be_floor_sl - entry_price) if position_type == "BUY"
+                   else (entry_price - be_floor_sl)) / pip
+            be_result = {"new_sl": be_floor_sl, "reason": "breakeven_lock",
+                         "aggressiveness": 0.0, "profit_locked": round(_pl, 1)}
+        else:
+            be_result = None
+
         # Single volatility-length-scale multiplier reused for all pip-distance
         # constants this tick. 1.0 (identity) when vol_pips unavailable/==REF.
         vol_scale = self._vol_scale(velocity)
@@ -186,7 +203,9 @@ class VelocityTrailingManager:
         _scale = float(self.config.get("pair_move_scale", 1.0))
         activation_pips = float(self.config.get("realtime_trail_activation_pips", 5.0)) * _scale
         if current_profit < activation_pips:
-            return None
+            # Momentum trail dormant in this band; the breakeven ratchet (if any)
+            # is the only manager here.
+            return be_result
 
         # MTF Retrace Delay Check: prevent trailing stop cuts on pullbacks when HTF is aligned
         enable_retrace_delay = self.config.get("enable_mtf_retrace_delay", True)
@@ -209,7 +228,9 @@ class VelocityTrailingManager:
                     "VelocityTrail #%d: Retrace delay active. Price retraced %.1f pips from peak %.5f. MTF aligned, skipping SL update.",
                     ticket, retrace_pips, state["peak_price"]
                 )
-                return None
+                # Retrace delay pauses the MOMENTUM trail, but a breakeven ratchet is
+                # exactly what should hold during a pullback — never gag it here.
+                return be_result
 
         # Detect velocity acceleration (getting faster)
         velocity_accelerating = velocity_acceleration >= self.velocity_acceleration_threshold
@@ -244,7 +265,7 @@ class VelocityTrailingManager:
         )
 
         if not should_trail:
-            return None
+            return be_result
 
         # Calculate trail aggressiveness based on real market conditions
         agg = self._calculate_dynamic_aggressiveness(
@@ -283,6 +304,8 @@ class VelocityTrailingManager:
 
         if position_type == "BUY":
             new_sl = bid - (trail_distance * pip)
+            if be_floor_sl is not None and be_floor_sl > new_sl:
+                new_sl = be_floor_sl  # trail must never sit looser than the breakeven lock
             if new_sl > current_sl:  # Only move SL up
                 state["last_trail_price"] = bid
                 reason_str = f"Velocity trail (agg={agg:.2f}, accel={velocity_acceleration:.2f}, retest={retest_detected}, regime={dyn_buffer.regime_name if dyn_buffer else 'static'})"
@@ -309,6 +332,8 @@ class VelocityTrailingManager:
                 }
         else:
             new_sl = ask + (trail_distance * pip)
+            if be_floor_sl is not None and be_floor_sl < new_sl:
+                new_sl = be_floor_sl  # trail must never sit looser than the breakeven lock
             if new_sl < current_sl or current_sl == 0.0:  # Only move SL down
                 state["last_trail_price"] = ask
                 reason_str = f"Velocity trail (agg={agg:.2f}, accel={velocity_acceleration:.2f}, retest={retest_detected}, regime={dyn_buffer.regime_name if dyn_buffer else 'static'})"
@@ -334,6 +359,49 @@ class VelocityTrailingManager:
                     "dynamic_buffer": dyn_buffer.threshold if dyn_buffer else None,
                 }
 
+        # Trail did not beat the current SL; the breakeven ratchet may still.
+        return be_result
+
+    def _breakeven_floor_sl(
+        self, state: dict, position_type: str, entry_price: float,
+        current_sl: float, bid: float, ask: float, pip: float,
+    ):
+        """One-way breakeven / peak-lock stop for the sub-activation profit band.
+
+        Returns a VALID, ratcheting SL, or None. Arms at be_arm_pips of PEAK profit
+        (SL -> entry + be_offset_pips, covering the spread), then locks
+        be_lock_frac of the peak once peak profit passes be_lock_start_pips. Never
+        loosens an existing stop and never returns a stop on the wrong side of the
+        live price (if the lock has already been crossed, the prior tick's SL closed
+        it; we do not emit an invalid modify). Default OFF (be_lock_enabled).
+        """
+        if not self.config.get("be_lock_enabled", False):
+            return None
+        sc = float(self.config.get("pair_move_scale", 1.0))
+        be_arm = float(self.config.get("be_arm_pips", 1.5)) * sc
+        be_offset = float(self.config.get("be_offset_pips", 0.2)) * sc
+        be_lock_start = float(self.config.get("be_lock_start_pips", 2.0)) * sc
+        be_lock_frac = float(self.config.get("be_lock_frac", 0.5))
+        peak = state.get("peak_price")
+        if peak is None:
+            return None
+        peak_profit = ((peak - entry_price) if position_type == "BUY"
+                       else (entry_price - peak)) / pip
+        floor_profit = None
+        if peak_profit >= be_arm:
+            floor_profit = be_offset
+        if peak_profit >= be_lock_start:
+            floor_profit = max(floor_profit or 0.0, peak_profit * be_lock_frac)
+        if floor_profit is None:
+            return None
+        if position_type == "BUY":
+            cand = entry_price + floor_profit * pip
+            if cand > current_sl and cand < bid:          # ratchets up, valid stop below price
+                return cand
+        else:
+            cand = entry_price - floor_profit * pip
+            if (cand < current_sl or current_sl == 0.0) and cand > ask:
+                return cand
         return None
 
     def _detect_retest(

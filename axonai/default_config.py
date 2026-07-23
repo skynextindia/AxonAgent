@@ -164,6 +164,20 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # tighter the closer price got. True requires the bounce (retest_bounce_pips) off
     # the adverse extreme; False restores the legacy proximity-only behaviour.
     "trail_retest_require_bounce": True,
+    # Breakeven / peak-lock ratchet, default OFF. Manages the profit band BELOW the
+    # momentum trail's activation (realtime_trail_activation_pips=5.0), which the
+    # trail never touches, so a winner peaking at e.g. +4p no longer round-trips to
+    # the initial SL (~-8p). One-way: only tightens toward profit. be_arm_pips of
+    # PEAK profit moves the SL to entry+be_offset_pips (covers spread); past
+    # be_lock_start_pips it locks be_lock_frac of the peak. Values sit inside the
+    # ~2.4-5p dead band on purpose. Kept off until a restarted session shows where
+    # MFE lands under exit_min_hold_seconds — tuning to the pre-restart distribution
+    # is the mistake to avoid. All pip values scale by pair_move_scale.
+    "be_lock_enabled": False,
+    "be_arm_pips": 1.5,
+    "be_offset_pips": 0.2,
+    "be_lock_start_pips": 2.0,
+    "be_lock_frac": 0.5,
     "realtime_min_price_distance_to_trail": 2.0,
     "realtime_max_trail_distance": 15.0,
     "realtime_base_trail_buffer": 7.5,
