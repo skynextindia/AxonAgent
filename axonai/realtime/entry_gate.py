@@ -1,13 +1,21 @@
-"""Shared entry-quality gate for microstructure-peak reversals.
+"""Entry-quality gate for microstructure-peak reversals (currently UNUSED in production).
 
-Single source of truth used by BOTH the backtester and the live daemon so the
-dry-run / live path trades the exact same quality-filtered strategy the
-backtest was tuned on. Mirrors backtester._evaluate_event's PEAK_DETECTION
-path (intensity/confidence gate, S/R proximity, H4 trend alignment, confluence
-scoring, level-behaviour, regime, MTF boost, quality floor, duplicate-side).
+STATUS as of 2026-07-23: not referenced by the live daemon or the backtester.
+The only caller is tests/test_entry_gate.py. The live entry path runs
+EntryStateMachine (entry_state_machine.py) followed by the unified confluence
+gate (_unified_confluence_score in reversal_model.py); the backtester has its
+own PEAK_DETECTION path. An earlier version of this docstring claimed this was
+"the single source of truth used by BOTH the backtester and the live daemon" —
+that was never wired up and was actively misleading, so it is corrected here.
+
+Retained rather than deleted because its pinning tests still document the
+intended gate ordering and it is a plausible base if the live and backtest paths
+are ever unified for real. If you wire it in, note that two gates inside
+evaluate_peak_entry are commented out (S/R proximity and H4 alignment); they
+would need to be restored, not just called.
 
 Stateful gates that depend on trade history (max-concurrent, session window,
-entry/loss cooldowns) stay in each caller, which already manages that state.
+entry/loss cooldowns) would stay in each caller, which already manages that state.
 """
 
 from __future__ import annotations

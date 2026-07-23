@@ -159,6 +159,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_velocity_decay_threshold_unaligned": 0.40,
     "decay_ticks_threshold": 10,
     # ── Trailing Stop settings ──────────────────────────────────────────
+    # Retest = price tested the SL zone AND bounced back. Was proximity-only, which
+    # armed the trail while price was still falling toward the stop and ratcheted it
+    # tighter the closer price got. True requires the bounce (retest_bounce_pips) off
+    # the adverse extreme; False restores the legacy proximity-only behaviour.
+    "trail_retest_require_bounce": True,
     "realtime_min_price_distance_to_trail": 2.0,
     "realtime_max_trail_distance": 15.0,
     "realtime_base_trail_buffer": 7.5,
@@ -231,6 +236,32 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # location, no retest), and was responsible for the bulk of the 98-99% of
     # trigger events that skipped RETEST_WAIT entirely. True restores it.
     "entry_enable_optimistic_decay_trigger": False,
+    # RETEST_WAIT timeout. Was hardcoded at 300.0. With both ARMING bypasses closed
+    # (optimistic decay + strong_reversal), RETEST_WAIT is the ONLY route to an entry,
+    # so this now sets the trade rate outright: a retest that does not complete inside
+    # it is discarded. Raise it if "timeout" dominates the outcome tally that
+    # EntryStateMachine logs on every retest timeout.
+    "entry_retest_timeout_sec": 300.0,
+    # Pips beyond the OBSERVED EXTREME (not the level) that price may push during a
+    # retest before the setup is called a breakout. Previously this check had no
+    # buffer at all and measured against the level, so a retest wick a fraction of a
+    # pip through the level killed a valid setup. Defaults to the ARMING buffer.
+    "entry_retest_break_buffer_pips": 2.0,
+    # Velocity confluence counted `is_decaying` and `decay < 0.5` as two separate
+    # confirmations. They are one event: measured over live snapshots they fire at
+    # byte-identical frequency on every symbol (EUR 10.3%, GBP 20.1%, AUD 7.6%,
+    # JPY 11.9%). Summing them let a single velocity reading buy the full 0.25
+    # velocity weight. True takes the stronger of the two; False restores the sum.
+    # Typical effect is about -0.05 on the confluence score against a 0.65 gate.
+    "entry_dedupe_correlated_velocity": True,
+    # Room-to-next-level veto (pips). Reject an entry whose room to the next level
+    # is below this. Real fills sat at a median 0.75p of room vs a market median of
+    # 1.20p (34th percentile); a trade with less room than its spread cannot pay
+    # cost before it stalls. location_context.room_available feeds it and returns a
+    # 10.0 sentinel with no levels synced, which is ignored (open space). 0.0 =
+    # disabled; recommended ~0.8 once measured on a restarted session. Off by
+    # default because room_available is not yet direction-aware.
+    "entry_min_room_pips": 0.0,
 
     # ── HTF Coherence Dampening ────────────────────────────────────────────
     "htf_opposing_sensitivity_multiplier": 1.5,       # more aggressive exits when HTF opposes

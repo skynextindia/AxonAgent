@@ -53,7 +53,10 @@ class TestEntryStateMachineWithMarketContext:
 
     def test_wait_for_confirmation_when_displacement_early(self):
         """Should wait when displacement is EARLY (not yet confirmed)."""
-        machine = EntryStateMachine()
+        # candle_setup_gate off so the tick-level anomaly is reached; with it on
+        # (the default) evaluate() returns from IDLE before the displacement-phase
+        # layer under test ever runs. See test_candle_setup_gate for the gate itself.
+        machine = EntryStateMachine(config={"candle_setup_gate": False})
 
         market_context = self._make_market_context(
             displacement_phase="EARLY",
@@ -73,8 +76,14 @@ class TestEntryStateMachineWithMarketContext:
         assert "early" in decision.reason.lower()
 
     def test_enter_when_displacement_confirmed(self):
-        """Should upgrade signal quality when displacement is CONFIRMED."""
-        machine = EntryStateMachine()
+        """Should upgrade signal quality when displacement is CONFIRMED.
+
+        entry_require_retest_confirm is set False so a confirmed breakaway triggers
+        directly, which is the behaviour this test is about. With it True (the
+        current default) the same breakaway routes through RETEST_WAIT first; that
+        path is covered in test_velocity_spike_quiet_market.
+        """
+        machine = EntryStateMachine(config={"entry_require_retest_confirm": False})
 
         # Move to ARMING state manually
         machine._current_state = STATE_ARMING
@@ -82,7 +91,6 @@ class TestEntryStateMachineWithMarketContext:
         machine._anomaly_time = datetime.now().timestamp()
         machine._anomaly_price = 1.0800
 
-        # 1. Breakaway to RETEST_WAIT
         market_context = self._make_market_context(
             displacement_phase="CONFIRMED",
             reversal_confidence=85.0,

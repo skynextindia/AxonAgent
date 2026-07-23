@@ -60,6 +60,24 @@ class EngineSnapshot:
     atr: float = 0.0
 
 
+def _num(obj, attr: str, default: float) -> float:
+    """Read a numeric attribute, falling back only when it is missing or None.
+
+    The idiom this replaces was `getattr(obj, attr, default) or default`, which
+    also swallows 0.0 because it is falsy. For these fields 0.0 is not a missing
+    value, it is the strongest possible reading: decay_ratio 0.0 is total velocity
+    decay and became 1.0 (no decay), tick_efficiency 0.0 is a pure climax tick and
+    became 0.5 (no climax credit). Each one inverted the signal it was guarding.
+    """
+    val = getattr(obj, attr, None)
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
 def _unified_confluence_score(
     direction: Optional[str],
     price: float,
@@ -72,6 +90,7 @@ def _unified_confluence_score(
     price_levels: Optional[List[PriceLevel]],
     candle_setup_score: float = 0.0,
     config: Optional[dict] = None,
+    location_context=None,
 ):
     """Unified confluence gate replacing _reversal_confluence_grade.
 
@@ -100,17 +119,31 @@ def _unified_confluence_score(
         return (False, 0.0, "structural break in progress (falling knife)")
     if getattr(vel, "is_unusual", False) and getattr(liq, "liquidity_void_active", False):
         return (False, 0.0, "velocity spike in liquidity void")
-        
+
+    # Room-to-next-level veto. Our real fills sit at a median 0.75p of room against
+    # a market median of 1.20p (34th percentile), and a trade with less room than
+    # the spread to the next opposing level cannot pay its cost before it stalls.
+    # location_context.room_available is in pips; it returns a 10.0 sentinel when no
+    # levels are synced, which is open space, not a box-in, so that case is ignored.
+    # Default floor 0.0 = disabled; recommended ~0.8p once the effect is measured on
+    # a restarted session (kept off by default because room_available is not yet
+    # direction-aware and a hard veto on a live-money path deserves measurement first).
+    min_room = float(cfg.get("entry_min_room_pips", 0.0))
+    if min_room > 0.0 and location_context is not None:
+        room = getattr(location_context, "room_available", None)
+        if room is not None and 0.0 < float(room) < min_room:
+            return (False, 0.0, f"insufficient room to next level ({float(room):.1f}p < {min_room:.1f}p)")
+
     # --- CALIBRATED MICROSTRUCTURE FILTERS ---
     # Filters out chasing spikes and enters only when stalled/absorbing
     max_vel_pct = float(cfg.get("entry_max_velocity_pct", 100.0))
     min_decay_ratio = float(cfg.get("entry_min_decay_ratio", 0.0))
     max_tick_eff = float(cfg.get("entry_max_tick_efficiency", 1.0))
     
-    vel_pct = getattr(vel, "percentile", 50.0) or 50.0
-    decay = getattr(vel, "decay_ratio", 1.0) or 1.0
-    eff = getattr(vel, "tick_efficiency", 0.5) or 0.5
-    
+    vel_pct = _num(vel, "percentile", 50.0)
+    decay = _num(vel, "decay_ratio", 1.0)
+    eff = _num(vel, "tick_efficiency", 0.5)
+
     if vel_pct > max_vel_pct:
         return (False, 0.0, f"entry velocity percentile too high ({vel_pct:.1f}% > {max_vel_pct:.1f}%)")
     if decay < min_decay_ratio:
@@ -141,13 +174,22 @@ def _unified_confluence_score(
     # --- COMPONENT 2 (25%): Tick Velocity Exhaustion ---
     # Decay + climax efficiency (lower eff at extreme = more exhausted)
     vel_score = 0.0
-    decay = getattr(vel, "decay_ratio", 1.0) or 1.0
-    eff = getattr(vel, "tick_efficiency", 0.5) or 0.5
+    decay = _num(vel, "decay_ratio", 1.0)
+    eff = _num(vel, "tick_efficiency", 0.5)
     is_decaying = getattr(vel, "is_decaying", False)
-    if is_decaying:
-        vel_score += 0.5
-    if decay < 0.5:
-        vel_score += min(0.5, (0.5 - decay))
+    # `is_decaying` and `decay < 0.5` are one observation reported twice. On live
+    # data they fire at byte-identical frequency on every symbol (EUR 10.3%, GBP
+    # 20.1%, AUD 7.6%, JPY 11.9%), so summing them let a single velocity event buy
+    # the entire 0.25 weight while presenting as two independent confirmations.
+    # Take the stronger of the two instead. The climax term below IS independent
+    # (tick efficiency, not decay) and stays additive.
+    # Set entry_dedupe_correlated_velocity=False to restore the additive behaviour.
+    decaying_credit = 0.5 if is_decaying else 0.0
+    decay_ratio_credit = min(0.5, (0.5 - decay)) if decay < 0.5 else 0.0
+    if cfg.get("entry_dedupe_correlated_velocity", True):
+        vel_score += max(decaying_credit, decay_ratio_credit)
+    else:
+        vel_score += decaying_credit + decay_ratio_credit
     # Climax credit: low efficiency at the extreme = exhausted move worth fading.
     # `entry_climax_eff_percentile` (set for gold) ranks efficiency against the
     # symbol's OWN distribution so the credit is not handed out every tick on
@@ -451,6 +493,7 @@ class ReversalModel:
                 vel_state, disp_state, self._price_levels,
                 candle_setup_score=_ss,
                 config=self._config,
+                location_context=location_context,
             )
             # Carry the confluence score for sizing/observability regardless.
             entry_decision.signal_quality = max(entry_decision.signal_quality, round(score, 2))

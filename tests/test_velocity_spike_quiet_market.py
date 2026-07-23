@@ -10,7 +10,7 @@ Test coverage:
 4. TRIGGERED state reached when price breaks away from trap with impulse
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from unittest.mock import MagicMock
 
 import pytest
@@ -35,6 +35,14 @@ from axonai.realtime.displacement_engine import (
 from axonai.realtime.liquidity_engine import LiquidityState
 from axonai.realtime.mtf_context import MTFState
 from axonai.realtime.regime_engine import RegimeState, REGIME_RANGE_CHOP
+
+
+# These tests cover TICK-LEVEL spike detection, which is upstream of the M15
+# candle-setup gate. That gate defaults on and returns from _evaluate_idle before
+# any velocity logic runs when no setup is active, so every case here stayed in
+# IDLE. Disabling it isolates the path under test rather than asserting against
+# the gate's own behaviour, which test_candle_setup_gate covers separately.
+_TICK_ONLY = {"candle_setup_gate": False}
 
 
 class TestVelocitySpikeQuietMarket:
@@ -87,7 +95,7 @@ class TestVelocitySpikeQuietMarket:
 
     def test_idle_state_initial(self):
         """Machine starts in IDLE state."""
-        fsm = EntryStateMachine()
+        fsm = EntryStateMachine(config=_TICK_ONLY)
         assert fsm._current_state == STATE_IDLE
 
     def test_velocity_spike_above_36th_percentile_triggers_anomaly(self):
@@ -98,7 +106,7 @@ class TestVelocitySpikeQuietMarket:
         - Velocity percentile 50 > 36 → is_unusual = True ✓
         - Low tick efficiency (climax) → anomaly detected
         """
-        fsm = EntryStateMachine()
+        fsm = EntryStateMachine(config=_TICK_ONLY)
 
         # Quiet market: RANGE_CHOP regime
         regime = self._make_regime(regime=REGIME_RANGE_CHOP)
@@ -126,7 +134,7 @@ class TestVelocitySpikeQuietMarket:
 
     def test_anomaly_with_absorption_transitions_to_arming(self):
         """When displacement shows absorption/trap, transition ANOMALY → ARMING."""
-        fsm = EntryStateMachine()
+        fsm = EntryStateMachine(config=_TICK_ONLY)
         regime = self._make_regime(regime=REGIME_RANGE_CHOP)
 
         # First evaluation: detect anomaly
@@ -152,12 +160,16 @@ class TestVelocitySpikeQuietMarket:
         assert fsm._current_state == STATE_ARMING
         assert decision.state == STATE_ARMING
 
-    def test_arming_with_impulse_breaks_away_to_triggered(self):
-        """When in ARMING and price breaks away with impulse, transition to TRIGGERED."""
-        fsm = EntryStateMachine()
+    def test_arming_with_impulse_breaks_away_to_retest_wait(self):
+        """A plain impulse breakaway routes to RETEST_WAIT, not straight to TRIGGERED.
+
+        A breakaway is a breakout, not yet a confirmed reversal. It has to come
+        back and fail at the level before it counts. `entry_require_retest_confirm`
+        (default True) is what enforces that; the next test covers it set False.
+        """
+        fsm = EntryStateMachine(config=_TICK_ONLY)
         regime = self._make_regime(regime=REGIME_RANGE_CHOP)
 
-        # Initial price
         price = 1.10000
         now = datetime.now()
 
@@ -176,21 +188,46 @@ class TestVelocitySpikeQuietMarket:
         fsm.evaluate(price, now, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
         assert fsm._current_state == STATE_ARMING
 
-        # 3. Break away: price drops 0.5 pips with IMPULSE → SELL reversal
-        price = 1.09994  # Down 0.6 pips from anomaly to exceed 0.5 pips trigger
+        # 3. Break away past the stall delay: price drops below the trigger distance.
+        price = 1.09994
         velocity = self._make_velocity(percentile=60.0, tick_efficiency=0.5)
         displacement = self._make_displacement(DISPLACEMENT_IMPULSE, net_displacement_pips=-8.0)
 
-        decision = fsm.evaluate(price, now, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
+        fsm.evaluate(price, now + timedelta(seconds=20), velocity, displacement,
+                     liquidity, regime, mtf, spread=0.1 * 0.0001)
+        assert fsm._current_state == STATE_RETEST_WAIT
 
-        # Should transition to TRIGGERED
+    def test_breakaway_triggers_directly_when_retest_confirm_disabled(self):
+        """entry_require_retest_confirm=False restores the pre-2026-07-23 bypass."""
+        fsm = EntryStateMachine(config={**_TICK_ONLY, "entry_require_retest_confirm": False})
+        regime = self._make_regime(regime=REGIME_RANGE_CHOP)
+
+        price = 1.10000
+        now = datetime.now()
+        liquidity = self._make_liquidity()
+        mtf = self._make_mtf()
+
+        fsm.evaluate(price, now, self._make_velocity(percentile=50.0, tick_efficiency=0.15),
+                     self._make_displacement(DISPLACEMENT_NEUTRAL, net_displacement_pips=10.0),
+                     liquidity, regime, mtf, spread=0.1 * 0.0001)
+        assert fsm._current_state == STATE_ANOMALY
+
+        fsm.evaluate(price, now, self._make_velocity(percentile=50.0, tick_efficiency=0.5),
+                     self._make_displacement(DISPLACEMENT_ABSORPTION, net_displacement_pips=5.0),
+                     liquidity, regime, mtf, spread=0.1 * 0.0001)
+        assert fsm._current_state == STATE_ARMING
+
+        decision = fsm.evaluate(1.09994, now + timedelta(seconds=20),
+                                self._make_velocity(percentile=60.0, tick_efficiency=0.5),
+                                self._make_displacement(DISPLACEMENT_IMPULSE, net_displacement_pips=-8.0),
+                                liquidity, regime, mtf, spread=0.1 * 0.0001)
         assert fsm._current_state == STATE_TRIGGERED
         assert decision.is_valid_entry is True
         assert decision.direction == "SELL"
 
     def test_full_cycle_idle_to_triggered_in_quiet_market(self):
         """Full state machine cycle in quiet market: IDLE → ANOMALY → ARMING → RETEST_WAIT → TRIGGERED."""
-        fsm = EntryStateMachine()
+        fsm = EntryStateMachine(config=_TICK_ONLY)
         regime = self._make_regime(regime=REGIME_RANGE_CHOP, confidence=0.95)
 
         price = 1.10000
@@ -225,13 +262,33 @@ class TestVelocitySpikeQuietMarket:
         assert fsm._current_state == STATE_ARMING
         assert decision.state == STATE_ARMING
 
-        # === TICK 4: Price breaks away with impulse (confirm breakaway) ===
-        price = 1.09994  # Down 0.6 pips from anomaly price
+        # === TICK 4: Price breaks away with impulse -> RETEST_WAIT ===
+        # Past the 15s stall delay, otherwise the trigger is held in ARMING.
+        price = 1.09994  # Down 1.1 pips from the anomaly level
         velocity = self._make_velocity(percentile=55.0, tick_efficiency=0.5)
         displacement = self._make_displacement(DISPLACEMENT_IMPULSE, net_displacement_pips=-10.0)
 
-        decision = fsm.evaluate(price, base_time, velocity, displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
-        assert fsm._current_state == STATE_TRIGGERED
+        decision = fsm.evaluate(price, base_time + timedelta(seconds=20), velocity,
+                                displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
+        assert fsm._current_state == STATE_RETEST_WAIT
+
+        # === TICK 5: Price pulls AWAY from the level (beyond the retest zone) ===
+        # zone_width = max(2.0, vol_pips=3.0) = 3.0, so it must exceed 3 pips out.
+        price = 1.09965  # 4.0 pips below the level
+        velocity = self._make_velocity(percentile=50.0, tick_efficiency=0.5, decay_ratio=0.7)
+        displacement = self._make_displacement(DISPLACEMENT_NEUTRAL, net_displacement_pips=-6.0)
+
+        fsm.evaluate(price, base_time + timedelta(seconds=30), velocity, displacement,
+                     liquidity, regime, mtf, spread=0.1 * 0.0001)
+        assert fsm._current_state == STATE_RETEST_WAIT
+
+        # === TICK 6: Price comes BACK toward the level and stalls -> TRIGGERED ===
+        price = 1.09995  # back to 1.0 pips below the level, off its 4.0 extreme
+        velocity = self._make_velocity(percentile=40.0, tick_efficiency=0.5, decay_ratio=0.3)
+        displacement = self._make_displacement(DISPLACEMENT_ABSORPTION, net_displacement_pips=-3.0)
+
+        decision = fsm.evaluate(price, base_time + timedelta(seconds=40), velocity,
+                                displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
         assert fsm._current_state == STATE_TRIGGERED
         assert decision.is_valid_entry is True
         assert decision.direction == "SELL"
@@ -239,7 +296,7 @@ class TestVelocitySpikeQuietMarket:
 
     def test_quiet_market_threshold_boundary(self):
         """At exactly 36th percentile, velocity is NOT unusual yet."""
-        fsm = EntryStateMachine()
+        fsm = EntryStateMachine(config=_TICK_ONLY)
         regime = self._make_regime(regime=REGIME_RANGE_CHOP)
 
         # At 36th percentile exactly (boundary)
@@ -259,7 +316,7 @@ class TestVelocitySpikeQuietMarket:
 
     def test_above_threshold_with_is_unusual_flag_triggers_anomaly(self):
         """Above 36th percentile WITH is_unusual=True triggers anomaly."""
-        fsm = EntryStateMachine()
+        fsm = EntryStateMachine(config=_TICK_ONLY)
         regime = self._make_regime(regime=REGIME_RANGE_CHOP)
 
         # 37th percentile (just above 36) with is_unusual=True

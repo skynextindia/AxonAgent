@@ -60,6 +60,23 @@ class EntryDecision:
     entry_displacement_class: Optional[str] = None     # from DisplacementEngine
 
 
+def _num(obj, attr: str, default: float) -> float:
+    """Read a numeric attribute, falling back only when it is missing or None.
+
+    Replaces `getattr(obj, attr, default) or default`, which also swallows 0.0
+    because it is falsy. For decay_ratio that inverted the signal at its most
+    informative value: 0.0 is total velocity decay, the ideal retest, and became
+    1.0, which trips the `decay > 0.8` high-momentum invalidation.
+    """
+    val = getattr(obj, attr, None)
+    if val is None:
+        return default
+    try:
+        return float(val)
+    except (TypeError, ValueError):
+        return default
+
+
 class EntryStateMachine:
     """Stateful trade entry execution manager."""
 
@@ -105,6 +122,19 @@ class EntryStateMachine:
         # price pulled away from the top and rallied BACK toward it (a real retest),
         # not on the first momentum stall on the way down (which fired at the bottom).
         self._retest_extreme: float = 0.0
+        self._retest_timeout_sec: float = float(self._config.get("entry_retest_timeout_sec", 300.0))
+        # Running tally of how RETEST_WAIT resolves. RETEST_WAIT is now the only route
+        # to an entry, so if it stops resolving the trade rate goes to zero silently.
+        # Counted rather than inferred so the reason is visible in the log.
+        self._retest_outcomes: dict[str, int] = {}
+        # The most extreme PRICE actually observed since the anomaly (the high for a
+        # SELL setup, the low for a BUY). Distinct from _anomaly_price, which is the
+        # structural S/R level the setup formed at. The breakout fast-kills mean "price
+        # made a NEW extreme", so they must measure against the observed extreme; once
+        # _anomaly_price became a level rather than a tick, measuring against it turned
+        # those checks into "price is on the wrong side of the level", which a normal
+        # retest wick trips on its way back.
+        self._anomaly_extreme_price: float = 0.0
         
         # Stall tracking
         self._arm_start_time: float = 0.0
@@ -125,6 +155,7 @@ class EntryStateMachine:
         self._anomaly_direction = ""
         self._anomaly_type = ""
         self._max_adverse_excursion = 0.0
+        self._anomaly_extreme_price = 0.0
         self._last_tick_time = 0.0
         self._retest_start_time = 0.0
         self._arm_start_time = 0.0
@@ -183,7 +214,7 @@ class EntryStateMachine:
             self._evaluate_anomaly(price, ts, velocity, displacement)
             
         elif self._current_state == STATE_ARMING:
-            self._evaluate_arming(price, ts, displacement, mtf, velocity)
+            self._evaluate_arming(price, ts, displacement, velocity)
             
         elif self._current_state == STATE_RETEST_WAIT:
             self._evaluate_retest_wait(price, ts, velocity)
@@ -362,42 +393,49 @@ class EntryStateMachine:
         # Diagnostic: Log why no anomaly detected
         if not is_climax and not is_sweep:
             logger.debug("EntryIDLE: No anomaly. vel_unusual=%s eff=%.3f sweeps=%d", vel.is_unusual, vel.tick_efficiency, len(liq.active_sweeps))
-        
-        # Infer expected reversal direction
-        direction = ""
+
+        # ── Expected reversal direction ───────────────────────────────────────
+        # Tick-level inference: sweep side first, then the sign of net displacement.
+        # With candle_setup_gate on (the default) the gate above guarantees a setup
+        # is active, so this only ever serves as the disagreement diagnostic. With
+        # the gate OFF it is the sole source of direction, which is the configuration
+        # the velocity-spike tests exercise.
+        tick_direction = ""
         if is_sweep:
             # Sweeping support -> expect BUY; sweeping resistance -> expect SELL
             sweep_lvl = liq.active_sweeps[0]
             if sweep_lvl.direction == "support":
-                direction = "BUY"
+                tick_direction = "BUY"
             elif sweep_lvl.direction == "resistance":
-                direction = "SELL"
+                tick_direction = "SELL"
             else:
-                # Fallback if direction is not synced: if we sweep above a level, it's a top -> SELL
-                direction = "SELL" if price > sweep_lvl.price else "BUY"
+                # Direction not synced: a sweep above a level is a top -> SELL
+                tick_direction = "SELL" if price > sweep_lvl.price else "BUY"
         elif is_climax:
             # Bullish climax (net displacement positive) -> expect SELL reversal
             if disp.net_displacement_pips > 0:
-                direction = "SELL"
-            # Bearish climax (net displacement negative) -> expect BUY reversal
+                tick_direction = "SELL"
             elif disp.net_displacement_pips < 0:
-                direction = "BUY"
+                tick_direction = "BUY"
 
-        # ── Direction agreement with candle setup ─────────────────────────────
-        # If a candle setup is active and the tick-level direction disagrees,
-        # override with candle_setup_direction (higher structural authority).
+        # A confirmed candle setup outranks the tick reading (structural authority).
         if candle_setup_active and candle_setup_direction:
-            if direction and direction != candle_setup_direction:
+            if tick_direction and tick_direction != candle_setup_direction:
                 logger.info(
                     "EntryIDLE: Tick direction=%s disagrees with candle setup direction=%s — using candle setup.",
-                    direction, candle_setup_direction
+                    tick_direction, candle_setup_direction
                 )
             direction = candle_setup_direction
-            # Allow the anomaly even without a tick-level spike when candle setup is strong
-            if not (is_climax or is_sweep):
-                is_climax = True  # treat confirmed candle setup as a synthetic climax
+        else:
+            direction = tick_direction
 
-        if (is_climax or is_sweep) and direction:
+        # A confirmed candle setup stands in for the tick-level spike. Kept because
+        # the M15 close is the structural evidence; the tick spike is corroboration
+        # we do not require. Named honestly rather than assigned into is_climax,
+        # which previously made the ANOMALY log claim a climax that never happened.
+        setup_is_evidence = bool(candle_setup_active and direction)
+
+        if (is_climax or is_sweep or setup_is_evidence) and direction:
             self._anomaly_time = ts
             # Anchor to the S/R level the candle setup formed at, not to whatever
             # tick price happened to be current when the setup was first seen.
@@ -407,13 +445,24 @@ class EntryStateMachine:
             # meaningful. Falls back to `price` when no level is available.
             self._anomaly_price = candle_setup_level if candle_setup_level > 0.0 else price
             self._anomaly_direction = direction
-            self._anomaly_type = "sweep" if is_sweep else "climax"
+            self._anomaly_type = "sweep" if is_sweep else ("climax" if is_climax else "setup")
             self._max_adverse_excursion = 0.0
+            # Seed the observed extreme from the live tick. This is what the breakout
+            # fast-kills compare against; _anomaly_price above is the structural level
+            # the retest distance is measured from. They are different references and
+            # conflating them is what made the kills fire on ordinary retest wicks.
+            self._anomaly_extreme_price = price
 
-            reason = "Sweep detected" if is_sweep else "Microstructure climax"
+            if is_sweep:
+                reason = "Sweep detected"
+            elif is_climax:
+                reason = "Microstructure climax"
+            else:
+                reason = "Candle setup confirmed (no tick-level spike)"
             logger.info(
-                "EntryStateMachine ANOMALY detected: price=%.5f direction=%s type=%s (climax: vel_unusual=%s eff=%.2f)",
-                price, direction, self._anomaly_type, vel.is_unusual, vel.tick_efficiency
+                "EntryStateMachine ANOMALY detected: price=%.5f level=%.5f direction=%s type=%s (%s; vel_unusual=%s eff=%.2f)",
+                price, self._anomaly_price, direction, self._anomaly_type, reason,
+                vel.is_unusual, vel.tick_efficiency
             )
             self._transition(STATE_ANOMALY, f"{reason}. Expected reversal: {direction}")
 
@@ -443,23 +492,52 @@ class EntryStateMachine:
             self._arm_start_time = ts
             self._transition(STATE_ARMING, "Velocity decayed. Arming trigger.")
 
+    def _extreme_breach_pips(self, price: float) -> float:
+        """Pips by which `price` has pushed BEYOND the observed extreme. 0.0 if it has not.
+
+        A SELL setup breaks upward and a BUY setup breaks downward. Returns 0.0 while
+        the extreme is unseeded so a missing seed can never manufacture a breakout.
+        """
+        if self._anomaly_extreme_price <= 0.0:
+            return 0.0
+        if self._anomaly_direction == "SELL":
+            return (price - self._anomaly_extreme_price) / self._pip
+        if self._anomaly_direction == "BUY":
+            return (self._anomaly_extreme_price - price) / self._pip
+        return 0.0
+
+    def _track_extreme(self, price: float) -> None:
+        """Extend the observed extreme in the setup's break direction."""
+        if self._anomaly_extreme_price <= 0.0:
+            self._anomaly_extreme_price = price
+        elif self._anomaly_direction == "SELL":
+            self._anomaly_extreme_price = max(self._anomaly_extreme_price, price)
+        elif self._anomaly_direction == "BUY":
+            self._anomaly_extreme_price = min(self._anomaly_extreme_price, price)
+
     def _evaluate_arming(
-        self, price: float, ts: float, disp: DisplacementState, mtf: MTFState,
+        self, price: float, ts: float, disp: DisplacementState,
         vel: Optional[NormalizedVelocity] = None,
     ) -> None:
         """Wait for the price to break away from the trap in our direction."""
         dist = (price - self._anomaly_price) / self._pip
 
-        # ── LOOSENED fast-kill: allow a small buffer before invalidating ──────
-        # Old: ANY price beyond extreme = immediate invalidation (too sensitive)
-        # New: allow up to max(2.0, 0.2*ATR/pip) pips before invalidating
+        # ── Breakout fast-kill ────────────────────────────────────────────────
+        # Measured against the observed extreme, not against _anomaly_price. Those
+        # were the same number back when the anomaly was anchored to the live tick;
+        # now that it is anchored to the structural level, only the extreme answers
+        # the question this check is asking ("did price make a NEW extreme?").
+        # Check before extending the extreme, or the extreme absorbs every breach
+        # and the kill can never fire.
         fast_kill_buffer = float(self._config.get("entry_fast_kill_buffer_pips", 2.0))
-        if self._anomaly_direction == "SELL" and dist > fast_kill_buffer:
-            self._transition(STATE_INVALIDATED, f"New high extreme ({dist:+.2f} pips, buffer={fast_kill_buffer:.1f}). Breakout.")
+        breach = self._extreme_breach_pips(price)
+        if breach > fast_kill_buffer:
+            side = "high" if self._anomaly_direction == "SELL" else "low"
+            self._transition(
+                STATE_INVALIDATED,
+                f"New {side} extreme ({breach:+.2f} pips beyond, buffer={fast_kill_buffer:.1f}). Breakout.")
             return
-        elif self._anomaly_direction == "BUY" and dist < -fast_kill_buffer:
-            self._transition(STATE_INVALIDATED, f"New low extreme ({dist:+.2f} pips, buffer={fast_kill_buffer:.1f}). Breakout.")
-            return
+        self._track_extreme(price)
 
         # ── OPTIMISTIC VELOCITY DECAY TRIGGER ────────────────────────────────
         # If tick velocity is clearly decaying (momentum exhaustion at the peak),
@@ -476,7 +554,7 @@ class EntryStateMachine:
         # (EUR 10.3%, GBP 20.1%, AUD 7.6%, JPY 11.9%), so the two "confirmations"
         # are one event. Set entry_enable_optimistic_decay_trigger=True to restore.
         if vel is not None and self._config.get("entry_enable_optimistic_decay_trigger", False):
-            decay = getattr(vel, "decay_ratio", 1.0) or 1.0
+            decay = _num(vel, "decay_ratio", 1.0)
             is_decaying = getattr(vel, "is_decaying", False)
             if is_decaying and decay < 0.5:
                 # Stall delay validation
@@ -561,17 +639,34 @@ class EntryStateMachine:
         """Wait for price to test the anomaly level and verify if opposing flow is exhausted."""
         dist = (price - self._anomaly_price) / self._pip
 
-        # 1. Beyond-extreme fast-kill
-        if self._anomaly_direction == "SELL" and dist > 0.0:
-            self._transition(STATE_INVALIDATED, f"New high extreme detected ({dist:+.2f} pips) during retest. Breakout.")
+        # 1. Beyond-extreme fast-kill.
+        # Was `dist > 0.0` against _anomaly_price with no buffer at all, while ARMING
+        # allowed entry_fast_kill_buffer_pips against the same reference. Since
+        # _anomaly_price is the structural level, that read as "price is back on the
+        # wrong side of the level" — which is what a retest LOOKS like as it returns,
+        # so a wick a fraction of a pip through the level killed a valid setup. Now
+        # measured against the observed extreme, with its own buffer.
+        break_buffer = float(self._config.get(
+            "entry_retest_break_buffer_pips",
+            self._config.get("entry_fast_kill_buffer_pips", 2.0)))
+        breach = self._extreme_breach_pips(price)
+        if breach > break_buffer:
+            side = "high" if self._anomaly_direction == "SELL" else "low"
+            self._retest_outcomes["breakout"] = self._retest_outcomes.get("breakout", 0) + 1
+            self._transition(
+                STATE_INVALIDATED,
+                f"New {side} extreme ({breach:+.2f} pips beyond, buffer={break_buffer:.1f}) during retest. Breakout.")
             return
-        elif self._anomaly_direction == "BUY" and dist < 0.0:
-            self._transition(STATE_INVALIDATED, f"New low extreme detected ({dist:+.2f} pips) during retest. Breakout.")
-            return
+        self._track_extreme(price)
 
-        # 2. Timeout check (5 minutes for retest)
+        # 2. Timeout. Configurable: with both ARMING bypasses closed, RETEST_WAIT is
+        # the only path to an entry, so this value now sets the trade rate outright.
         elapsed = ts - self._retest_start_time
-        if elapsed > 300.0:
+        if elapsed > self._retest_timeout_sec:
+            self._retest_outcomes["timeout"] = self._retest_outcomes.get("timeout", 0) + 1
+            logger.info(
+                "EntryRETEST timed out after %.1fs (limit %.1fs, closest approach %.1fp of zone). Outcomes so far: %s",
+                elapsed, self._retest_timeout_sec, self._retest_extreme, self._retest_outcomes)
             self._transition(STATE_INVALIDATED, f"Retest timed out after {elapsed:.1f}s")
             return
 
@@ -605,10 +700,11 @@ class EntryStateMachine:
             approached = pulled_away and coming_back
 
         if in_zone:
-            decay = getattr(velocity, "decay_ratio", 1.0) or 1.0
+            decay = _num(velocity, "decay_ratio", 1.0)
 
             # Trigger invalidate: high momentum on retest (breaking through)
             if decay > 0.8:
+                self._retest_outcomes["high_momentum"] = self._retest_outcomes.get("high_momentum", 0) + 1
                 self._transition(STATE_INVALIDATED, f"High momentum on retest (decay={decay:.2f}). Breakout threat.")
                 return
 
@@ -616,6 +712,7 @@ class EntryStateMachine:
             # Old: decay < 0.4 AND tr_10 < tr_300 * 0.6 (dual condition — too strict)
             if decay < 0.6 and approached:
                 if (ts - self._arm_start_time) >= self._min_stall_duration:
+                    self._retest_outcomes["confirmed"] = self._retest_outcomes.get("confirmed", 0) + 1
                     self._transition(STATE_TRIGGERED, f"Retest confirmed (decay={decay:.2f}, dist={dist:+.1f}p off extreme {self._retest_extreme:+.1f}p). Reversal trigger.")
                 else:
                     logger.debug("EntryRETEST: Stall delay active on retest trigger. Spent %.1fs / %.1fs", ts - self._arm_start_time, self._min_stall_duration)

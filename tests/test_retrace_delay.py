@@ -11,6 +11,10 @@ def test_mtf_retrace_delay():
         "realtime_max_trail_distance": 15.0,
         "realtime_base_trail_buffer": 7.5,
         "realtime_min_trail_floor_pips": 4.0,
+        # Set explicitly. The retrace ticks below sit at 1.1005 against a 1.1000
+        # entry, which is 4.999999999998895 pips in float, not 5.0, so the default
+        # 5.0 activation gate returned before the retrace logic under test ever ran.
+        "realtime_trail_activation_pips": 2.0,
     }
     manager = VelocityTrailingManager(config=config)
 
