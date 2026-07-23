@@ -120,19 +120,27 @@ def _unified_confluence_score(
     if getattr(vel, "is_unusual", False) and getattr(liq, "liquidity_void_active", False):
         return (False, 0.0, "velocity spike in liquidity void")
 
-    # Room-to-next-level veto. Our real fills sit at a median 0.75p of room against
-    # a market median of 1.20p (34th percentile), and a trade with less room than
-    # the spread to the next opposing level cannot pay its cost before it stalls.
-    # location_context.room_available is in pips; it returns a 10.0 sentinel when no
-    # levels are synced, which is open space, not a box-in, so that case is ignored.
-    # Default floor 0.0 = disabled; recommended ~0.8p once the effect is measured on
-    # a restarted session (kept off by default because room_available is not yet
-    # direction-aware and a hard veto on a live-money path deserves measurement first).
+    # Room-to-next-level veto, measured in the PROFIT direction. A reversal fade
+    # profits toward the opposite level: a BUY (fade support) runs up toward the
+    # next resistance, a SELL (fade resistance) runs down toward the next support.
+    # A trade with less room ahead than its spread cannot pay cost before it stalls.
+    # The trade log bears this out: room<1p entries netted -0.67p/trade at 33% win
+    # while room>=1p netted ~+0.6p at 50%, and 52% of fills were in the losing
+    # bucket. Rooms are in pips; 10.0 is the no-level-that-side sentinel (open
+    # space), so it never vetoes. Falls back to the direction-agnostic room_available
+    # for older LocationContext objects. Default floor 0.0 = disabled.
     min_room = float(cfg.get("entry_min_room_pips", 0.0))
     if min_room > 0.0 and location_context is not None:
-        room = getattr(location_context, "room_available", None)
+        if direction == "BUY":
+            room = getattr(location_context, "room_above_pips", None)
+        elif direction == "SELL":
+            room = getattr(location_context, "room_below_pips", None)
+        else:
+            room = None
+        if room is None:  # pre-directional LocationContext
+            room = getattr(location_context, "room_available", None)
         if room is not None and 0.0 < float(room) < min_room:
-            return (False, 0.0, f"insufficient room to next level ({float(room):.1f}p < {min_room:.1f}p)")
+            return (False, 0.0, f"insufficient room toward target ({float(room):.1f}p < {min_room:.1f}p)")
 
     # --- CALIBRATED MICROSTRUCTURE FILTERS ---
     # Filters out chasing spikes and enters only when stalled/absorbing

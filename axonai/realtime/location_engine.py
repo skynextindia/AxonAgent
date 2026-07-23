@@ -19,10 +19,17 @@ class LocationContext:
 
     distance_to_liquidity: float         # ATR units to nearest liquidity cluster
     distance_to_sr: float                # ATR units to nearest S/R level
-    room_available: float                # Pips from current price to next level
+    room_available: float                # Pips to the nearest level EITHER side (direction-agnostic)
     at_structure: bool                   # Within config threshold of a level?
     nearest_level_type: str              # "support" / "resistance" / "none"
     nearest_level_price: float           # Price of the nearest level
+    # Directional room in pips: distance to the next level ABOVE / BELOW price.
+    # A reversal fade profits toward the OPPOSITE level, so the entry gate reads
+    # room_above_pips for a BUY (profits up toward resistance) and room_below_pips
+    # for a SELL (profits down toward support). OPEN_SPACE (10.0) when that side is
+    # unbounded. Defaulted so older constructions / pickles stay valid.
+    room_above_pips: float = 10.0
+    room_below_pips: float = 10.0
 
     @property
     def is_safe_entry(self) -> bool:
@@ -120,13 +127,20 @@ class LocationEngine:
         else:
             nearest_level_price = nearest_level.price
 
-        # Room available (pips to next level)
+        # Directional room in pips. OPEN_SPACE when no level bounds that side, so an
+        # unbounded direction reads as "plenty of room" and is never vetoed.
+        OPEN_SPACE_PIPS = 10.0
+        room_above_pips = (nearest_above.price - price) / self._pip if nearest_above else OPEN_SPACE_PIPS
+        room_below_pips = (price - nearest_below.price) / self._pip if nearest_below else OPEN_SPACE_PIPS
+
+        # Direction-agnostic room (nearest level either side), kept for telemetry and
+        # backward compatibility. Prefers the level above, matching prior behaviour.
         if nearest_above:
-            room_pips = (nearest_above.price - price) / self._pip
+            room_pips = room_above_pips
         elif nearest_below:
-            room_pips = (price - nearest_below.price) / self._pip
+            room_pips = room_below_pips
         else:
-            room_pips = 10.0  # Safe default if no levels
+            room_pips = OPEN_SPACE_PIPS
 
         # at_structure flag
         at_struct = nearest_distance <= at_struct_threshold
@@ -142,6 +156,8 @@ class LocationEngine:
             at_structure=at_struct,
             nearest_level_type=nearest_type,
             nearest_level_price=round(nearest_level_price, 5),
+            room_above_pips=round(room_above_pips, 1),
+            room_below_pips=round(room_below_pips, 1),
         )
 
 

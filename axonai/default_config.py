@@ -254,13 +254,15 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # velocity weight. True takes the stronger of the two; False restores the sum.
     # Typical effect is about -0.05 on the confluence score against a 0.65 gate.
     "entry_dedupe_correlated_velocity": True,
-    # Room-to-next-level veto (pips). Reject an entry whose room to the next level
-    # is below this. Real fills sat at a median 0.75p of room vs a market median of
-    # 1.20p (34th percentile); a trade with less room than its spread cannot pay
-    # cost before it stalls. location_context.room_available feeds it and returns a
-    # 10.0 sentinel with no levels synced, which is ignored (open space). 0.0 =
-    # disabled; recommended ~0.8 once measured on a restarted session. Off by
-    # default because room_available is not yet direction-aware.
+    # Room-to-next-level veto (pips), measured in the PROFIT direction (BUY -> room
+    # to the next resistance above, SELL -> room to the next support below). Reject
+    # an entry with less room ahead than this. Trade log: room<1p entries netted
+    # -0.67p/trade at 33% win, room>=1p netted ~+0.6p at 50%, and 52% of fills were
+    # in the losing bucket; vetoing <1p flipped the FX sample -4.2p -> +19.9p (69
+    # trades, in-sample). 10.0 is the no-level-that-side sentinel (open space) and
+    # never vetoes. 0.0 = disabled; recommended 1.0 by the data. Off by default so
+    # the direction-aware veto is confirmed on a restarted session before it gates
+    # live money.
     "entry_min_room_pips": 0.0,
 
     # ── HTF Coherence Dampening ────────────────────────────────────────────

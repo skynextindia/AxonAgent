@@ -50,8 +50,14 @@ def _lvl(direction, tf, is_active=True, price=1.1000):
                            is_active=is_active, price=price)
 
 
-def _loc(room):
-    return SimpleNamespace(room_available=room)
+def _loc(room=None, above=None, below=None):
+    # room sets the direction-agnostic field; above/below set the directional ones.
+    # Default the directional fields to `room` so single-arg callers still work.
+    return SimpleNamespace(
+        room_available=room if room is not None else 10.0,
+        room_above_pips=above if above is not None else (room if room is not None else 10.0),
+        room_below_pips=below if below is not None else (room if room is not None else 10.0),
+    )
 
 
 # ── Hard rejects ───────────────────────────────────────────────────────────
@@ -193,6 +199,39 @@ def test_room_veto_ignores_no_levels_sentinel():
 def test_room_veto_disabled_by_default():
     # min_room 0.0 -> even zero room does not veto on the room check.
     allow, _, _ = _allow_with_room(room=0.1, min_room=0.0)
+    assert allow is True
+
+
+def _grade(direction, loc, min_room):
+    mtf = _mtf(h4=0.6, h1=0.4) if direction == "BUY" else _mtf(h4=-0.6, h1=-0.4)
+    return _reversal_confluence_grade(
+        direction, 1.1000, 0.0001, 0.0010, mtf,
+        _liq(sweeps=1), _vel(decaying=True, tick_efficiency=0.1), _disp(), None,
+        candle_setup_score=1.0, config={"entry_min_room_pips": min_room},
+        location_context=loc)
+
+
+def test_room_veto_is_direction_aware_buy_reads_room_above():
+    # BUY profits UP: boxed in above (0.4p to resistance) but open below -> veto.
+    allow, _, reason = _grade("BUY", _loc(above=0.4, below=8.0), min_room=1.0)
+    assert allow is False and "room" in reason.lower()
+
+
+def test_room_veto_is_direction_aware_buy_ignores_room_below():
+    # BUY with tight room BELOW (support just under) but open ABOVE -> allowed.
+    allow, _, _ = _grade("BUY", _loc(above=5.0, below=0.3), min_room=1.0)
+    assert allow is True
+
+
+def test_room_veto_is_direction_aware_sell_reads_room_below():
+    # SELL profits DOWN: boxed in below (0.4p to support) -> veto.
+    allow, _, reason = _grade("SELL", _loc(above=8.0, below=0.4), min_room=1.0)
+    assert allow is False and "room" in reason.lower()
+
+
+def test_room_veto_is_direction_aware_sell_ignores_room_above():
+    # SELL with tight room ABOVE but open BELOW -> allowed.
+    allow, _, _ = _grade("SELL", _loc(above=0.3, below=5.0), min_room=1.0)
     assert allow is True
 
 
