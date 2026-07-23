@@ -254,6 +254,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # velocity weight. True takes the stronger of the two; False restores the sum.
     # Typical effect is about -0.05 on the confluence score against a 0.65 gate.
     "entry_dedupe_correlated_velocity": True,
+    # reversal_pressure high-decay term. Added up to +0.5 pressure when decay_ratio
+    # > 0.6 on the claim "reversals show 0.75-0.91 decay". Measured over 88k snapshot
+    # ticks: decay_ratio has no forward relationship to reversals (all buckets within
+    # +/-0.06p, noise vs a 0.6p spread), and all 69 real FX entries fired at decay
+    # < 0.5 so the term never applied at entry. Default off. True restores it.
+    "reversal_pressure_high_decay_term": False,
     # Room-to-next-level veto (pips), measured in the PROFIT direction (BUY -> room
     # to the next resistance above, SELL -> room to the next support below). Reject
     # an entry with less room ahead than this. Trade log: room<1p entries netted

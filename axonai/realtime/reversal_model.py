@@ -428,13 +428,20 @@ class ReversalModel:
             rp = 0.0
             if getattr(vel_state, "is_decaying", False):
                 rp += 0.5
-            # Velocity FADING (high decay_ratio) = exhaustion = reversal pressure.
-            # Bugfix: was inverted (added pressure when decay_ratio was LOW), so
-            # reversal_pressure stayed ~0 at real reversals — which have HIGH
-            # decay_ratio (0.75-0.91 empirically). Now keyed the correct way.
-            dr = getattr(vel_state, "decay_ratio", 0.0)
-            if dr is not None and dr > 0.6:
-                rp += min(0.5, (dr - 0.5))
+            # High-decay term, GATED and now default OFF (2026-07-24). It claimed
+            # "reversals show high decay_ratio (0.75-0.91)" and added up to +0.5 of
+            # reversal_pressure when decay_ratio > 0.6. Measured over 88k snapshot
+            # ticks on EURUSD+GBPUSD, decay_ratio has no forward relationship to
+            # mean-reversion at any level (every bucket within +/-0.06p, ~noise vs a
+            # 0.6p spread), and every one of our 69 real FX entries fired at decay
+            # < 0.5 so this term never applied at an actual entry anyway. It only
+            # injected noise into reversal_pressure, which feeds the counter-trend
+            # allow in the confluence gate. reversal_pressure_high_decay_term=True
+            # restores it.
+            if self._config.get("reversal_pressure_high_decay_term", False):
+                dr = getattr(vel_state, "decay_ratio", 0.0)
+                if dr is not None and dr > 0.6:
+                    rp += min(0.5, (dr - 0.5))
             if getattr(disp_state, "is_exhausting", False) or getattr(disp_state, "classification", "") in ("EXHAUSTION", "TRAP", "ABSORPTION"):
                 rp += 0.5
             self._last_mtf_state.reversal_pressure = min(1.0, rp)
