@@ -347,17 +347,36 @@ class VelocityTrailingManager:
         if retest_window_pips is None:
             retest_window_pips = self.retest_window_pips
 
+        # A retest is two events: price came DOWN into the SL zone (tested support),
+        # and has since bounced BACK off it. The old code checked only the first —
+        # current proximity to SL — and ignored both `lowest_price` (the adverse
+        # extreme the caller tracks) and `retest_bounce_pips` (defined but never
+        # read). So it returned True while price was still falling toward the stop,
+        # and since a retest arms the trail, that ratcheted the SL toward price: the
+        # closer to the stop, the more it tightened. Require the confirmed bounce.
+        # `lowest_price` is the min bid for a BUY and the max ask for a SELL (the
+        # worst adverse price), seeded and updated by the daemon.
+        require_bounce = self.config.get("trail_retest_require_bounce", True)
         if position_type == "BUY":
-            distance_to_sl = (bid - current_sl) / pip
-            # Retest: price got within window pips of SL and bounced back
-            retest = distance_to_sl <= retest_window_pips
+            extreme_dist_to_sl = (lowest_price - current_sl) / pip
+            touched = extreme_dist_to_sl <= retest_window_pips
+            bounce_pips = (bid - lowest_price) / pip
         else:
-            distance_to_sl = (current_sl - ask) / pip
-            retest = distance_to_sl <= retest_window_pips
+            extreme_dist_to_sl = (current_sl - lowest_price) / pip
+            touched = extreme_dist_to_sl <= retest_window_pips
+            bounce_pips = (lowest_price - ask) / pip
+
+        if require_bounce:
+            retest = touched and bounce_pips >= self.retest_bounce_pips
+        else:
+            # Legacy proximity-only behaviour: current price near the SL.
+            live_dist = (bid - current_sl) / pip if position_type == "BUY" else (current_sl - ask) / pip
+            retest = live_dist <= retest_window_pips
 
         if retest:
             state["retest_count"] += 1
-            logger.debug("Retest detected for ticket %d (count: %d)", ticket, state["retest_count"])
+            logger.debug("Retest detected for ticket %d (count: %d, bounce=%.1fp)",
+                         ticket, state["retest_count"], bounce_pips)
             return True
 
         return False
