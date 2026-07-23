@@ -113,6 +113,14 @@ class TradeRecord:
     exit_displacement: str = ""
     exit_phase: str = ""
     exit_thesis: str = ""
+    # Who closed it: "engine" (a gate fired) or "broker" (TP/SL/stop-out hit).
+    # Broker closes have no gate; without this they were absent from the log
+    # entirely, which silently censored every TP winner out of the sample.
+    exit_source: str = "engine"
+    # Realized money. pips_profit alone is not comparable across trades once
+    # position size varies, and it is not comparable at all across symbols.
+    volume: float = 0.0
+    profit_usd: float = 0.0
 
 
 class TradeAnalytics:
@@ -220,9 +228,21 @@ class TradeAnalytics:
         pips_profit: float,
         exit_reason: str,
         snapshot: EngineSnapshot,
+        exit_time: str | None = None,
+        profit_usd: float | None = None,
+        volume: float | None = None,
+        exit_source: str = "engine",
     ) -> None:
-        """Complete the record with exit criteria + engine state at the cut."""
+        """Complete the record with exit criteria + engine state at the cut.
+
+        exit_time/profit_usd/volume/exit_source are optional so existing callers
+        keep working. Pass them from the broker-close detector so TP/SL exits land
+        in the log with the real deal time and realized money, not just pips.
+        """
         if ticket not in self._active_trades:
+            # Already completed (the engine-close path records and deletes before
+            # the position-closed detector sees the ticket vanish), or never opened
+            # by us (adopted / manual trade). Either way there is nothing to finish.
             return
         record = self._active_trades[ticket]
         th = getattr(snapshot, "trade_health", None)
@@ -230,11 +250,16 @@ class TradeAnalytics:
         v = getattr(snapshot, "velocity", None)
         d = getattr(snapshot, "displacement", None)
 
-        record.exit_time = datetime.now().isoformat()
+        record.exit_time = exit_time or datetime.now().isoformat()
         record.exit_price = exit_price
         record.pips_profit = round(float(pips_profit), 2)
         record.exit_reason = exit_reason
         record.exit_gate = _classify_gate(exit_reason)
+        record.exit_source = exit_source
+        if profit_usd is not None:
+            record.profit_usd = round(float(profit_usd), 2)
+        if volume is not None:
+            record.volume = round(float(volume), 2)
         record.r_multiple = round(pips_profit / record.initial_sl_pips, 2) if record.initial_sl_pips else 0.0
         record.max_favorable_excursion = round(float(_g(th, "max_favorable_excursion", 0.0)), 1)
         record.max_adverse_excursion = round(float(

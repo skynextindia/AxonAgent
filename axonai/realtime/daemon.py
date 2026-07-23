@@ -3069,6 +3069,27 @@ class AxonDaemon:
                     profit = (entry_price - exit_price) * volume * 100000
             logger.info(f"[PROFIT_CALC] Ticket {ticket}: {direction} entry={entry_price} exit={exit_price} -> profit={profit:.2f} pips={pips:.1f}")
 
+            # Complete the analytics record for BROKER-side closes (TP / SL / stop-out).
+            # The engine-close paths call record_exit themselves and delete the record,
+            # so this is a no-op for those and cannot double-write; likewise for adopted
+            # or manually-opened tickets we never recorded an entry for. It only fires
+            # when the broker closed the position and no exit gate ran.
+            #
+            # Without this, trade_analytics.jsonl held engine-cut trades ONLY, which made
+            # it a censored sample: every position that ran all the way to its take-profit
+            # was missing. On 2026-07-23 that hid 2 of 14 trades worth +386.76 USD, 73% of
+            # the day's P&L, and produced the false reading of "0 TP hits in 109 trades".
+            # Runs before clear_trade() below so trade_health still carries the trade's MFE.
+            try:
+                self.trade_analytics.record_exit(
+                    ticket, exit_price, pips, reason, self._last_snapshot,
+                    exit_time=exit_time_str.replace(" ", "T"),
+                    profit_usd=profit, volume=volume, exit_source="broker",
+                )
+            except Exception as _ta_err:
+                logger.warning("trade_analytics.record_exit failed for broker close %d: %s",
+                               ticket, _ta_err)
+
             # Outcome from pips when we have a direction; otherwise fall back to the
             # broker's realized profit so a real loss is never mislabelled BREAKEVEN.
             if pips != 0.0:
