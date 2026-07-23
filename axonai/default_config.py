@@ -346,3 +346,21 @@ def signal_quality_for(symbol: str) -> float:
         if key in s:
             return val
     return SIGNAL_QUALITY_DEFAULT
+
+
+# ── Strategy version stamp ─────────────────────────────────────────────────
+# Every trade carries the version of the entry logic + active experiment flags
+# that produced it, so later analysis never has to infer which configuration was
+# live. Bump STRATEGY_VERSION_BASE when the entry CODE changes; the flag suffix
+# is derived automatically, so flipping a phase flag (room / regime / be_lock)
+# moves trades onto a new, distinguishable version with no manual edit.
+STRATEGY_VERSION_BASE = "entry_v5.1"
+
+
+def strategy_version(config: dict | None = None) -> str:
+    """Version fingerprint of the live entry configuration, for trade tagging."""
+    c = config or {}
+    room = 1 if float(c.get("entry_min_room_pips", 0.0) or 0.0) > 0 else 0
+    regime = 1 if (c.get("entry_avoid_regimes") or []) else 0
+    belock = 1 if c.get("be_lock_enabled", False) else 0
+    return f"{STRATEGY_VERSION_BASE}_room{room}_regime{regime}_belock{belock}"

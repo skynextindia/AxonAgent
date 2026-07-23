@@ -80,8 +80,13 @@ class AxonDaemon:
         # Per-symbol confluence-score floor (live == backtest selectivity).
         # Single source of truth: default_config.signal_quality_for. Overrides
         # the flat DEFAULT so each pair uses its tuned floor.
-        from axonai.default_config import signal_quality_for
+        from axonai.default_config import signal_quality_for, strategy_version
         config["realtime_min_signal_quality"] = signal_quality_for(clean_sym)
+        # Version fingerprint of this run's entry logic + active experiment flags,
+        # stamped on every trade so later analysis can attribute each fill to a
+        # configuration without inference. Constant per process (flags change only
+        # on restart).
+        self._strategy_version = strategy_version(config)
         logger.info("Signal-quality floor for %s: %.2f", self.mt5_symbol, config["realtime_min_signal_quality"])
         # Ensure the per-symbol velocity-baseline file is keyed correctly on every
         # entrypoint (the `daemon` CLI path doesn't set config["symbol"]); prevents
@@ -1859,6 +1864,7 @@ class AxonDaemon:
                             snapshot.price, trade_result.get("sl"), trade_result.get("tp"), snapshot,
                             spread_pips=(getattr(_entry_ws, "spread_pips", None) if _entry_ws else None),
                             fill_price=trade_result.get("price"),
+                            strategy_version=self._strategy_version,
                         )
                 except Exception as ex_err:
                     logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
@@ -2021,6 +2027,7 @@ class AxonDaemon:
                                 snapshot.price, trade_result.get("sl"), trade_result.get("tp"), snapshot,
                                 spread_pips=(getattr(_entry_ws, "spread_pips", None) if _entry_ws else None),
                                 fill_price=trade_result.get("price"),
+                                strategy_version=self._strategy_version,
                             )
                     except Exception as ex_err:
                         logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)

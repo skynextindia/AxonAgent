@@ -121,6 +121,10 @@ class TradeRecord:
     # position size varies, and it is not comparable at all across symbols.
     volume: float = 0.0
     profit_usd: float = 0.0
+    # Version of the entry logic + active experiment flags that produced this
+    # trade (see default_config.strategy_version). Lets later analysis attribute
+    # each fill to a configuration directly instead of inferring it.
+    strategy_version: str = ""
 
 
 class TradeAnalytics:
@@ -144,6 +148,7 @@ class TradeAnalytics:
         entry_style: str = "",
         spread_pips: float | None = None,
         fill_price: float | None = None,
+        strategy_version: str = "",
     ) -> None:
         """Create a trade record capturing the full entry decision.
 
@@ -176,6 +181,7 @@ class TradeAnalytics:
             nearest_support=float(_g(sup, "price", 0.0)),
             nearest_resistance=float(_g(res, "price", 0.0)),
         )
+        record.strategy_version = strategy_version
         # Reversal signature (velocity) — the field set our analysis proved matters
         record.vel_pct = round(float(_g(v, "percentile", 0.0)), 2)
         record.vel_tick_eff = round(float(_g(v, "tick_efficiency", 0.0)), 3)
