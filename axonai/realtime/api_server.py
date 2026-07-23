@@ -1181,10 +1181,20 @@ class DashboardServer:
         if sym:
             sym = sym.replace("=X", "").replace("=x", "").upper()
           # If no symbol specified, broadcast to all
+        # FAN-OUT: which clients receive the message. Ticks stay global so a client
+        # that has not sent a subscription still gets price updates.
         is_global = msg_type in ["account", "news_data", "system_log", "tick"] or not sym
 
+        # HISTORY ROUTING is a separate question, and conflating the two was a bug.
+        # A tick belongs to exactly one symbol and _new_symbol_history() reserves a
+        # "tick" slot for it, but routing it to the shared history meant every
+        # symbol's ticks overwrote each other and a newly connected client hydrated
+        # with whichever symbol happened to tick last. Only genuinely symbol-less
+        # messages belong in the shared history.
+        history_is_global = msg_type in ["account", "news_data", "system_log"] or not sym
+
         # Choose history dict and corresponding lock to update
-        if is_global:
+        if history_is_global:
             hist_ref = self.history
             lock = self._lock
         else:

@@ -1545,13 +1545,22 @@ class AxonDaemon:
             })
 
             if self.config.get("latency_instrumentation_enabled", False):
+                # A slow tick is a performance signal, not a failure: nothing errored,
+                # the tick still completed. Logging it at ERROR meant a routine
+                # broadcast spike (typically ~13ms, almost all in broadcast) buried
+                # genuine ERRORs and coloured monitoring red. Downgraded to WARNING and
+                # throttled to once per window so a sustained-load burst is one line,
+                # not one per tick across five symbols.
                 if _tot_ms > 10.0:
-                    logger.error(
-                        f"on_tick exceeded budget: {_tot_ms:.1f}ms "
-                        f"(reversal={_rev_ms:.1f}ms, broadcast={_brd_ms:.1f}ms)"
-                    )
+                    now_mono = time.monotonic()
+                    if now_mono - getattr(self, "_last_budget_warn_mono", 0.0) >= 5.0:
+                        self._last_budget_warn_mono = now_mono
+                        logger.warning(
+                            f"on_tick over budget: {_tot_ms:.1f}ms "
+                            f"(reversal={_rev_ms:.1f}ms, broadcast={_brd_ms:.1f}ms); "
+                            f"throttled to 1/5s")
                 elif _tot_ms > 5.0:
-                    logger.warning(f"on_tick slow: {_tot_ms:.1f}ms")
+                    logger.debug(f"on_tick slow: {_tot_ms:.1f}ms")
 
             # Throttle heavier updates to once every 5 ticks
             if self.tick_engine._tick_count % 5 == 1:
@@ -1937,7 +1946,11 @@ class AxonDaemon:
                         # Surface portfolio-guard rejections on the dashboard events log
                         if trade_result and not trade_result.get("success", True) and str(trade_result.get("reason", "")).startswith("portfolio"):
                             try:
-                                from axonai.realtime.api_server import get_dashboard
+                                # No local import here: rebinding the name inside this
+                                # function makes `get_dashboard` a local for the WHOLE
+                                # function body, so the earlier uses at the top of the
+                                # event loop raised UnboundLocalError before this line
+                                # ever ran. Module-level import at the top of the file.
                                 _db = get_dashboard()
                                 if _db:
                                     _db.broadcast({
