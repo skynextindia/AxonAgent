@@ -144,6 +144,7 @@ class EntryStateMachine:
         spread: float = 0.0,
         candle_setup_active: bool = False,
         candle_setup_direction: Optional[str] = None,
+        candle_setup_level: float = 0.0,
     ) -> EntryDecision:
         """Evaluate conditions and transition states."""
         # Smooth spread over 3-5 ticks
@@ -175,8 +176,9 @@ class EntryStateMachine:
                 price, ts, velocity, displacement, liquidity, regime,
                 candle_setup_active=candle_setup_active,
                 candle_setup_direction=candle_setup_direction,
+                candle_setup_level=candle_setup_level,
             )
-            
+
         elif self._current_state == STATE_ANOMALY:
             self._evaluate_anomaly(price, ts, velocity, displacement)
             
@@ -331,6 +333,7 @@ class EntryStateMachine:
         disp: DisplacementState, liq: LiquidityState, regime: RegimeState,
         candle_setup_active: bool = False,
         candle_setup_direction: Optional[str] = None,
+        candle_setup_level: float = 0.0,
     ) -> None:
         """Look for the initial anomaly (Microstructure Peak).
 
@@ -396,7 +399,13 @@ class EntryStateMachine:
 
         if (is_climax or is_sweep) and direction:
             self._anomaly_time = ts
-            self._anomaly_price = price
+            # Anchor to the S/R level the candle setup formed at, not to whatever
+            # tick price happened to be current when the setup was first seen.
+            # `dist` in _evaluate_arming and _evaluate_retest_wait is measured off
+            # this, so anchoring it to an arbitrary tick made the breakaway and
+            # retest checks reference a level that was never structurally
+            # meaningful. Falls back to `price` when no level is available.
+            self._anomaly_price = candle_setup_level if candle_setup_level > 0.0 else price
             self._anomaly_direction = direction
             self._anomaly_type = "sweep" if is_sweep else "climax"
             self._max_adverse_excursion = 0.0
@@ -456,7 +465,17 @@ class EntryStateMachine:
         # If tick velocity is clearly decaying (momentum exhaustion at the peak),
         # trigger immediately at the wick extreme — don't wait for a full breakaway.
         # This is the "sniper entry" — entering right at the inflection point.
-        if vel is not None:
+        # Gated by config, DISABLED by default 2026-07-23. This path never reads
+        # `dist` — no breakaway, no location check, no retest — so it entered at
+        # whatever price the tick happened to be at. Measured over 3,919 trigger
+        # events across four FX pairs, 98-99% of all entries came straight from
+        # ARMING rather than through RETEST_WAIT (only 57 total, 1.5%, were real
+        # retests), and this path is the reason. Its gate is also not independent
+        # of `strong_reversal` below: `is_decaying and decay<0.5` fires at
+        # byte-identical frequency to `disp_class == EXHAUSTION` on every symbol
+        # (EUR 10.3%, GBP 20.1%, AUD 7.6%, JPY 11.9%), so the two "confirmations"
+        # are one event. Set entry_enable_optimistic_decay_trigger=True to restore.
+        if vel is not None and self._config.get("entry_enable_optimistic_decay_trigger", False):
             decay = getattr(vel, "decay_ratio", 1.0) or 1.0
             is_decaying = getattr(vel, "is_decaying", False)
             if is_decaying and decay < 0.5:
@@ -480,9 +499,20 @@ class EntryStateMachine:
         is_trigger = False
         # Dynamic spread-aware trigger: max(0.5, 1.5 * smoothed_spread)
         trigger_pips = max(0.5, 1.5 * self._smoothed_spread_pips)
-        if self._anomaly_direction == "SELL" and dist < -trigger_pips and is_impulse:
+        # Requiring `is_impulse` here forced the trigger to wait until the move was
+        # actively impulsive — i.e. maximally extended — before entering. Measured
+        # over 49 matched FX trades: BUYs filled at median range_pos 0.60 and SELLs
+        # at 0.27, buying tops and selling bottoms, with the extreme cohort showing
+        # avgMFE 2.1p vs 3.2p for the rest. A plain breakaway is still routed through
+        # RETEST_WAIT below (which requires price to travel away and then come back
+        # toward the level), so dropping this requirement improves fill location
+        # rather than loosening the gate. Set entry_require_impulse_trigger=True to
+        # restore the previous behaviour.
+        require_impulse = self._config.get("entry_require_impulse_trigger", False)
+        impulse_ok = is_impulse or not require_impulse
+        if self._anomaly_direction == "SELL" and dist < -trigger_pips and impulse_ok:
             is_trigger = True
-        elif self._anomaly_direction == "BUY" and dist > trigger_pips and is_impulse:
+        elif self._anomaly_direction == "BUY" and dist > trigger_pips and impulse_ok:
             is_trigger = True
 
         # Displacement-flip detector: net displacement flipping toward our
@@ -511,7 +541,14 @@ class EntryStateMachine:
             if (ts - self._arm_start_time) < self._min_stall_duration:
                 logger.debug("EntryARMING: Stall delay active on standard trigger. Spent %.1fs / %.1fs", ts - self._arm_start_time, self._min_stall_duration)
                 return
-            if strong_reversal or not self._require_retest_confirm:
+            # `strong_reversal` used to short-circuit straight to TRIGGERED here.
+            # It is true on EXHAUSTION, which is the SAME event as the optimistic
+            # decay gate above, so it was the second of the two bypasses that kept
+            # 98-99% of entries out of RETEST_WAIT. A reversal tell at the level is
+            # a reason to WAIT for the retest, not to skip it — the pull-away /
+            # come-back check in _evaluate_retest_wait is what distinguishes a
+            # genuine retest from a stall part-way down the initial impulse.
+            if not self._require_retest_confirm:
                 self._transition(STATE_TRIGGERED, f"Reversal inflection confirmed ({disp.classification}, flip={flip_favorable}). Trigger.")
             else:
                 self._retest_start_time = ts

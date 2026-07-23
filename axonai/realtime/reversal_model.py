@@ -414,6 +414,7 @@ class ReversalModel:
             spread=spread,
             candle_setup_active=self.candle_setup.setup_active,
             candle_setup_direction=self.candle_setup.setup_direction,
+            candle_setup_level=self.candle_setup.setup_level,
         )
 
         # Snapshot the candle setup that ARMS the machine. The M15 setup often

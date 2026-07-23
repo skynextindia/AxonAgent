@@ -129,6 +129,16 @@ class CandleSetupTracker:
         return self._active.direction if self._active else None
 
     @property
+    def setup_level(self) -> float:
+        """The S/R level this setup formed at — the level a retest must test.
+
+        Was populated but never read outside this module, so EntryStateMachine
+        anchored its retest to whatever tick price happened to be current when
+        the setup was first observed. 0.0 means no level (caller falls back).
+        """
+        return self._active.confirmed_level if self._active else 0.0
+
+    @property
     def setup_score(self) -> float:
         return self._active.score if self._active else 0.0
 
@@ -404,6 +414,11 @@ class CandleSetupTracker:
                 self._active.reason = reason
                 self._active.source = source
                 self._active.expiry = expiry  # refresh expiry
+                # Keep the level consistent with the pattern now being described.
+                # reason/source are overwritten above, so leaving the old level
+                # here would report pattern B while still pointing at pattern A's
+                # level — and EntryStateMachine now anchors its retest to it.
+                self._active.confirmed_level = level
                 logger.info(
                     "CandleSetupTracker: Setup upgraded → %s score=%.2f (%s)",
                     direction, score, reason
