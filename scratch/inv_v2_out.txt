@@ -1,0 +1,796 @@
+﻿{
+ "files": [
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_AUDUSD.csv",
+   "symbol": "AUDUSD",
+   "rows": 58052,
+   "header_width": 41,
+   "row_widths": {
+    "41": 58052
+   },
+   "first_ts": "2026-07-17 19:45:46",
+   "last_ts": "2026-07-18 21:32:52",
+   "min_ts": "2026-07-17 19:45:46",
+   "max_ts": "2026-07-18 21:32:52",
+   "schema_ok": true,
+   "entry_state_valid": 58052,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 57997,
+   "naive_entry_state_index": 29
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_AUDUSD_old_1784313601.csv",
+   "symbol": "AUDUSD",
+   "rows": 32479,
+   "header_width": 39,
+   "row_widths": {
+    "39": 32479
+   },
+   "first_ts": "2026-07-16 07:24:11",
+   "last_ts": "2026-07-17 19:44:20",
+   "min_ts": "2026-07-16 07:24:11",
+   "max_ts": "2026-07-17 19:44:20",
+   "schema_ok": true,
+   "entry_state_valid": 32479,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 32448,
+   "naive_entry_state_index": 29
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_AUDUSD_pre_location.csv",
+   "symbol": "AUDUSD",
+   "rows": 82200,
+   "header_width": 25,
+   "row_widths": {
+    "25": 25386,
+    "33": 56814
+   },
+   "first_ts": "2026-07-09 20:57:08",
+   "last_ts": "2026-07-16 07:23:51",
+   "min_ts": "2026-07-09 20:57:08",
+   "max_ts": "2026-07-16 07:23:51",
+   "schema_ok": false,
+   "entry_state_valid": 82200,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 82131,
+   "naive_entry_state_index": 21
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_EURUSD.csv",
+   "symbol": "EURUSD",
+   "rows": 58125,
+   "header_width": 41,
+   "row_widths": {
+    "41": 58125
+   },
+   "first_ts": "2026-07-17 19:45:53",
+   "last_ts": "2026-07-18 21:32:52",
+   "min_ts": "2026-07-17 19:45:53",
+   "max_ts": "2026-07-18 21:32:52",
+   "schema_ok": true,
+   "entry_state_valid": 58125,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 58060,
+   "naive_entry_state_index": 29
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_EURUSD_old_1784313600.csv",
+   "symbol": "EURUSD",
+   "rows": 38499,
+   "header_width": 39,
+   "row_widths": {
+    "39": 38499
+   },
+   "first_ts": "2026-07-16 07:24:04",
+   "last_ts": "2026-07-17 19:44:23",
+   "min_ts": "2026-07-16 07:24:04",
+   "max_ts": "2026-07-17 19:44:23",
+   "schema_ok": true,
+   "entry_state_valid": 38499,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 38482,
+   "naive_entry_state_index": 29
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_EURUSD_pre_location.csv",
+   "symbol": "EURUSD",
+   "rows": 115506,
+   "header_width": 25,
+   "row_widths": {
+    "25": 36846,
+    "33": 78660
+   },
+   "first_ts": "2026-07-09 20:57:01",
+   "last_ts": "2026-07-16 07:23:54",
+   "min_ts": "2026-07-09 20:57:01",
+   "max_ts": "2026-07-16 07:23:54",
+   "schema_ok": false,
+   "entry_state_valid": 115506,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 115400,
+   "naive_entry_state_index": 21
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_GBPUSD.csv",
+   "symbol": "GBPUSD",
+   "rows": 59522,
+   "header_width": 41,
+   "row_widths": {
+    "41": 59522
+   },
+   "first_ts": "2026-07-17 19:45:43",
+   "last_ts": "2026-07-18 21:32:53",
+   "min_ts": "2026-07-17 19:45:43",
+   "max_ts": "2026-07-18 21:32:53",
+   "schema_ok": true,
+   "entry_state_valid": 59522,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 59470,
+   "naive_entry_state_index": 29
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_GBPUSD_old_1784313601.csv",
+   "symbol": "GBPUSD",
+   "rows": 60180,
+   "header_width": 39,
+   "row_widths": {
+    "39": 60180
+   },
+   "first_ts": "2026-07-16 07:24:10",
+   "last_ts": "2026-07-17 19:44:20",
+   "min_ts": "2026-07-16 07:24:10",
+   "max_ts": "2026-07-17 19:44:20",
+   "schema_ok": true,
+   "entry_state_valid": 60180,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 60126,
+   "naive_entry_state_index": 29
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_GBPUSD_pre_location.csv",
+   "symbol": "GBPUSD",
+   "rows": 163209,
+   "header_width": 25,
+   "row_widths": {
+    "25": 49783,
+    "33": 113426
+   },
+   "first_ts": "2026-07-09 20:57:02",
+   "last_ts": "2026-07-16 07:23:54",
+   "min_ts": "2026-07-09 20:57:02",
+   "max_ts": "2026-07-16 07:23:54",
+   "schema_ok": false,
+   "entry_state_valid": 163209,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 163053,
+   "naive_entry_state_index": 21
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_USDJPY.csv",
+   "symbol": "USDJPY",
+   "rows": 58457,
+   "header_width": 41,
+   "row_widths": {
+    "41": 58457
+   },
+   "first_ts": "2026-07-17 19:45:51",
+   "last_ts": "2026-07-18 21:32:52",
+   "min_ts": "2026-07-17 19:45:51",
+   "max_ts": "2026-07-18 21:32:52",
+   "schema_ok": true,
+   "entry_state_valid": 58457,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 58400,
+   "naive_entry_state_index": 29
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_USDJPY_old_1784313600.csv",
+   "symbol": "USDJPY",
+   "rows": 36903,
+   "header_width": 39,
+   "row_widths": {
+    "39": 36903
+   },
+   "first_ts": "2026-07-16 07:24:11",
+   "last_ts": "2026-07-17 19:44:20",
+   "min_ts": "2026-07-16 07:24:11",
+   "max_ts": "2026-07-17 19:44:20",
+   "schema_ok": true,
+   "entry_state_valid": 36903,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 36868,
+   "naive_entry_state_index": 29
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_USDJPY_pre_location.csv",
+   "symbol": "USDJPY",
+   "rows": 119329,
+   "header_width": 25,
+   "row_widths": {
+    "25": 43861,
+    "33": 75468
+   },
+   "first_ts": "2026-07-09 20:57:57",
+   "last_ts": "2026-07-16 07:23:54",
+   "min_ts": "2026-07-09 20:57:57",
+   "max_ts": "2026-07-16 07:23:54",
+   "schema_ok": false,
+   "entry_state_valid": 119329,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 119225,
+   "naive_entry_state_index": 21
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_XAUUSD.csv",
+   "symbol": "XAUUSD",
+   "rows": 64746,
+   "header_width": 41,
+   "row_widths": {
+    "41": 64746
+   },
+   "first_ts": "2026-07-17 19:45:48",
+   "last_ts": "2026-07-18 21:32:53",
+   "min_ts": "2026-07-17 19:45:48",
+   "max_ts": "2026-07-18 21:32:53",
+   "schema_ok": true,
+   "entry_state_valid": 64746,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 64683,
+   "naive_entry_state_index": 29
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_XAUUSD_old_1784313605.csv",
+   "symbol": "XAUUSD",
+   "rows": 345928,
+   "header_width": 39,
+   "row_widths": {
+    "39": 345928
+   },
+   "first_ts": "2026-07-16 07:24:12",
+   "last_ts": "2026-07-17 19:44:23",
+   "min_ts": "2026-07-16 07:24:12",
+   "max_ts": "2026-07-17 19:44:23",
+   "schema_ok": true,
+   "entry_state_valid": 345928,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 345620,
+   "naive_entry_state_index": 29
+  },
+  {
+   "path": "D:/AXON.AI/AxonAgent-Agy/reports/engine_snapshots_XAUUSD_pre_location.csv",
+   "symbol": "XAUUSD",
+   "rows": 698375,
+   "header_width": 25,
+   "row_widths": {
+    "25": 214740,
+    "33": 483635
+   },
+   "first_ts": "2026-07-09 20:57:09",
+   "last_ts": "2026-07-16 07:23:55",
+   "min_ts": "2026-07-09 20:57:09",
+   "max_ts": "2026-07-16 07:23:55",
+   "schema_ok": false,
+   "entry_state_valid": 698375,
+   "entry_state_numeric": 0,
+   "entry_state_other": 0,
+   "bad_ts": 0,
+   "bad_price": 0,
+   "backward_time_jumps": 0,
+   "subsecond_rows": 697779,
+   "naive_entry_state_index": 21
+  }
+ ],
+ "symbols": {
+  "AUDUSD": {
+   "files": 3,
+   "raw_rows": 172731,
+   "distinct_subsecond_ticks": 172672,
+   "distinct_second_epochs": 143817,
+   "duplicate_second_collisions": 28914,
+   "first": "2026-07-09 20:57:08",
+   "last": "2026-07-18 21:32:52",
+   "span_days": 9.02,
+   "m15_bars": 452,
+   "coverage_pct": 52.1,
+   "gaps_gt_5min": 16,
+   "gaps_gt_1h": 9,
+   "top_gaps": [
+    [
+     "2026-07-10 21:46:12",
+     "2026-07-13 06:40:21",
+     56.9
+    ],
+    [
+     "2026-07-13 20:59:57",
+     "2026-07-14 07:20:00",
+     10.33
+    ],
+    [
+     "2026-07-09 20:59:46",
+     "2026-07-10 06:55:29",
+     9.93
+    ],
+    [
+     "2026-07-14 19:52:26",
+     "2026-07-15 05:46:23",
+     9.9
+    ],
+    [
+     "2026-07-17 07:00:33",
+     "2026-07-17 12:23:11",
+     5.38
+    ],
+    [
+     "2026-07-18 04:46:24",
+     "2026-07-18 10:05:25",
+     5.32
+    ],
+    [
+     "2026-07-17 20:57:56",
+     "2026-07-18 00:00:00",
+     3.03
+    ],
+    [
+     "2026-07-10 19:06:37",
+     "2026-07-10 21:46:06",
+     2.66
+    ],
+    [
+     "2026-07-15 13:23:37",
+     "2026-07-15 15:03:49",
+     1.67
+    ],
+    [
+     "2026-07-15 11:59:33",
+     "2026-07-15 12:54:12",
+     0.91
+    ]
+   ],
+   "weekend_second_epochs": 50544,
+   "weekend_m15_bars": 67,
+   "weekend_first": "2026-07-18 00:00:00",
+   "weekend_last": "2026-07-18 21:30:00",
+   "spacing_hist": {
+    "1": 81196,
+    "2": 26206,
+    "3": 10643,
+    "4": 6724,
+    ">10s": 5565,
+    "5": 4373,
+    "6": 3122,
+    "7": 2151
+   },
+   "pip_step_hist": {
+    "0.1": 62408,
+    "0.0": 41670,
+    "0.2": 28415,
+    "0.3": 8168,
+    "0.4": 1868,
+    "0.5": 578,
+    "0.6": 324,
+    "0.7": 163
+   },
+   "zero_move_ticks": 41670
+  },
+  "EURUSD": {
+   "files": 3,
+   "raw_rows": 212130,
+   "distinct_subsecond_ticks": 211964,
+   "distinct_second_epochs": 160145,
+   "duplicate_second_collisions": 51985,
+   "first": "2026-07-09 20:57:01",
+   "last": "2026-07-18 21:32:52",
+   "span_days": 9.02,
+   "m15_bars": 453,
+   "coverage_pct": 52.2,
+   "gaps_gt_5min": 15,
+   "gaps_gt_1h": 9,
+   "top_gaps": [
+    [
+     "2026-07-10 21:46:11",
+     "2026-07-13 06:40:13",
+     56.9
+    ],
+    [
+     "2026-07-13 21:04:00",
+     "2026-07-14 07:19:59",
+     10.27
+    ],
+    [
+     "2026-07-09 20:59:46",
+     "2026-07-10 06:55:22",
+     9.93
+    ],
+    [
+     "2026-07-14 19:52:25",
+     "2026-07-15 05:46:20",
+     9.9
+    ],
+    [
+     "2026-07-17 07:00:32",
+     "2026-07-17 12:23:11",
+     5.38
+    ],
+    [
+     "2026-07-18 04:46:23",
+     "2026-07-18 10:05:19",
+     5.32
+    ],
+    [
+     "2026-07-17 20:58:57",
+     "2026-07-18 00:00:00",
+     3.02
+    ],
+    [
+     "2026-07-10 19:06:37",
+     "2026-07-10 21:46:00",
+     2.66
+    ],
+    [
+     "2026-07-15 13:23:42",
+     "2026-07-15 15:03:47",
+     1.67
+    ],
+    [
+     "2026-07-15 11:59:41",
+     "2026-07-15 12:54:04",
+     0.91
+    ]
+   ],
+   "weekend_second_epochs": 50626,
+   "weekend_m15_bars": 67,
+   "weekend_first": "2026-07-18 00:00:00",
+   "weekend_last": "2026-07-18 21:30:00",
+   "spacing_hist": {
+    "1": 94850,
+    "2": 30961,
+    "3": 11399,
+    "4": 6417,
+    ">10s": 4898,
+    "5": 4054,
+    "6": 2660,
+    "7": 1807
+   },
+   "pip_step_hist": {
+    "0.1": 88640,
+    "0.2": 33984,
+    "0.0": 22229,
+    "0.3": 7763,
+    "0.4": 3450,
+    "0.5": 1795,
+    "0.6": 914,
+    "0.7": 526
+   },
+   "zero_move_ticks": 22229
+  },
+  "GBPUSD": {
+   "files": 3,
+   "raw_rows": 282911,
+   "distinct_subsecond_ticks": 282495,
+   "distinct_second_epochs": 203631,
+   "duplicate_second_collisions": 79280,
+   "first": "2026-07-09 20:57:02",
+   "last": "2026-07-18 21:32:53",
+   "span_days": 9.02,
+   "m15_bars": 453,
+   "coverage_pct": 52.2,
+   "gaps_gt_5min": 15,
+   "gaps_gt_1h": 9,
+   "top_gaps": [
+    [
+     "2026-07-10 21:46:11",
+     "2026-07-13 06:40:15",
+     56.9
+    ],
+    [
+     "2026-07-13 21:04:27",
+     "2026-07-14 07:19:59",
+     10.26
+    ],
+    [
+     "2026-07-09 20:59:46",
+     "2026-07-10 06:55:23",
+     9.93
+    ],
+    [
+     "2026-07-14 19:52:25",
+     "2026-07-15 05:46:19",
+     9.9
+    ],
+    [
+     "2026-07-17 07:00:33",
+     "2026-07-17 12:23:11",
+     5.38
+    ],
+    [
+     "2026-07-18 04:46:24",
+     "2026-07-18 10:05:21",
+     5.32
+    ],
+    [
+     "2026-07-17 20:58:55",
+     "2026-07-18 00:00:00",
+     3.02
+    ],
+    [
+     "2026-07-10 19:06:40",
+     "2026-07-10 21:46:03",
+     2.66
+    ],
+    [
+     "2026-07-15 13:23:41",
+     "2026-07-15 15:03:45",
+     1.67
+    ],
+    [
+     "2026-07-15 11:59:42",
+     "2026-07-15 12:54:06",
+     0.91
+    ]
+   ],
+   "weekend_second_epochs": 50586,
+   "weekend_m15_bars": 67,
+   "weekend_first": "2026-07-18 00:00:00",
+   "weekend_last": "2026-07-18 21:30:00",
+   "spacing_hist": {
+    "1": 133020,
+    "2": 40377,
+    "3": 13627,
+    "4": 6126,
+    "5": 3123,
+    ">10s": 2962,
+    "6": 1721,
+    "7": 1110
+   },
+   "pip_step_hist": {
+    "0.1": 72805,
+    "0.0": 43700,
+    "0.2": 34880,
+    "0.3": 30344,
+    "0.4": 9859,
+    "0.6": 3667,
+    "0.7": 2780,
+    "0.5": 2431
+   },
+   "zero_move_ticks": 43700
+  },
+  "USDJPY": {
+   "files": 3,
+   "raw_rows": 214689,
+   "distinct_subsecond_ticks": 214234,
+   "distinct_second_epochs": 163754,
+   "duplicate_second_collisions": 50935,
+   "first": "2026-07-09 20:57:57",
+   "last": "2026-07-18 21:32:52",
+   "span_days": 9.02,
+   "m15_bars": 452,
+   "coverage_pct": 52.1,
+   "gaps_gt_5min": 16,
+   "gaps_gt_1h": 9,
+   "top_gaps": [
+    [
+     "2026-07-10 21:46:12",
+     "2026-07-13 06:40:19",
+     56.9
+    ],
+    [
+     "2026-07-13 20:59:54",
+     "2026-07-14 07:19:59",
+     10.33
+    ],
+    [
+     "2026-07-09 20:59:43",
+     "2026-07-10 06:55:27",
+     9.93
+    ],
+    [
+     "2026-07-14 19:52:25",
+     "2026-07-15 05:46:22",
+     9.9
+    ],
+    [
+     "2026-07-17 07:00:32",
+     "2026-07-17 12:23:11",
+     5.38
+    ],
+    [
+     "2026-07-18 04:46:24",
+     "2026-07-18 10:05:24",
+     5.32
+    ],
+    [
+     "2026-07-17 20:58:57",
+     "2026-07-18 00:00:00",
+     3.02
+    ],
+    [
+     "2026-07-10 19:06:31",
+     "2026-07-10 21:46:04",
+     2.66
+    ],
+    [
+     "2026-07-15 13:23:40",
+     "2026-07-15 15:03:47",
+     1.67
+    ],
+    [
+     "2026-07-15 11:59:31",
+     "2026-07-15 12:54:08",
+     0.91
+    ]
+   ],
+   "weekend_second_epochs": 50696,
+   "weekend_m15_bars": 67,
+   "weekend_first": "2026-07-18 00:00:00",
+   "weekend_last": "2026-07-18 21:30:00",
+   "spacing_hist": {
+    "1": 98800,
+    "2": 30817,
+    "3": 11550,
+    "4": 6558,
+    ">10s": 4760,
+    "5": 3945,
+    "6": 2523,
+    "7": 1754
+   },
+   "pip_step_hist": {
+    "0.1": 95629,
+    "0.2": 24894,
+    "0.0": 21702,
+    "0.3": 11992,
+    "0.4": 3267,
+    "0.5": 2064,
+    "0.6": 1296,
+    "0.7": 908
+   },
+   "zero_move_ticks": 21702
+  },
+  "XAUUSD": {
+   "files": 3,
+   "raw_rows": 1109049,
+   "distinct_subsecond_ticks": 1100956,
+   "distinct_second_epochs": 312795,
+   "duplicate_second_collisions": 796254,
+   "first": "2026-07-09 20:57:09",
+   "last": "2026-07-18 21:32:53",
+   "span_days": 9.02,
+   "m15_bars": 443,
+   "coverage_pct": 51.1,
+   "gaps_gt_5min": 16,
+   "gaps_gt_1h": 10,
+   "top_gaps": [
+    [
+     "2026-07-10 19:06:44",
+     "2026-07-13 06:40:21",
+     59.56
+    ],
+    [
+     "2026-07-13 20:57:59",
+     "2026-07-14 07:20:04",
+     10.37
+    ],
+    [
+     "2026-07-09 20:57:59",
+     "2026-07-10 06:55:31",
+     9.96
+    ],
+    [
+     "2026-07-14 19:52:26",
+     "2026-07-15 05:46:25",
+     9.9
+    ],
+    [
+     "2026-07-17 07:00:33",
+     "2026-07-17 12:23:11",
+     5.38
+    ],
+    [
+     "2026-07-18 04:46:24",
+     "2026-07-18 10:05:27",
+     5.32
+    ],
+    [
+     "2026-07-17 20:57:58",
+     "2026-07-18 00:00:00",
+     3.03
+    ],
+    [
+     "2026-07-15 13:23:42",
+     "2026-07-15 15:03:51",
+     1.67
+    ],
+    [
+     "2026-07-15 20:57:53",
+     "2026-07-15 22:00:31",
+     1.04
+    ],
+    [
+     "2026-07-16 20:57:59",
+     "2026-07-16 22:00:30",
+     1.04
+    ]
+   ],
+   "weekend_second_epochs": 50640,
+   "weekend_m15_bars": 67,
+   "weekend_first": "2026-07-18 00:00:00",
+   "weekend_last": "2026-07-18 21:30:00",
+   "spacing_hist": {
+    "1": 284188,
+    "2": 25273,
+    ">10s": 1714,
+    "3": 1182,
+    "4": 262,
+    "5": 88,
+    "6": 42,
+    ">300s": 16
+   },
+   "pip_step_hist": {
+    "0.1": 36516,
+    "0.0": 17827,
+    "0.2": 4629,
+    "4.9": 3111,
+    "0.3": 3043,
+    "5.0": 2900,
+    "5.1": 2557,
+    "0.4": 2516
+   },
+   "zero_move_ticks": 17827
+  }
+ }
+}

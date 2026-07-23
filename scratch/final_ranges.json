@@ -1,0 +1,142 @@
+{
+ "AUDUSD": {
+  "total_second_epochs": 143817,
+  "duplicate_second_collisions": 28914,
+  "full_first": "2026-07-09 20:57:08",
+  "full_last": "2026-07-18 21:32:52",
+  "full_m15_bars": 452,
+  "clean_first": "2026-07-09 20:57:08",
+  "clean_last": "2026-07-17 20:57:56",
+  "clean_second_epochs": 93273,
+  "clean_m15_bars": 385,
+  "clean_span_days": 8.0,
+  "synthetic_second_epochs": 50544,
+  "synthetic_m15_bars": 67,
+  "synthetic_raw_rows": 57327,
+  "synthetic_first": "2026-07-18 00:00:00",
+  "synthetic_last": "2026-07-18 21:32:52",
+  "weekend_rows_before_0718": 0,
+  "profile_clean": {
+   "n": 93272,
+   "flat_pct": 26.9,
+   "le_0p1_pct": 63.1
+  },
+  "profile_synth": {
+   "n": 50543,
+   "flat_pct": 32.9,
+   "le_0p1_pct": 89.5
+  }
+ },
+ "EURUSD": {
+  "total_second_epochs": 160145,
+  "duplicate_second_collisions": 51985,
+  "full_first": "2026-07-09 20:57:01",
+  "full_last": "2026-07-18 21:32:52",
+  "full_m15_bars": 453,
+  "clean_first": "2026-07-09 20:57:01",
+  "clean_last": "2026-07-17 20:58:57",
+  "clean_second_epochs": 109519,
+  "clean_m15_bars": 386,
+  "clean_span_days": 8.0,
+  "synthetic_second_epochs": 50626,
+  "synthetic_m15_bars": 67,
+  "synthetic_raw_rows": 57224,
+  "synthetic_first": "2026-07-18 00:00:00",
+  "synthetic_last": "2026-07-18 21:32:52",
+  "weekend_rows_before_0718": 0,
+  "profile_clean": {
+   "n": 109518,
+   "flat_pct": 5.2,
+   "le_0p1_pct": 59.9
+  },
+  "profile_synth": {
+   "n": 50625,
+   "flat_pct": 32.6,
+   "le_0p1_pct": 89.4
+  }
+ },
+ "GBPUSD": {
+  "total_second_epochs": 203631,
+  "duplicate_second_collisions": 79280,
+  "full_first": "2026-07-09 20:57:02",
+  "full_last": "2026-07-18 21:32:53",
+  "full_m15_bars": 453,
+  "clean_first": "2026-07-09 20:57:02",
+  "clean_last": "2026-07-17 20:58:55",
+  "clean_second_epochs": 153045,
+  "clean_m15_bars": 386,
+  "clean_span_days": 8.0,
+  "synthetic_second_epochs": 50586,
+  "synthetic_m15_bars": 67,
+  "synthetic_raw_rows": 57157,
+  "synthetic_first": "2026-07-18 00:00:00",
+  "synthetic_last": "2026-07-18 21:32:53",
+  "weekend_rows_before_0718": 0,
+  "profile_clean": {
+   "n": 153044,
+   "flat_pct": 17.7,
+   "le_0p1_pct": 46.6
+  },
+  "profile_synth": {
+   "n": 50585,
+   "flat_pct": 32.8,
+   "le_0p1_pct": 89.3
+  }
+ },
+ "USDJPY": {
+  "total_second_epochs": 163754,
+  "duplicate_second_collisions": 50935,
+  "full_first": "2026-07-09 20:57:57",
+  "full_last": "2026-07-18 21:32:52",
+  "full_m15_bars": 452,
+  "clean_first": "2026-07-09 20:57:57",
+  "clean_last": "2026-07-17 20:58:57",
+  "clean_second_epochs": 113058,
+  "clean_m15_bars": 385,
+  "clean_span_days": 8.0,
+  "synthetic_second_epochs": 50696,
+  "synthetic_m15_bars": 67,
+  "synthetic_raw_rows": 57242,
+  "synthetic_first": "2026-07-18 00:00:00",
+  "synthetic_last": "2026-07-18 21:32:52",
+  "weekend_rows_before_0718": 0,
+  "profile_clean": {
+   "n": 113057,
+   "flat_pct": 4.4,
+   "le_0p1_pct": 60.4
+  },
+  "profile_synth": {
+   "n": 50695,
+   "flat_pct": 33.1,
+   "le_0p1_pct": 96.8
+  }
+ },
+ "XAUUSD": {
+  "total_second_epochs": 312795,
+  "duplicate_second_collisions": 796254,
+  "full_first": "2026-07-09 20:57:09",
+  "full_last": "2026-07-18 21:32:53",
+  "full_m15_bars": 443,
+  "clean_first": "2026-07-09 20:57:09",
+  "clean_last": "2026-07-17 20:57:58",
+  "clean_second_epochs": 262155,
+  "clean_m15_bars": 376,
+  "clean_span_days": 8.0,
+  "synthetic_second_epochs": 50640,
+  "synthetic_m15_bars": 67,
+  "synthetic_raw_rows": 57293,
+  "synthetic_first": "2026-07-18 00:00:00",
+  "synthetic_last": "2026-07-18 21:32:53",
+  "weekend_rows_before_0718": 0,
+  "profile_clean": {
+   "n": 262154,
+   "flat_pct": 0.5,
+   "le_0p1_pct": 2.1
+  },
+  "profile_synth": {
+   "n": 50639,
+   "flat_pct": 32.5,
+   "le_0p1_pct": 96.6
+  }
+ }
+}
