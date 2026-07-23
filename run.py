@@ -69,6 +69,20 @@ def start_execution_bridge(exec_path, port):
         print(f"  [!] Execution bridge script not found: {bridge_script}")
         return None
 
+    # Reuse an already-running bridge instead of launching a duplicate. A prior
+    # run.py session (or a manually-started bridge) may still own the port; a
+    # second Popen would crash on bind (WinError 10048). Probe health first and,
+    # if a bridge already answers, adopt it. Return None so we do not later kill
+    # a process we did not start (cleanup only terminates a live Popen handle).
+    health_url = f"http://127.0.0.1:{port + 10}/health"
+    try:
+        with urllib.request.urlopen(health_url, timeout=1) as resp:
+            if resp.status == 200:
+                print(f"  [+] Execution bridge already healthy on port {port} — reusing it.")
+                return None
+    except Exception:
+        pass  # nothing listening yet; launch our own below
+
     cmd = [sys.executable, bridge_script, "--port", str(port), "--host", "127.0.0.1"]
     if exec_path:
         cmd += ["--path", exec_path]
@@ -77,7 +91,6 @@ def start_execution_bridge(exec_path, port):
     proc = subprocess.Popen(cmd)
 
     # Poll the bridge health endpoint (port + 10) until it answers or we give up.
-    health_url = f"http://127.0.0.1:{port + 10}/health"
     import time
     for _ in range(30):  # ~15s
         if proc.poll() is not None:
