@@ -45,3 +45,18 @@ def test_trade_record_carries_version_field():
     assert r.strategy_version == ""
     r.strategy_version = "entry_v5.1_room1_regime0_belock0"
     assert r.strategy_version.endswith("regime0_belock0")
+
+
+def test_trade_record_carries_why_accepted_fields():
+    # entry_state + setup_source default empty and are settable (populated in
+    # record_entry from the snapshot). These are the group-by keys for
+    # "which setup/state is profitable".
+    r = TradeRecord(
+        ticket=1, symbol="EURUSD", direction="BUY", entry_time="", entry_price=1.1,
+        initial_sl=1.09, initial_tp=1.12, regime="RANGE_CHOP", regime_confidence=0.0,
+        mtf_alignment=0.0, mtf_context="", anomaly_velocity_z=0.0,
+        displacement_classification="", nearest_support=0.0, nearest_resistance=0.0,
+    )
+    assert r.entry_state == "" and r.setup_source == ""
+    r.entry_state, r.setup_source = "RETEST_WAIT", "sweep"
+    assert r.entry_state == "RETEST_WAIT" and r.setup_source == "sweep"

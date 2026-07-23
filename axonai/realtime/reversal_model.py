@@ -58,6 +58,9 @@ class EngineSnapshot:
     trade_state: Optional[TradeState] = None
     location_context: Optional[LocationContext] = None
     atr: float = 0.0
+    # Setup source that armed the entry ("sweep"/"pin_bar"/"engulfing"/"combined").
+    # Observability only: lets trade analysis attribute outcome to setup type.
+    candle_setup_source: str = ""
 
 
 def _num(obj, attr: str, default: float) -> float:
@@ -596,6 +599,8 @@ class ReversalModel:
             trade_state=trade_state,
             location_context=location_context,
             atr=self._h1_atr,
+            candle_setup_source=(self.candle_setup.active_setup.source
+                                 if self.candle_setup.active_setup else ""),
         )
 
     def register_trade(self, ticket: int, direction: str, entry_price: float, sl: float, tp: float, reason: str = "") -> None:

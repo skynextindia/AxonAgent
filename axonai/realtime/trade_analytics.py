@@ -125,6 +125,12 @@ class TradeRecord:
     # trade (see default_config.strategy_version). Lets later analysis attribute
     # each fill to a configuration directly instead of inferring it.
     strategy_version: str = ""
+    # Why the trade was accepted: state-machine state at fire (ARMING / RETEST_WAIT
+    # / TRIGGERED) and the setup source that armed it. Signal-level importance
+    # ranked state/setup above every continuous feature, so these are the fields to
+    # group by when asking "which setup/state is actually profitable".
+    entry_state: str = ""
+    setup_source: str = ""
 
 
 class TradeAnalytics:
@@ -182,6 +188,8 @@ class TradeAnalytics:
             nearest_resistance=float(_g(res, "price", 0.0)),
         )
         record.strategy_version = strategy_version
+        record.entry_state = str(_g(ed, "state", "") or "")
+        record.setup_source = str(getattr(snapshot, "candle_setup_source", "") or "")
         # Reversal signature (velocity) — the field set our analysis proved matters
         record.vel_pct = round(float(_g(v, "percentile", 0.0)), 2)
         record.vel_tick_eff = round(float(_g(v, "tick_efficiency", 0.0)), 3)
