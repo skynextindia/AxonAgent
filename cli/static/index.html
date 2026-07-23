@@ -4,22 +4,25 @@
 <script src="/lightweight-charts.min.js?v=7"></script>
 <style>
 :root{
-  --bg:#0a0c10;--ink:#e7ecf1;--sub:#93a0af;--dim:#5c6773;--faint:#39424d;
-  --glass:#0e141b;--glass2:#121a22;--line:rgba(148,163,184,.16);--line2:rgba(148,163,184,.24);
-  --teal:#4fd1c5;--cyan:#5bd6e0;--green:#5ec98a;--red:#f2708a;--amber:#e8b866;--violet:#a89bec;--blue:#6aa6e8;
+  --bg:#070a0f;--bg2:#0b0f16;--ink:#e6ecf3;--sub:#93a1b4;--dim:#5b6879;--faint:#38424f;
+  --glass:#0c1119;--glass2:#10161f;--line:rgba(150,170,205,.10);--line2:rgba(150,170,205,.19);
+  /* ONE restrained accent (electric blue) for live/active truth; semantic trio only */
+  --acc:#4c8dff;--teal:#4c8dff;--cyan:#5bc8e0;--green:#2fcf9a;--red:#ff5a72;--amber:#f2b13e;--violet:#9a8cf0;--blue:#4c8dff;
   --sans:-apple-system,"Segoe UI",Inter,system-ui,sans-serif;--mono:"Cascadia Mono",ui-monospace,Consolas,monospace;
-  --shadow:none;--edge:none;--r:2px;
+  --shadow:none;--edge:inset 0 1px 0 rgba(255,255,255,.035);--r:3px;
 }
 *{box-sizing:border-box;margin:0;padding:0}html,body{height:100%}
-body{font-family:var(--sans);font-size:12px;color:var(--ink);overflow:hidden;display:flex;flex-direction:column;background:var(--bg);letter-spacing:.005em}
+body{font-family:var(--sans);font-size:12px;color:var(--ink);overflow:hidden;display:flex;flex-direction:column;letter-spacing:.005em;background:var(--bg);
+  background-image:linear-gradient(rgba(150,170,205,.02) 1px,transparent 1px),linear-gradient(90deg,rgba(150,170,205,.02) 1px,transparent 1px);background-size:40px 40px}
 .mono{font-family:var(--mono);font-variant-numeric:tabular-nums}
 .pos{color:var(--green)}.neg{color:var(--red)}.amb{color:var(--amber)}.d{color:var(--dim)}
 .lbl{font-size:8.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);font-weight:600}
 .flash{animation:fl .5s ease}@keyframes fl{0%{background:rgba(56,224,255,.2)}100%{background:transparent}}
 @media(prefers-reduced-motion:reduce){*{animation:none!important}}
 /* KPI */
-.kpi{display:flex;align-items:center;gap:16px;height:46px;flex-shrink:0;padding:0 16px;border-bottom:1px solid var(--line2);background:var(--glass);box-shadow:none;overflow-x:auto}
-.brand{font-family:var(--mono);font-weight:800;font-size:15px;background:linear-gradient(90deg,var(--teal),var(--cyan));-webkit-background-clip:text;background-clip:text;color:transparent;flex-shrink:0}
+.kpi{display:flex;align-items:center;gap:16px;height:44px;flex-shrink:0;padding:0 16px;border-bottom:1px solid var(--line2);background:rgba(9,12,18,.72);backdrop-filter:blur(10px);overflow-x:auto;z-index:3}
+.brand{font-family:var(--mono);font-weight:800;font-size:14px;letter-spacing:.02em;color:var(--ink);flex-shrink:0}
+.brand::first-letter{color:var(--acc)}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--red);box-shadow:0 0 8px var(--red);flex-shrink:0}
 #sock{font-size:9px;font-weight:700;letter-spacing:.1em;color:var(--red)}
 .badge{font-size:8.5px;font-weight:800;letter-spacing:.08em;text-transform:uppercase;padding:3px 8px;border:1px solid var(--line2);border-radius:5px;flex-shrink:0}
@@ -65,13 +68,15 @@ body{font-family:var(--sans);font-size:12px;color:var(--ink);overflow:hidden;dis
 .pill{font-size:8px;font-weight:800;padding:2px 6px;border-radius:4px;white-space:nowrap}
 .pill.mon{color:var(--dim);background:rgba(255,255,255,.05)}.pill.trig{color:var(--amber);background:rgba(255,194,75,.14)}
 .pill.trade{color:var(--teal);background:rgba(45,212,191,.14)}.pill.cool{color:var(--violet);background:rgba(167,139,250,.14)}
-nav{display:flex;gap:3px;flex-shrink:0;padding:6px 16px 0;border-bottom:1px solid var(--line)}
-nav button{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);background:none;border:1px solid transparent;border-bottom:none;padding:7px 15px;cursor:pointer;border-radius:2px 2px 0 0}
-nav button.on{color:var(--teal);border-color:var(--line);background:var(--glass2)}
+nav{display:flex;gap:2px;flex-shrink:0;padding:0 16px;border-bottom:1px solid var(--line);z-index:2}
+nav button{font-size:10px;font-weight:700;letter-spacing:.13em;text-transform:uppercase;color:var(--dim);background:none;border:none;padding:11px 15px 12px;cursor:pointer;position:relative;transition:color .15s}
+nav button:hover{color:var(--sub)}
+nav button.on{color:var(--ink)}
+nav button.on::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;background:var(--acc)}
 main{flex:1;min-height:0;position:relative}
 .view{position:absolute;inset:0;display:none;overflow:auto;padding:20px 24px}.view.on{display:block}
 /* cards */
-.card{border:1px solid var(--line);border-radius:var(--r);background:var(--glass);padding:10px 11px;box-shadow:none}
+.card{border:1px solid var(--line);border-radius:var(--r);background:var(--glass);padding:10px 11px;box-shadow:var(--edge)}
 .card>h3{font-size:8.5px;letter-spacing:.18em;text-transform:uppercase;color:var(--sub);font-weight:700;margin-bottom:12px;padding-bottom:9px;border-bottom:1px solid var(--line);display:flex;align-items:center}
 .card>h3::before{content:"";width:4px;height:4px;border-radius:1px;background:var(--teal);box-shadow:0 0 7px var(--teal);margin-right:8px;flex-shrink:0}
 .card>h3>*{margin-left:auto}
@@ -88,6 +93,10 @@ main{flex:1;min-height:0;position:relative}
 #v-cockpit>.core{flex-shrink:0}
 #v-cockpit .cock{flex:1;min-height:0}
 #v-cockpit .col{overflow-y:auto;overflow-x:hidden;min-height:0}
+/* Rail sub-tabs: the tab bar is pinned, only the active subview occupies the column.
+   Inline display:none (set by the switcher) beats this rule, so hidden stays hidden. */
+#v-cockpit .col>.subtabs{flex-shrink:0;position:sticky;top:0;z-index:2;background:var(--bg);padding-bottom:2px}
+#v-cockpit .col>.subview{display:flex;flex-direction:column;gap:10px;flex:1;min-height:0}
 .col{display:flex;flex-direction:column;gap:10px;min-width:0}
 /* decision core */
 .core{border:1px solid var(--line);border-radius:var(--r);background:var(--glass);padding:11px 13px;position:relative;overflow:hidden}
@@ -127,8 +136,37 @@ main{flex:1;min-height:0;position:relative}
 .row{display:flex;justify-content:space-between;font-size:11px;padding:4px 0;border-bottom:1px solid rgba(255,255,255,.045);gap:8px;cursor:default}
 .row:last-child{border-bottom:none}.imp{width:6px;height:6px;border-radius:50%;flex-shrink:0;margin-top:4px}
 .empty{color:var(--faint);font-style:italic;text-align:center;padding:12px;font-size:11px}
+/* Tier-1 telemetry lanes: stacked SVG series sharing one time axis. Time-proportional
+   x (not index) so recording gaps render as real gaps rather than being hidden. */
+.tlane{display:grid;grid-template-columns:96px 1fr 62px;align-items:center;gap:8px;
+  border-bottom:1px solid var(--line);padding:5px 0}
+.tlane:last-child{border-bottom:none}
+.tlane .tnm{font-size:8.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--sub)}
+.tlane .tnm i{display:block;font-style:normal;font-size:8px;color:var(--dim);letter-spacing:.02em}
+.tlane svg{width:100%;height:44px;display:block}
+/* The floating dock is ~300px wide, so lanes there run tighter than in the Engine view. */
+.telbody .tlane{grid-template-columns:58px 1fr 46px;gap:6px;padding:4px 0}
+.telbody .tlane svg{height:34px}
+.telbody .tlane .tnm{font-size:8px}
+.telbody .tlane .tnm i{display:none}
+.telbody .tlane .tlive{font-size:10.5px}
+.tlane .tlive{font-family:var(--mono);font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+.tlane .tlive s{display:block;text-decoration:none;font-size:8px;color:var(--dim);letter-spacing:.04em}
 .subtabs{display:flex;gap:4px;margin-bottom:10px}.subtabs button{font-size:9px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--dim);background:var(--glass);border:1px solid var(--line);border-radius:7px;padding:5px 12px;cursor:pointer}
 .subtabs button.on{color:var(--teal);border-color:var(--teal)}
+/* Six tabs in one rail bar: wrap to a second row rather than overflow the column. */
+.subtabs.wrap{flex-wrap:wrap;gap:3px}
+.subtabs.wrap button{padding:4px 8px;font-size:8.5px;border-radius:5px}
+/* Floating live-telemetry dock (cockpit right). Deliberately reads as a window sitting
+   above the layout, not another flat card, because it runs on its own update clock. */
+.telcol{overflow:visible!important}
+.telfloat{display:flex;flex-direction:column;flex:1;min-height:0;border:1px solid var(--line2);
+  border-radius:var(--r);background:linear-gradient(180deg,rgba(18,24,34,.97),rgba(10,14,20,.97));
+  box-shadow:0 10px 28px -12px rgba(0,0,0,.85),var(--edge)}
+.telhead{display:flex;align-items:center;gap:7px;padding:7px 10px;border-bottom:1px solid var(--line);flex-shrink:0}
+.telhead .tt{font-size:8.5px;font-weight:700;letter-spacing:.1em;color:var(--sub)}
+.telhead .pill{margin-left:auto}
+.telbody{flex:1;overflow:auto;min-height:0;padding:2px 10px 6px}
 .exp{cursor:pointer}.det{font-size:10px;color:var(--sub);padding:6px 8px;background:rgba(255,255,255,.02);border-radius:7px;margin:2px 0 6px;display:none}
 .det.open{display:block}.det .kv{font-size:10px}
 ::-webkit-scrollbar{width:8px;height:8px}::-webkit-scrollbar-thumb{background:var(--line2);border-radius:4px}
@@ -157,7 +195,9 @@ main{flex:1;min-height:0;position:relative}
 <div class="rail" id="rail"></div>
 <nav>
   <button data-v="cockpit" class="on">Cockpit</button>
+  <button data-v="engine">Engine</button>
   <button data-v="portfolio">Portfolio</button>
+  <button data-v="system">System</button>
   <button data-v="journal">Journal</button>
 </nav>
 
@@ -182,6 +222,16 @@ main{flex:1;min-height:0;position:relative}
   <div class="cock">
     <!-- LEFT COLUMN -->
     <div class="col">
+      <!-- One rail group: the six panel sets that were split across two columns. -->
+      <div class="subtabs wrap" data-group="rail">
+        <button data-sub="feed" class="on">Feed</button>
+        <button data-sub="context">Context</button>
+        <button data-sub="events">Events</button>
+        <button data-sub="trigger">Trigger</button>
+        <button data-sub="trade">Trade</button>
+        <button data-sub="levels">Levels</button>
+      </div>
+      <div class="subview" data-group="rail" data-sub="feed">
       <div class="card"><h3>Core feed <span class="strip" id="tick-activity-strip"></span></h3>
         <div class="kv">Bid <b id="price-bid">0.00000</b></div><div class="kv">Ask <b id="price-ask">0.00000</b></div>
         <div class="kv">Spread <b id="spread-val">0.0</b></div>
@@ -192,6 +242,8 @@ main{flex:1;min-height:0;position:relative}
           <div class="big-tile" style="padding:6px"><span class="lbl">Gated</span><div class="n amb" id="stats-skipped" style="font-size:14px">0</div></div>
         </div>
       </div>
+      </div>
+      <div class="subview" data-group="rail" data-sub="context" style="display:none">
       <div class="card"><h3>Microstructure</h3>
         <div class="kv">Velocity <b id="tick-velocity">0.00</b></div>
         <div class="lbl" style="margin:6px 0 2px">MTF bias</div>
@@ -205,24 +257,20 @@ main{flex:1;min-height:0;position:relative}
         <div class="kv">Bias <b id="london-bias">--</b></div><div class="kv">High <b id="london-high-val">--</b></div><div class="kv">Low <b id="london-low-val">--</b></div>
       </div>
       <div class="card"><h3>Sessions <span id="market-status-badge" class="pill mon">—</span></h3><div id="session-stack" class="kv" style="flex-direction:column;border:none"></div></div>
-      <div class="card"><h3>News / events</h3><div id="econ-calendar-container"><div class="empty">No upcoming events.</div></div></div>
-    </div>
-    <!-- CENTER: chart only (dominant) -->
-    <div class="col" style="overflow:hidden">
-      <div class="card chartcard">
-        <div class="chead"><span class="livedot" id="live-tick-dot"></span><span class="t" id="ch-sym">—</span><span class="mono d" id="ch-px" style="font-size:11px">—</span>
-          <div class="tfs"><button data-tf="M15" class="on">M15</button></div></div>
-        <div id="price-chart"></div>
       </div>
-    </div>
-    <!-- RIGHT: focused-symbol telemetry -->
-    <div class="col">
+      <div class="subview" data-group="rail" data-sub="events" style="display:none">
+        <div class="card" style="flex:1;min-height:160px;display:flex;flex-direction:column"><h3>News / events <span class="pill mon" id="econ-count">—</span></h3>
+          <div id="econ-calendar-container" style="flex:1;overflow:auto"><div class="empty">No upcoming events.</div></div></div>
+      </div>
+      <div class="subview" data-group="rail" data-sub="trigger" style="display:none">
       <div class="card"><h3>Trigger metrics</h3>
         <div class="kv">State <b id="trigger-state">IDLE</b></div><div class="kv">Dir <b id="trigger-direction">--</b></div>
         <div class="kv">Quality <b id="trigger-quality">0.00</b></div><div class="kv">Disp <b id="trigger-disp-class">--</b></div>
         <div class="kv">Ratio <b id="trigger-disp-ratio">0.00</b></div><div class="kv">Vel-z <b id="trigger-vel-z">0.00</b></div>
         <div class="kv">Regime <b id="trigger-regime">--</b></div><div class="kv">H1/H4 <b><span id="trigger-h1-bias">0</span>/<span id="trigger-h4-bias">0</span></b></div>
         <div class="kv">Reason <b id="trigger-reason" style="font-size:9px">--</b></div></div>
+      </div>
+      <div class="subview" data-group="rail" data-sub="trade" style="display:none">
       <div class="card"><h3>Trade state</h3>
         <div class="kv">Phase <b id="ts-phase">--</b></div><div class="kv">Health <b id="ts-health">0%</b></div>
         <div class="kv">Thesis <b id="ts-thesis">--</b></div><div class="kv">MFE/MAE <b><span id="ts-mfe" class="pos">0</span>/<span id="ts-mae" class="neg">0</span></b></div>
@@ -233,48 +281,87 @@ main{flex:1;min-height:0;position:relative}
         <div class="kv">Level <b><span id="lc-level-type">--</span> <span id="lc-level-price">--</span></b></div></div>
       <div class="card"><h3>Regime</h3><div class="kv">Type <b id="regime-type">UNKNOWN</b></div><div class="kv">Vol/ATR <b id="regime-vol" style="font-size:9px">—</b></div>
         <div class="kv">ATR H1 <b id="atr-math-val">—</b></div><div class="kv">SL/TP <b id="atr-math-sltp" style="font-size:9px">—</b></div></div>
+      </div>
+      <div class="subview" data-group="rail" data-sub="levels" style="display:none;flex:1;min-height:0;flex-direction:column">
       <div class="card"><h3>Swing channels</h3>
         <div class="kv">Resist <b id="level-res-val" class="neg">--</b></div><div class="kv d" style="font-size:9px">dist <b id="level-res-dist">--</b></div>
         <div class="bar" style="margin:4px 0"><i id="swing-push-indicator" style="background:var(--cyan);width:50%"></i></div>
         <div class="kv">Support <b id="level-sup-val" class="pos">--</b></div><div class="kv d" style="font-size:9px">dist <b id="level-sup-dist">--</b></div>
         <div class="kv" style="margin-top:4px">Behavior <b id="bhv-placeholder" style="font-size:9px">—</b></div></div>
       <div class="card" style="flex:1;min-height:120px;display:flex;flex-direction:column"><h3>Dynamic levels</h3><div id="dynamic-levels" style="flex:1;overflow:auto;min-height:120px"><span class="empty">Awaiting…</span></div></div>
+      </div>
+    </div>
+    <!-- CENTER: chart only (dominant) -->
+    <div class="col" style="overflow:hidden">
+      <div class="card chartcard">
+        <div class="chead"><span class="livedot" id="live-tick-dot"></span><span class="t" id="ch-sym">—</span><span class="mono d" id="ch-px" style="font-size:11px">—</span>
+          <div class="tfs"><button data-tf="M15" class="on">M15</button></div></div>
+        <div id="price-chart"></div>
+      </div>
+    </div>
+    <!-- RIGHT: floating live telemetry windows (Tier-1 engine values) -->
+    <div class="col telcol">
+      <div class="telfloat">
+        <div class="telhead"><span class="livedot" id="tel-dot"></span><span class="tt">LIVE TELEMETRY</span>
+          <span class="pill mon" id="tel-span-ck">—</span></div>
+        <div id="tel-lanes-ck" class="telbody"><div class="empty">Awaiting engine snapshots…</div></div>
+      </div>
     </div>
   </div>
 </section>
 
-<!-- ========== PORTFOLIO ========== -->
+<!-- ========== ENGINE (pipeline + active trade + reason stream) ========== -->
+<section id="v-engine" class="view">
+  <div class="subtabs" data-group="engine">
+    <button data-sub="pipeline" class="on">Pipeline</button>
+    <button data-sub="telemetry">Telemetry</button>
+    <button data-sub="reasoning">Reasoning</button>
+  </div>
+  <div class="subview" data-group="engine" data-sub="telemetry" style="display:none">
+    <div class="card" style="flex:1;min-height:0;display:flex;flex-direction:column">
+      <h3>Tier-1 telemetry <span class="pill mon" id="tel-span">—</span>
+        <span class="d" style="font-size:8.5px;margin-left:auto;letter-spacing:.04em">M15 MEAN · DASHED = GATE · RIGHT = LIVE TICK</span></h3>
+      <div id="tel-lanes" style="flex:1;overflow:auto;min-height:0"><div class="empty">Awaiting engine snapshots…</div></div>
+    </div>
+  </div>
+  <div class="subview" data-group="engine" data-sub="pipeline">
+    <div class="card"><h3>Engine pipeline <span class="pill trade" id="pipeline-status">ACTIVE</span></h3>
+      <div class="grid4" style="gap:8px">
+        <div class="big-tile" id="card-velocity-normalizer"><span class="lbl">L1 Velocity</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-velocity-normalizer"></span><span class="mono" id="pl-vel" style="font-size:12px">—</span></div></div>
+        <div class="big-tile" id="card-regime-engine"><span class="lbl">L2 Regime</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-regime-engine"></span><span class="mono" id="pl-reg" style="font-size:12px">—</span></div></div>
+        <div class="big-tile" id="card-mtf-bias"><span class="lbl">L2 MTF bias</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-mtf-bias"></span><span class="mono" id="pl-mtf" style="font-size:12px">—</span></div></div>
+        <div class="big-tile" id="card-liquidity-sweep"><span class="lbl">L2 Liquidity</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-liquidity-sweep"></span><span class="mono" id="pl-liq" style="font-size:12px">—</span></div></div>
+        <div class="big-tile" id="card-entry-sm"><span class="lbl">L3 Entry SM</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-entry-sm"></span><span class="mono" id="pl-ent" style="font-size:12px">—</span></div></div>
+        <div class="big-tile" id="card-health-monitor"><span class="lbl">L3 Health</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-health-monitor"></span><span class="mono" id="pl-hm" style="font-size:12px">—</span></div></div>
+        <div class="big-tile" id="card-adaptive-exit-manager"><span class="lbl">L3 Exit mgr</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-adaptive-exit-manager"></span><span class="mono" id="pl-ex" style="font-size:12px">—</span></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="subview" data-group="engine" data-sub="reasoning" style="display:none">
+    <div class="grid2" style="align-items:start">
+      <div class="card"><h3>Active trade</h3><div id="active-trade-hud"><span class="empty">No open trade.</span></div></div>
+      <div class="card"><h3>Reason stream <button id="clear-console-btn-intel" style="font-size:8px;color:var(--dim);background:none;border:1px solid var(--line);border-radius:4px;padding:2px 7px;cursor:pointer">CLEAR</button></h3><div class="feed" id="events-log-container" style="max-height:none"><div class="empty">Awaiting events…</div></div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ========== PORTFOLIO (money state) ========== -->
 <section id="v-portfolio" class="view">
-  <div class="grid4" style="align-items:start;margin-bottom:10px">
+  <div class="grid3" style="align-items:start">
     <div class="card"><h3>Risk / day <span class="led on" id="risk-status-led"></span></h3>
       <div class="kv">Day PnL <b id="risk-pnl">+0.00</b></div><div class="kv">Limit <b id="risk-limit">-500</b></div>
       <div class="bar" style="margin:3px 0"><i id="risk-bar" style="background:var(--green);width:0%"></i></div>
       <div class="kv">Max pos <b id="risk-pos">5</b></div><div class="kv">Q-floor <b id="risk-floor">0.50</b></div>
       <div class="kv">Guard <b id="risk-status" class="pos">ACTIVE</b></div></div>
-    <div class="card"><h3>Positions</h3><div style="overflow:auto"><table class="tbl"><thead><tr><th>Sym</th><th>Type</th><th>Vol</th><th>PnL</th></tr></thead><tbody id="positions-table-body"><tr><td colspan="4" class="empty">None</td></tr></tbody></table></div></div>
+    <div class="card"><h3>Open positions</h3><div style="overflow:auto"><table class="tbl"><thead><tr><th>Sym</th><th>Type</th><th>Vol</th><th>PnL</th></tr></thead><tbody id="positions-table-body"><tr><td colspan="4" class="empty">None</td></tr></tbody></table></div></div>
     <div class="card"><h3>Resting orders</h3><div style="overflow:auto"><table class="tbl"><thead><tr><th>Sym</th><th>Type</th><th>Price</th><th>Dist</th></tr></thead><tbody id="orders-table-body"><tr><td colspan="4" class="empty">None</td></tr></tbody></table></div></div>
+  </div>
+</section>
+
+<!-- ========== SYSTEM (infra truth) ========== -->
+<section id="v-system" class="view">
+  <div class="grid4" style="align-items:start">
     <div class="card"><h3>Connections</h3><div class="kv">WebSocket <b id="health-ws">—</b></div><div class="kv">Daemon <b id="health-daemon">—</b></div><div class="kv">MT5 <b id="health-mt5">—</b></div></div>
-  </div>
-  <div class="grid2" style="align-items:start">
-    <div class="col">
-      <div class="card"><h3>Engine pipeline <span class="pill trade" id="pipeline-status">ACTIVE</span></h3>
-        <div class="grid2" style="gap:8px">
-          <div class="big-tile" id="card-velocity-normalizer"><span class="lbl">L1 Velocity</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-velocity-normalizer"></span><span class="mono" id="pl-vel" style="font-size:12px">—</span></div></div>
-          <div class="big-tile" id="card-regime-engine"><span class="lbl">L2 Regime</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-regime-engine"></span><span class="mono" id="pl-reg" style="font-size:12px">—</span></div></div>
-          <div class="big-tile" id="card-mtf-bias"><span class="lbl">L2 MTF bias</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-mtf-bias"></span><span class="mono" id="pl-mtf" style="font-size:12px">—</span></div></div>
-          <div class="big-tile" id="card-liquidity-sweep"><span class="lbl">L2 Liquidity</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-liquidity-sweep"></span><span class="mono" id="pl-liq" style="font-size:12px">—</span></div></div>
-          <div class="big-tile" id="card-entry-sm"><span class="lbl">L3 Entry SM</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-entry-sm"></span><span class="mono" id="pl-ent" style="font-size:12px">—</span></div></div>
-          <div class="big-tile" id="card-health-monitor"><span class="lbl">L3 Health</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-health-monitor"></span><span class="mono" id="pl-hm" style="font-size:12px">—</span></div></div>
-          <div class="big-tile" id="card-adaptive-exit-manager"><span class="lbl">L3 Exit mgr</span><div style="display:flex;gap:6px;align-items:center;margin-top:3px"><span class="led" id="led-adaptive-exit-manager"></span><span class="mono" id="pl-ex" style="font-size:12px">—</span></div></div>
-        </div>
-      </div>
-      <div class="card"><h3>Active trade</h3><div id="active-trade-hud"><span class="empty">No open trade.</span></div></div>
-    </div>
-    <div class="col">
-      <div class="card"><h3>Reason stream <button id="clear-console-btn-intel" style="font-size:8px;color:var(--dim);background:none;border:1px solid var(--line);border-radius:4px;padding:2px 7px;cursor:pointer">CLEAR</button></h3><div class="feed" id="events-log-container"><div class="empty">Awaiting events…</div></div></div>
-    </div>
-  </div>
-  <div class="grid4" style="align-items:start;margin-top:10px">
     <div class="card"><h3>Data feed</h3><div class="kv">Last tick <b id="health-last-tick">—</b></div><div class="kv">Active pair <b id="health-pair">—</b></div><div class="kv">Candles <b id="health-candles">0</b></div></div>
     <div class="card"><h3>Performance</h3><div class="kv">Uptime <b id="sys-uptime">—</b></div><div class="kv">Timeframe <b id="sys-timeframe">M15</b></div></div>
     <div class="card"><h3>Cache</h3><div class="kv">M15 <b id="sys-candles-M15">0</b></div><div class="kv">H1 <b id="sys-candles-H1">0</b></div><div class="kv">H4 <b id="sys-candles-H4">0</b></div></div>
@@ -344,18 +431,34 @@ class Axon{
     setTimeout(()=>this.loadPatterns(),4000);setInterval(()=>{if(this.active)this.loadPatterns()},120000);}
   bindUI(){
     document.querySelectorAll("nav button").forEach(b=>b.onclick=()=>this.setView(b.dataset.v));
+    // Generic sub-tab switcher: any .subtabs[data-group] toggles its .subview[data-group] siblings.
+    document.querySelectorAll(".subtabs[data-group]").forEach(bar=>{
+      const g=bar.dataset.group;
+      bar.querySelectorAll("button[data-sub]").forEach(b=>b.onclick=()=>{
+        bar.querySelectorAll("button[data-sub]").forEach(x=>x.classList.toggle("on",x===b));
+        document.querySelectorAll('.subview[data-group="'+g+'"]').forEach(v=>{v.style.display=(v.dataset.sub===b.dataset.sub)?"":"none";});
+      });
+    });
     document.querySelectorAll(".tfs button").forEach(b=>b.onclick=()=>{this.tf=b.dataset.tf;document.querySelectorAll(".tfs button").forEach(x=>x.classList.toggle("on",x===b));setV("sys-timeframe",this.tf);this.render();});
     $("jtab-trades-btn").onclick=()=>this.jsub("trades");$("jtab-system-btn").onclick=()=>this.jsub("system");
     $("refresh-journal-btn").onclick=()=>this.loadJournal();
     $("cal-prev").onclick=()=>this.calNav(-1);$("cal-next").onclick=()=>this.calNav(1);
     $("clear-console-btn-intel").onclick=()=>{$("events-log-container").innerHTML='<div class="empty">Cleared.</div>';};
-    window.addEventListener("keydown",e=>{if(e.target.tagName==="INPUT")return;const m={1:"cockpit",2:"portfolio",3:"journal"};if(m[e.key])this.setView(m[e.key]);
-      if(e.key==="ArrowLeft"||e.key==="ArrowRight"){const v=["cockpit","portfolio","journal"];let i=v.indexOf(this.view);i=(i+(e.key==="ArrowLeft"?-1:1)+3)%3;this.setView(v[i]);}});
+    window.addEventListener("keydown",e=>{if(e.target.tagName==="INPUT")return;const m={1:"cockpit",2:"engine",3:"portfolio",4:"system",5:"journal"};if(m[e.key])this.setView(m[e.key]);
+      if(e.key==="ArrowLeft"||e.key==="ArrowRight"){const v=["cockpit","engine","portfolio","system","journal"];let i=v.indexOf(this.view);i=(i+(e.key==="ArrowLeft"?-1:1)+5)%5;this.setView(v[i]);}});
     this.view="cockpit";}
   setView(v){this.view=v;document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.v===v));document.querySelectorAll(".view").forEach(s=>s.classList.remove("on"));$("v-"+v).classList.add("on");
-    if(v==="journal")this.loadJournal();if(v==="portfolio")this.sysHealth();if(v==="cockpit"&&this.chart)setTimeout(()=>{this.chart.resize($("price-chart").clientWidth,$("price-chart").clientHeight);this.render();},40);}
+    if(v==="journal")this.loadJournal();if(v==="system")this.sysHealth();if(v==="engine"||v==="cockpit")this.drawTelAll();if(v==="cockpit"&&this.chart)setTimeout(()=>{this.chart.resize($("price-chart").clientWidth,$("price-chart").clientHeight);this.render();},40);}
   jsub(s){this.jtab=s;$("jtab-trades-btn").classList.toggle("on",s==="trades");$("jtab-system-btn").classList.toggle("on",s==="system");$("jview-trades").style.display=s==="trades"?"block":"none";$("jview-system").style.display=s==="system"?"block":"none";}
   arr(tf){return tf==="M15"?this.m15:tf==="H1"?this.h1:this.h4;}
+  /* Defence in depth against a foreign-symbol bar reaching the series. No FX pair
+     or gold moves 25% intraday, so a bar that far off the median close is not this
+     instrument. One such bar makes the price scale autoscale to contain it and
+     crushes every real candle into a sliver. Drop them rather than render them. */
+  sane(a){if(!a||a.length<5)return a||[];
+    const cl=a.map(c=>+c.close).filter(x=>x>0).sort((x,y)=>x-y);if(!cl.length)return a;
+    const med=cl[cl.length>>1],lo=med*0.75,hi=med*1.25;
+    return a.filter(c=>+c.low>=lo&&+c.high<=hi&&+c.high>=+c.low);}
   clock(){const s=Math.floor((Date.now()-this.start)/1000);const hh=Math.floor(s/3600),mm=Math.floor(s/60)%60,ss=s%60;const t=(hh?hh+":":"")+String(mm).padStart(2,"0")+":"+String(ss).padStart(2,"0");setV("header-uptime",t);setV("sys-uptime",t);this.sessionClock();}
   sessionClock(){const now=new Date(),h=now.getUTCHours()+now.getUTCMinutes()/60;const defs=[["SYD",21,6],["TYO",0,9],["LDN",7,16],["NY",12,21]];let open=[];
     const rows=defs.map(([n,s,e])=>{const on=(s>e)?(h>=s||h<e):(h>=s&&h<e);if(on)open.push(n);const nextH=on?e:s;let d=(nextH-h+24)%24;const lbl=on?"closes "+Math.floor(d)+"h"+Math.round((d%1)*60)+"m":"opens "+Math.floor(d)+"h"+Math.round((d%1)*60)+"m";
@@ -370,10 +473,18 @@ class Axon{
     if(d.type==="pong"){setV("header-latency",(Date.now()-d.timestamp)+"ms");return;}
     switch(d.type){case"fleet_summary":return this.onFleet(d);case"active_symbols":return this.onSymbols(d);case"account":return this.onAccount(d);
       case"mode":return this.onMode(d);case"news_data":return this.onNews(d);case"tick":return this.onTick(d);case"event":return this.onEvent(d);
+      case"decision":return this.onDecision(d);case"trade_closed":return this.onClosed(d);
       case"latency_metrics":setV("metrics-exec-tot",nf(d.total_ms,1)+"ms");setV("metrics-exec-rev",nf(d.reversal_ms,1)+"ms");setV("metrics-exec-brd",nf(d.broadcast_ms,1)+"ms");return;}
     // cache last per-symbol snapshot so re-focusing a pair repaints instantly (no blank-then-refill)
     if(d.symbol){this.snap=this.snap||{};(this.snap[d.symbol]=this.snap[d.symbol]||{})[d.type==="candles"?"candles_"+d.timeframe:d.type]=d;}
-    if(d.symbol&&this.active&&d.symbol!==this.active)return;
+    // Strict: drop per-symbol payloads whenever they are not the focused symbol.
+    // The old guard also required this.active to be truthy, so during the first
+    // seconds after load (before focus() runs) candles from ALL five daemons fell
+    // through into the shared m15/h1/h4 arrays — mixing e.g. AUDUSD 0.84 bars into
+    // a GBPUSD 1.34 series, which then blew out DAY H/L, the ADR band, and the
+    // price scale. Nothing is lost by dropping: the snapshot cache above already
+    // stored this payload per-symbol, and focus() rehydrates from it.
+    if(d.symbol&&d.symbol!==this.active)return;
     switch(d.type){case"trigger_metrics":return this.onTrig(d);case"regime":return this.onRegime(d);case"trade_state":return this.onTrade(d);
       case"location_context":return this.onLoc(d);case"risk_state":return this.onRisk(d);case"levels":return this.onLevels(d);
       case"candles":return this.onCandles(d);case"candle":return this.onCandle(d);}}
@@ -392,12 +503,20 @@ class Axon{
     if(this.series){const F=/XAU/.test(sym)?[0.01,2]:/JPY/.test(sym)?[0.001,3]:[0.00001,5];
       this.series.applyOptions({priceFormat:{type:"custom",minMove:F[0],formatter:p=>Number(p).toFixed(F[1])}});}
     document.querySelectorAll(".chip").forEach(c=>c.classList.toggle("on",c.dataset.s===sym));
-    this.m15=[];this.h1=[];this.h4=[];this.trade=null;this._fit=false;this.clearOverlays();
+    this.m15=[];this.h1=[];this.h4=[];this.trade=null;this._fitSym=null;this._fitN=0;this.clearOverlays();
+    // A manual drag on the price axis latches autoScale:false. That must not carry
+    // across a switch — EURUSD (1.08) to XAUUSD (4000) would render off-screen.
+    if(this.chart){try{this.chart.priceScale("right").applyOptions({autoScale:true});
+      this.chart.timeScale().applyOptions({barSpacing:8,rightOffset:12});}catch(e){}}
     (this.posLines||[]).forEach(l=>{try{this.series.removePriceLine(l)}catch(e){}});this.posLines=[];
     [this._dhL,this._dlL,this._adrHi,this._adrLo].forEach(l=>{if(l)try{this.series.removePriceLine(l)}catch(e){}});this._dhL=this._dlL=this._adrHi=this._adrLo=null;
     if(this.series)this.series.setData([]);if(this.hist)this.hist.setData([]);
     if(this.ws&&this.ws.readyState===1)this.ws.send(JSON.stringify({type:"switch_pair",pair:sym,mt5:sym}));
-    this._rstat=null;this._replay=[];this._patterns=[];this.loadFades();this.loadRangeStats();this.loadReplay();this.loadPatterns();
+    // Instant paint from the per-symbol cache, then refresh in the background.
+    this._rstat=null;this._patterns=[];this._telLive=null;
+    this._replay=(this._repCache&&this._repCache[sym])||[];
+    this.drawTelAll();
+    this.loadFades();this.loadRangeStats();this.loadReplay();this.loadPatterns();
     // instant repaint from cached snapshot; live pushes overwrite as they arrive
     const sn=this.snap&&this.snap[sym];
     if(sn){["candles_M15","candles_H1","candles_H4"].forEach(k=>{if(sn[k])this.onCandles(sn[k]);});
@@ -437,8 +556,16 @@ class Axon{
     setV("broker-marginlevel-val",(mlvl&&isFinite(mlvl))?Math.round(mlvl)+"%":"—");
     setV("health-mt5","CONNECTED");
     const ps=Array.isArray(d.positions)?d.positions:[];
-    $("positions-table-body").innerHTML=ps.length?ps.map(p=>{const dir=(p.type===0||p.type==="BUY")?"BUY":"SELL";return '<tr><td>'+(p.symbol||"")+'</td><td class="'+(dir==="BUY"?"pos":"neg")+'">'+dir+'</td><td>'+(p.volume||"")+'</td><td class="'+((p.profit||0)>=0?"pos":"neg")+'">'+money(p.profit)+'</td></tr>';}).join(""):'<tr><td colspan="4" class="empty">None</td></tr>';
+    // `account` arrives once per daemon (~5/sec), each carrying the SAME server-merged
+    // positions list. Rebuilding the table innerHTML on every one repaints it 5x/sec
+    // and is the visible PnL flicker. Only re-render when the position set or its PnL
+    // actually changed. Signature includes profit so real moves still update.
+    const psig=ps.map(p=>(p.ticket||"")+":"+(p.profit!=null?(+p.profit).toFixed(2):"")+":"+(p.volume||"")).sort().join("|");
+    if(psig!==this._psig){this._psig=psig;
+      $("positions-table-body").innerHTML=ps.length?ps.map(p=>{const dir=(p.type===0||p.type==="BUY")?"BUY":"SELL";return '<tr><td>'+(p.symbol||"")+'</td><td class="'+(dir==="BUY"?"pos":"neg")+'">'+dir+'</td><td>'+(p.volume||"")+'</td><td class="'+((p.profit||0)>=0?"pos":"neg")+'">'+money(p.profit)+'</td></tr>';}).join(""):'<tr><td colspan="4" class="empty">None</td></tr>';}
     const os=Array.isArray(d.pending_orders)?d.pending_orders:[];
+    const osig=os.map(o=>(o.ticket||"")+":"+(o.price_open!=null?o.price_open:o.price)).sort().join("|");
+    if(osig!==this._osig){this._osig=osig;
     $("orders-table-body").innerHTML=os.length?os.map(o=>{
       const px=o.price_open!=null?o.price_open:o.price;                 // daemon sends price_open
       const cur=o.price_current!=null?o.price_current:this.lastBid;
@@ -446,7 +573,7 @@ class Axon{
       const dist=(px!=null&&cur)?nf(Math.abs(px-cur)/jpy,1)+"p":"—";
       const ty=(""+(o.type!=null?o.type:"")).replace("ORDER_TYPE_","");
       return '<tr><td>'+(o.symbol||"")+'</td><td>'+ty+'</td><td>'+nf(px,jpy===0.01?3:5)+'</td><td class="d">'+dist+'</td></tr>';
-    }).join(""):'<tr><td colspan="4" class="empty">None</td></tr>';
+    }).join(""):'<tr><td colspan="4" class="empty">None</td></tr>';}
     // chart overlays for the open position on the ACTIVE symbol: entry/SL/TP lines
     try{if(this.series){(this.posLines||[]).forEach(l=>{try{this.series.removePriceLine(l)}catch(e){}});this.posLines=[];
       const mp=ps.find(p=>this.active&&(p.symbol||"").toUpperCase().includes(this.active));
@@ -469,8 +596,11 @@ class Axon{
         if(+tr.mfe>0)this.posLines.push(this.series.createPriceLine({price:e+dir*(+tr.mfe)*pm,color:"rgba(94,201,138,.45)",lineWidth:1,lineStyle:1,axisLabelVisible:true,title:"MFE +"+nf(tr.mfe,0)}));
         if(+tr.mae>0)this.posLines.push(this.series.createPriceLine({price:e-dir*(+tr.mae)*pm,color:"rgba(242,112,138,.45)",lineWidth:1,lineStyle:1,axisLabelVisible:true,title:"MAE -"+nf(tr.mae,0)}));}}}catch(e){}
     // active-trade HUD + live journal
+    // HUD must show the ACTIVE symbol's trade, not ps[0]. ps[0] is the first of the
+    // merged all-symbol list, so viewing a flat symbol showed another symbol's open
+    // trade -- a position not present on the instrument you are looking at.
     const mine=ps.filter(p=>!this.active||(p.symbol||"").toUpperCase().includes(this.active));
-    const p0=ps[0];$("active-trade-hud").innerHTML=p0?('<div class="kv">'+((p0.type===0||p0.type==="BUY")?"BUY":"SELL")+' '+(p0.symbol||"")+' <b>'+(p0.volume||"")+'</b></div><div class="kv">Entry <b>'+nf(p0.price_open,5)+'</b></div><div class="kv">Now <b>'+nf(p0.price_current,5)+'</b></div><div class="kv">PnL <b class="'+((p0.profit||0)>=0?"pos":"neg")+'">'+money(p0.profit)+'</b></div><div class="kv">SL/TP <b>'+nf(p0.sl,5)+' / '+nf(p0.tp,5)+'</b></div>'):'<span class="empty">No open trade.</span>';
+    const p0=mine[0];$("active-trade-hud").innerHTML=p0?('<div class="kv">'+((p0.type===0||p0.type==="BUY")?"BUY":"SELL")+' '+(p0.symbol||"")+' <b>'+(p0.volume||"")+'</b></div><div class="kv">Entry <b>'+nf(p0.price_open,5)+'</b></div><div class="kv">Now <b>'+nf(p0.price_current,5)+'</b></div><div class="kv">PnL <b class="'+((p0.profit||0)>=0?"pos":"neg")+'">'+money(p0.profit)+'</b></div><div class="kv">SL/TP <b>'+nf(p0.sl,5)+' / '+nf(p0.tp,5)+'</b></div>'):'<span class="empty">No open trade.</span>';
     if(this.view==="journal"){this.renderOpen();this.renderStats();}}
 
   onMode(d){const b=$("mode");b.style.display="inline-block";b.textContent=d.label||"LIVE";const c=d.color==="red"?"var(--red)":d.color==="amber"?"var(--amber)":"var(--green)";b.style.color=c;b.style.borderColor=c;}
@@ -496,6 +626,13 @@ class Axon{
     if(this.series&&(d.bid>this._dhP||d.bid<this._dlP))this.dayLines();this.rangeHUD();}
 
   onTrig(d){
+    // Live per-tick values for the telemetry lanes' right-hand readout. Throttled to
+    // ~1s of wall clock: trigger_metrics arrives per tick and a full lane redraw on
+    // every one would burn the main thread for no readable gain.
+    this._telLive={vel_z:d.velocity_z_score,disp_ratio:d.displacement_ratio,q:d.signal_quality,
+                   tick_eff:d.velocity_tick_efficiency,vol_pips:d.vol_pips,h1_bias:d.mtf_h1_bias};
+    if(this.view==="engine"||this.view==="cockpit"){const now=Date.now();
+      if(!this._telAt||now-this._telAt>1000){this._telAt=now;this.drawTelAll();}}
     setV("trigger-state",d.state||"IDLE");setV("trigger-direction",d.direction||"--");setV("trigger-quality",nf(d.signal_quality,2));
     setV("trigger-disp-class",d.displacement_class||"--");setV("trigger-disp-ratio",nf(d.displacement_ratio,2));setV("trigger-vel-z",nf(d.velocity_z_score,2));
     setV("trigger-regime",d.regime||"--");setV("trigger-h1-bias",nf(d.mtf_h1_bias,2));setV("trigger-h4-bias",nf(d.mtf_h4_bias,2));setV("trigger-reason",(d.is_valid?"✓ ":"")+(d.reason||"--"));
@@ -559,7 +696,16 @@ class Axon{
     if(d.events_detected!=null){setV("stats-detected",d.events_detected);setV("stats-fired",d.events_fired);setV("stats-skipped",d.events_skipped);}
     if((d.event_type||"")==="TRADE_CLOSED"&&det.direction&&this.series){this.pushEvt(this.active,{kind:"exit",dir:det.direction,price:this.lastBid,pnl:det.profit,pips:det.pips});}}
 
+  /* daemon broadcasts "decision" the instant ReversalModel fires an entry — was
+     previously dropped on the floor by route(). Surfaced in the reason stream. */
+  onDecision(d){this.feed("sig",(d.signal||"?").toUpperCase()+" · "+(d.system||"engine")+" · Q "+nf(d.quality,2)+(d.paper?" · PAPER":""),d.symbol);}
+  /* daemon broadcasts "trade_closed" with the full exit record (pips, reason,
+     exit_strategy, urgency). Also previously dropped. */
+  onClosed(d){const p=Number(d.pips)||0;
+    this.feed(p>=0?"trd":"ext",(d.direction||"")+" closed "+(p>=0?"+":"")+nf(p,1)+"p ("+(d.outcome||d.reason||"exit")+") via "+(d.exit_strategy||"—"),d.symbol);}
+
   onNews(d){const cal=(d.calendar||[]).filter(x=>x.mins_away>=-30).slice(0,10);
+    setV("econ-count",cal.length?cal.length+" UPCOMING":"NONE");
     $("econ-calendar-container").innerHTML=cal.length?cal.map(x=>{const col=x.impact==="High"?"var(--red)":x.impact==="Medium"?"var(--amber)":"var(--dim)";const away=x.mins_away>=0?"in "+Math.round(x.mins_away)+"m":Math.abs(Math.round(x.mins_away))+"m ago";
       return '<div class="row"><span style="display:flex;gap:7px"><span class="imp" style="background:'+col+'"></span><span>'+(x.currency||"")+' · '+(x.title||"").slice(0,34)+(x.is_blocking?' <span class="neg" style="font-size:8px">⛔</span>':'')+'</span></span><span class="d mono" style="font-size:9px">'+away+'</span></div>';}).join(""):'<div class="empty">No upcoming events.</div>';}
 
@@ -680,10 +826,24 @@ class Axon{
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(()=>{this.drawSessions();this.drawReplay();this.drawPatterns();});
     new ResizeObserver(es=>{const r=es[0]&&es[0].contentRect;if(r&&r.width>0){this.chart.resize(r.width,r.height);setTimeout(()=>{this.drawSessions();this.drawReplay();this.drawPatterns();},40);}}).observe(el);
   }catch(e){console.warn("chart",e);}}
-  render(){if(!this.series)return;const a=this.arr(this.tf);this.series.setData(a.map(c=>({time:+c.time,open:+c.open,high:+c.high,low:+c.low,close:+c.close})));
-    if(this.hist)this.hist.setData(a.map(c=>{const bv=this._barVel[+c.time],clx=bv&&(bv.u||bv.z>=1.0);return {time:+c.time,value:Math.abs(c.close-c.open),color:clx?"rgba(232,184,102,.8)":(c.close>=c.open?"rgba(62,224,138,.28)":"rgba(255,93,115,.28)")};}));if(!this._fit){this.chart.timeScale().fitContent();this._fit=true;}this.drawSessions();this.drawReplay();this.drawPatterns();this.dayLines();this.renderMarkers();this.rangeHUD();}
+  /* Fit the time scale to the chart area whenever the dataset materially changes.
+     A one-shot latch was wrong: focus() repaints from the cached snapshot first
+     (partial bars), that fit stuck, then the full live dataset arrived and never
+     refit — leaving the previous symbol's window on the new data. Refit on symbol
+     change, bulk arrival, or shrink; leave the user's pan/zoom alone when a single
+     candle closes. */
+  autoFit(n){if(!this.chart)return;const sym=this.active,prev=this._fitN||0;
+    if(this._fitSym!==sym||n<prev||n-prev>3){
+      const el=$("price-chart");
+      if(el&&el.clientWidth>0)this.chart.resize(el.clientWidth,el.clientHeight);
+      this.chart.timeScale().fitContent();this._fitSym=sym;this._fitN=n;
+    }else if(n>prev)this._fitN=n;}
+
+  render(){if(!this.series)return;const a=this.sane(this.arr(this.tf));this.series.setData(a.map(c=>({time:+c.time,open:+c.open,high:+c.high,low:+c.low,close:+c.close})));
+    if(this.hist)this.hist.setData(a.map(c=>{const bv=this._barVel[+c.time],clx=bv&&(bv.u||bv.z>=1.0);return {time:+c.time,value:Math.abs(c.close-c.open),color:clx?"rgba(232,184,102,.8)":(c.close>=c.open?"rgba(62,224,138,.28)":"rgba(255,93,115,.28)")};}));this.autoFit(a.length);this.drawSessions();this.drawReplay();this.drawPatterns();this.dayLines();this.renderMarkers();this.rangeHUD();}
   dayLines(){try{if(!this.series||!this.m15.length)return;const n=new Date(),k=Date.UTC(n.getUTCFullYear(),n.getUTCMonth(),n.getUTCDate())/1000;
-    const today=this.m15.filter(c=>+c.time>=k);if(!today.length)return;
+    const m15=this.sane(this.m15);if(!m15.length)return;
+    const today=m15.filter(c=>+c.time>=k);if(!today.length)return;
     const hi=Math.max(...today.map(c=>+c.high)),lo=Math.min(...today.map(c=>+c.low));
     if(this._dhP===hi&&this._dlP===lo)return;this._dhP=hi;this._dlP=lo;
     [this._dhL,this._dlL].forEach(l=>{if(l)try{this.series.removePriceLine(l)}catch(e){}});
@@ -691,11 +851,11 @@ class Axon{
     this._dlL=this.series.createPriceLine({price:lo,color:"rgba(255,190,80,.6)",lineWidth:1,lineStyle:2,axisLabelVisible:true,title:"DAY L"});
     // ADR band: projected day-range exhaustion levels (fade zones)
     [this._adrHi,this._adrLo].forEach(l=>{if(l)try{this.series.removePriceLine(l)}catch(e){}});this._adrHi=this._adrLo=null;
-    const dd={};this.m15.forEach(c=>{const dt=new Date(+c.time*1000),k=dt.getUTCFullYear()+"-"+dt.getUTCMonth()+"-"+dt.getUTCDate(),g=dd[k]||(dd[k]={h:-1e9,l:1e9});g.h=Math.max(g.h,+c.high);g.l=Math.min(g.l,+c.low);});
+    const dd={};m15.forEach(c=>{const dt=new Date(+c.time*1000),k=dt.getUTCFullYear()+"-"+dt.getUTCMonth()+"-"+dt.getUTCDate(),g=dd[k]||(dd[k]={h:-1e9,l:1e9});g.h=Math.max(g.h,+c.high);g.l=Math.min(g.l,+c.low);});
     const rr=Object.values(dd).map(g=>(g.h-g.l)/this.pip).filter(x=>x>0),pr5=rr.slice(-6,-1),adr=pr5.length?pr5.reduce((a,b)=>a+b,0)/pr5.length:0;
     // Only draw an ADR line when it is within reach of recent price — otherwise a
     // far projection expands the price scale and squashes the candles + levels.
-    if(adr>0){const rc=this.m15.slice(-96),chi=Math.max.apply(0,rc.map(c=>+c.high)),clo=Math.min.apply(0,rc.map(c=>+c.low)),cr=(chi-clo)||adr*this.pip;
+    if(adr>0){const rc=m15.slice(-96),chi=Math.max.apply(0,rc.map(c=>+c.high)),clo=Math.min.apply(0,rc.map(c=>+c.low)),cr=(chi-clo)||adr*this.pip;
       const aHi=lo+adr*this.pip,aLo=hi-adr*this.pip;
       if(aHi<=chi+cr*0.15)this._adrHi=this.series.createPriceLine({price:aHi,color:"rgba(168,155,236,.5)",lineWidth:1,lineStyle:1,axisLabelVisible:true,title:"ADR↑ fade"});
       if(aLo>=clo-cr*0.15)this._adrLo=this.series.createPriceLine({price:aLo,color:"rgba(168,155,236,.5)",lineWidth:1,lineStyle:1,axisLabelVisible:true,title:"ADR↓ fade"});}}catch(e){}}
@@ -704,7 +864,8 @@ class Axon{
     const hi=this._dhP,lo=this._dlP,pr=this.lastBid,pm=this.pip;
     if(!hi||!lo||hi<=lo||!pr){h.innerHTML="";return;}
     const rng=(hi-lo)/pm;
-    const days={};this.m15.forEach(c=>{const d=new Date(+c.time*1000),k=d.getUTCFullYear()+"-"+d.getUTCMonth()+"-"+d.getUTCDate(),g=days[k]||(days[k]={h:-1e9,l:1e9});g.h=Math.max(g.h,+c.high);g.l=Math.min(g.l,+c.low);});
+    const m15=this.sane(this.m15);
+    const days={};m15.forEach(c=>{const d=new Date(+c.time*1000),k=d.getUTCFullYear()+"-"+d.getUTCMonth()+"-"+d.getUTCDate(),g=days[k]||(days[k]={h:-1e9,l:1e9});g.h=Math.max(g.h,+c.high);g.l=Math.min(g.l,+c.low);});
     const rs=Object.values(days).map(g=>(g.h-g.l)/pm).filter(x=>x>0),prior=rs.slice(-6,-1),adr=prior.length?prior.reduce((a,b)=>a+b,0)/prior.length:rng;
     const pos=Math.max(0,Math.min(100,((pr-lo)/(hi-lo))*100)),used=adr?Math.min(300,(rng/adr)*100):0;
     const posC=(pos>=80||pos<=20)?"var(--amber)":"var(--sub)",usedC=used>=100?"var(--red)":used>=80?"var(--amber)":"var(--sub)";
@@ -713,7 +874,7 @@ class Axon{
     if(rst){const hh=new Date().getUTCHours();const W={ASIA:[0,8],LONDON:[7,16],NY:[12,21]};
       const cur=hh<7?"ASIA":hh<12?"LONDON":hh<21?"NY":"ASIA",st=rst[cur];
       if(st&&st.avg_pips){const n2=new Date(),k=Date.UTC(n2.getUTCFullYear(),n2.getUTCMonth(),n2.getUTCDate())/1000,a=W[cur][0],b=W[cur][1];
-        let sh=-1e9,sl=1e9;this.m15.forEach(c=>{if(+c.time<k)return;const H=new Date(+c.time*1000).getUTCHours();if(H>=a&&H<b){sh=Math.max(sh,+c.high);sl=Math.min(sl,+c.low);}});
+        let sh=-1e9,sl=1e9;m15.forEach(c=>{if(+c.time<k)return;const H=new Date(+c.time*1000).getUTCHours();if(H>=a&&H<b){sh=Math.max(sh,+c.high);sl=Math.min(sl,+c.low);}});
         const sr=(sh>sl)?(sh-sl)/pm:0,sp=Math.min(300,(sr/st.avg_pips)*100),lbl={ASIA:"ASIA",LONDON:"LDN",NY:"NY"}[cur];
         const sc=sp>=100?"var(--red)":sp>=80?"var(--amber)":"var(--sub)";
         sessLine='<div><span class="d">'+lbl+' </span><b style="color:'+sc+'">'+Math.round(sp)+'%</b> <span class="d">'+Math.round(sr)+'/'+Math.round(st.avg_pips)+'p</span></div>';}}
@@ -722,7 +883,12 @@ class Axon{
   }catch(e){}}
   clearLevelLines(){this.levelLines.forEach(l=>{try{this.series.removePriceLine(l)}catch(e){}});this.levelLines=[];}
   clearZone(){this.zoneLines.forEach(l=>{try{this.series.removePriceLine(l)}catch(e){}});this.zoneLines=[];}
-  clearOverlays(){this.clearLevelLines();this.clearZone();this.markers=[];if(this.series&&this.series.setMarkers)this.series.setMarkers([]);}
+  clearOverlays(){this.clearLevelLines();this.clearZone();this.markers=[];if(this.series&&this.series.setMarkers)this.series.setMarkers([]);
+    // The SVG layers are painted from per-symbol fetches that resolve asynchronously.
+    // Without wiping them here the outgoing symbol's patterns / replay ribbon /
+    // session bands stay drawn over the incoming chart until those fetches land.
+    ["pat-svg","replay-svg","sess-svg"].forEach(id=>{const s=$(id);if(s)s.innerHTML="";});
+    const h=$("range-hud");if(h)h.innerHTML="";}
   _saveEvts(){try{localStorage.setItem("axon_evts",JSON.stringify(this.evts))}catch(e){}}
   pushEvt(sym,ev){if(!sym)return;ev.t=ev.t||this.lastT||Math.floor(Date.now()/1000);
     const arr=(this.evts[sym]=this.evts[sym]||[]);
@@ -743,7 +909,101 @@ class Axon{
     (j.signals||[]).forEach(s=>{const t=Math.floor(Date.parse((s.timestamp||"").replace(" ","T")+"Z")/1000);if(!t)return;
       this.pushEvt(sym,{kind:"fade",dir:(s.direction||"").toUpperCase(),price:+s.price,t,ticket:"fade_"+t});});}catch(e){}}
   async loadRangeStats(){try{const sym=this.active;if(!sym)return;const r=await fetch("/api/range_stats?symbol="+sym);const j=await r.json();this._rstat=(j&&j.sessions&&Object.keys(j.sessions).length)?j:null;this.rangeHUD();}catch(e){this._rstat=null;}}
-  async loadReplay(){try{const sym=this.active;if(!sym)return;const r=await fetch("/api/replay?symbol="+sym+"&buckets=600");const j=await r.json();this._replay=(j&&j.buckets)?j.buckets:[];this.drawReplay();}catch(e){this._replay=[];}}
+  /* Tier-1 telemetry lanes. Reuses this._replay (already fetched by loadReplay for the
+     chart ribbon) so there is no extra request. Each lane draws the M15 bucket mean as a
+     series, the engine's actual gate as a dashed reference, and the live per-tick value
+     on the right. History and live tick run at different cadences; the layout says so
+     rather than blending them into one misleading line. */
+  // Ordered by forward-predictive power (132k-row mining, 07-21 FX). Signal lanes
+  // first: h1_bias direction (sep 0.58, dominant) and vol_pips magnitude (sep 0.19)
+  // are the velocity values that actually mark true entries. Decay/Reversal-P scored
+  // sep ~0 for entry timing and are demoted + labelled as such -- shown for context,
+  // not trusted as entry signals.
+  telLanes(){return [
+    {k:"h1_bias", nm:"H1 Direction",sub:"ENTRY signal · dominant",col:"var(--acc)", gate:0, fmt:2, min:-1,max:1},
+    {k:"vol_pips",nm:"Velocity vol",sub:"ENTRY signal · magnitude",col:"var(--cyan)",fmt:1, min:0},
+    {k:"vel_z",   nm:"Velocity z",  sub:"peak overlay", col:"var(--cyan)",  gate:1.0,  fmt:2, pk:"vz_pk"},
+    {k:"vel_pct", nm:"Velocity %",  sub:"percentile",   col:"var(--sub)",   gate:70,   fmt:0, max:100},
+    {k:"q",       nm:"Signal Q",    sub:"gate 0.65",    col:"var(--acc)",   gate:0.65, fmt:2, min:0,max:1},
+    {k:"disp_ratio",nm:"Displace",  sub:"disp ratio",   col:"var(--violet)",fmt:3},
+    {k:"decay_ratio",nm:"Decay",    sub:"flat for entry (sep~0)",col:"var(--amber)",gate:0.6, fmt:2, min:0,max:1},
+    {k:"revp",    nm:"Reversal P",  sub:"non-predictive (sep~0)",col:"var(--green)", fmt:2, min:0,max:1},
+  ];}
+
+  /* Renders into every mounted telemetry surface: the cockpit floating dock and the
+     full-size Engine > Telemetry view. Both read the same _replay array. */
+  drawTelAll(){this.drawTel("tel-lanes-ck","tel-span-ck");this.drawTel("tel-lanes","tel-span");}
+
+  drawTel(boxId,spanId){
+    const box=$(boxId);if(!box)return;
+    const bs=this._replay;
+    if(!bs||!bs.length){box.innerHTML='<div class="empty">Awaiting engine snapshots…</div>';setV(spanId,"—");return;}
+    const t0=bs[0].t,t1=bs[bs.length-1].t,span=(t1-t0)||1;
+    const W=1000,H=44,NS="http://www.w3.org/2000/svg";
+    const fmtT=e=>new Date(e*1000).toISOString().slice(5,16).replace("T"," ");
+    setV(spanId,bs.length+" BKT · "+fmtT(t0)+" → "+fmtT(t1));
+    const live=this._telLive||{};
+    box.innerHTML="";
+    this.telLanes().forEach(L=>{
+      const vals=bs.map(b=>b[L.k]).filter(v=>v!=null&&!isNaN(v));
+      const row=document.createElement("div");row.className="tlane";
+      if(!vals.length){
+        row.innerHTML='<div class="tnm">'+L.nm+'<i>'+L.sub+'</i></div>'+
+          '<div class="empty" style="font-size:9px">no data</div><div class="tlive d">--</div>';
+        box.appendChild(row);return;}
+      // Scale: honour declared bounds, else fit to data. Always include the gate line
+      // so the reference cannot fall outside the drawn range.
+      // Scale to the MEAN series only. The peak overlay is deliberately excluded:
+      // vel_z peaks reach ~79 against a mean range of -0.4..1.3, so including them
+      // crushes the line into a sliver. Peaks are clipped to the lane top instead.
+      let lo=(L.min!=null)?L.min:Math.min.apply(0,vals), hi=(L.max!=null)?L.max:Math.max.apply(0,vals);
+      if(L.gate!=null){lo=Math.min(lo,L.gate);hi=Math.max(hi,L.gate);}
+      if(hi<=lo)hi=lo+1;
+      const pad=(hi-lo)*0.08;lo-=pad;hi+=pad;
+      const X=t=>((t-t0)/span)*W, Y=v=>H-((v-lo)/(hi-lo))*H;
+      // Break the polyline wherever a bucket is null or the recording gapped, so the
+      // 6 disconnected capture segments show as gaps instead of straight-line lies.
+      const segs=[];let cur=[];
+      let prevT=null;
+      bs.forEach(b=>{
+        const v=b[L.k];
+        if(v==null||isNaN(v)||(prevT!=null&&(b.t-prevT)>1800)){if(cur.length>1)segs.push(cur);cur=[];}
+        if(v!=null&&!isNaN(v))cur.push(X(b.t).toFixed(1)+","+Y(v).toFixed(1));
+        prevT=b.t;});
+      if(cur.length>1)segs.push(cur);
+      let inner="";
+      if(L.pk){ // peak |z| as faint bars behind the mean line
+        bs.forEach(b=>{const p=b[L.pk];if(p==null||isNaN(p))return;
+          const y=Math.max(0,Math.min(H,Y(p)));            // clip, never rescale
+          const pegged=Y(p)<0;                              // spike exceeds the lane
+          inner+='<line x1="'+X(b.t).toFixed(1)+'" y1="'+H+'" x2="'+X(b.t).toFixed(1)+'" y2="'+y.toFixed(1)+
+                 '" stroke="'+L.col+'" stroke-opacity="'+(pegged?".42":".18")+'" stroke-width="1"/>';});}
+      if(L.gate!=null)inner+='<line x1="0" y1="'+Y(L.gate).toFixed(1)+'" x2="'+W+'" y2="'+Y(L.gate).toFixed(1)+
+        '" stroke="var(--red)" stroke-opacity=".5" stroke-width="1" stroke-dasharray="4 3"/>';
+      segs.forEach(s=>{inner+='<polyline points="'+s.join(" ")+'" fill="none" stroke="'+L.col+
+        '" stroke-width="1.4" vector-effect="non-scaling-stroke"/>';});
+      const lastV=vals[vals.length-1];
+      const lv=live[L.k];
+      const shown=(lv!=null&&!isNaN(lv))?lv:lastV;
+      const isLive=(lv!=null&&!isNaN(lv));
+      const hot=(L.gate!=null)&&(shown>=L.gate);
+      row.innerHTML='<div class="tnm">'+L.nm+'<i>'+L.sub+'</i></div>'+
+        '<svg viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'+inner+'</svg>'+
+        '<div class="tlive'+(hot?" pos":"")+'">'+Number(shown).toFixed(L.fmt)+
+        '<s>'+(isLive?"LIVE":"M15")+'</s></div>';
+      box.appendChild(row);
+    });}
+
+  /* Caches per symbol so a re-focus repaints instantly instead of blanking for the
+     round trip. The response is discarded if the user switched away mid-flight --
+     otherwise a slow fetch for the previous symbol overwrites the current one. */
+  async loadReplay(){const sym=this.active;if(!sym)return;
+    try{const r=await fetch("/api/replay?symbol="+sym+"&buckets=600");const j=await r.json();
+      const bs=(j&&j.buckets)?j.buckets:[];
+      (this._repCache=this._repCache||{})[sym]=bs;
+      if(this.active!==sym)return;
+      this._replay=bs;this.drawReplay();this.drawTelAll();
+    }catch(e){if(this.active===sym){this._replay=[];this.drawTelAll();}}}
   async loadPatterns(){try{const sym=this.active;if(!sym)return;const [r1,r2]=await Promise.all([fetch("/api/patterns?symbol="+sym+"&days=8"),fetch("/api/exhaustion?symbol="+sym+"&days=4")]);const j1=await r1.json(),j2=await r2.json();this._patterns=[].concat((j1&&j1.patterns)||[],(j2&&j2.patterns)||[]);this.drawPatterns();}catch(e){this._patterns=[];}}
   drawPatterns(){try{if(!this.chart||!this.series)return;const el=$("price-chart");let svg=$("pat-svg");
     if(!svg){svg=document.createElementNS("http://www.w3.org/2000/svg","svg");svg.id="pat-svg";svg.style.cssText="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:2";el.appendChild(svg);}

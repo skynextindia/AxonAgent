@@ -886,7 +886,15 @@ class DashboardServer:
                                            "rank": -1, "q": 0.0, "skips": {},
                                            "revp_s": 0.0, "revp_n": 0,
                                            "exh": False, "rpos": None,
-                                           "swp": False, "void": False, "bos": False}
+                                           "swp": False, "void": False, "bos": False,
+                                           # Tier-1 telemetry series (Engine > Telemetry charts).
+                                           # Mean per bucket, plus peak |vel_z| because the
+                                           # velocity spike is the signal, not the average.
+                                           "tel": {k: [0.0, 0] for k in
+                                                   ("vel_z", "vel_pct", "decay_ratio",
+                                                    "disp_ratio", "tick_eff",
+                                                    "vol_pips", "h1_bias")},
+                                           "vz_pk": 0.0}
                         rk = RANK.get(st, 0)
                         if rk >= a["rank"]:
                             a["rank"] = rk
@@ -918,18 +926,45 @@ class DashboardServer:
                             a["rpos"] = float(r.get("range_pos") or 0)
                         except ValueError:
                             pass
+                        # Tier-1 telemetry accumulation. Each column is optional and
+                        # absent from older rotated schemas, so every field is guarded
+                        # independently -- one missing column must not drop the bucket.
+                        for _tk, _tc in (("vel_z", "vel_z"), ("vel_pct", "vel_pct"),
+                                         ("decay_ratio", "decay_ratio"),
+                                         ("disp_ratio", "disp_ratio"),
+                                         ("tick_eff", "tick_eff"),
+                                         ("vol_pips", "vol_pips"),
+                                         ("h1_bias", "h1_bias")):
+                            _raw = r.get(_tc)
+                            if _raw is None or _raw == "":
+                                continue
+                            try:
+                                _v = float(_raw)
+                            except (ValueError, TypeError):
+                                continue
+                            _acc = a["tel"][_tk]
+                            _acc[0] += _v
+                            _acc[1] += 1
+                            if _tk == "vel_z" and abs(_v) > abs(a["vz_pk"]):
+                                a["vz_pk"] = _v
             except Exception as e:
                 return {"status": "error", "message": str(e), "buckets": []}
             res = []
             for k in sorted(agg.keys())[-int(buckets):]:
                 a = agg[k]
                 sk = sorted(a["skips"].items(), key=lambda x: -x[1])
-                res.append({"t": a["t"], "state": a["state"], "dir": a["dir"],
-                            "q": round(a["q"], 2),
-                            "skip": sk[0][0] if sk else "",
-                            "revp": round(a["revp_s"] / a["revp_n"], 2) if a["revp_n"] else 0.0,
-                            "exh": a["exh"], "swp": a["swp"], "void": a["void"], "bos": a["bos"],
-                            "rpos": round(a["rpos"], 2) if a["rpos"] is not None else None})
+                row = {"t": a["t"], "state": a["state"], "dir": a["dir"],
+                       "q": round(a["q"], 2),
+                       "skip": sk[0][0] if sk else "",
+                       "revp": round(a["revp_s"] / a["revp_n"], 2) if a["revp_n"] else 0.0,
+                       "exh": a["exh"], "swp": a["swp"], "void": a["void"], "bos": a["bos"],
+                       "rpos": round(a["rpos"], 2) if a["rpos"] is not None else None}
+                # Telemetry means. null (not 0.0) when the column was absent for the
+                # whole bucket, so the client can draw a gap instead of a fake zero.
+                for _tk, (_s, _n) in a["tel"].items():
+                    row[_tk] = round(_s / _n, 3) if _n else None
+                row["vz_pk"] = round(a["vz_pk"], 2) if a["tel"]["vel_z"][1] else None
+                res.append(row)
             out["buckets"] = res
             return out
 
