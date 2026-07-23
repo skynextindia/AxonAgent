@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -101,6 +102,32 @@ class ExitEngine:
         
         profit_protect_pips = float(self.config.get("exit_profit_protect_pips", 4.0)) * vol_scale
 
+        # --- MINIMUM HOLD GATE ---
+        # Measured 2026-07-23 over 109 real FX trades: median MFE offered was
+        # 2.10p, but the market's own median favourable excursion is 2.80p at a
+        # 15-minute hold, 5.50p at 60m and 11.32p at 240m, while round-trip cost
+        # is a flat ~0.8-1.2p. The soft gates below were closing trades after
+        # 2-4 minutes, i.e. before even the 15-minute opportunity had formed
+        # (0 stop-loss and 0 take-profit hits in 109 trades — every close came
+        # from a soft gate). Hold the position until it has had time to develop;
+        # SL/TP still protect it throughout. 0.0 restores previous behaviour.
+        elapsed_sec = 0.0
+        entry_time = getattr(trade_state, "entry_time", None)
+        if isinstance(entry_time, datetime):
+            try:
+                elapsed_sec = (datetime.now(entry_time.tzinfo) - entry_time).total_seconds()
+            except (TypeError, ValueError, OverflowError):
+                elapsed_sec = 0.0
+        min_hold_sec = float(self.config.get("exit_min_hold_seconds", 0.0))
+        soft_gates_armed = elapsed_sec >= min_hold_sec
+        if not soft_gates_armed:
+            return ExitSignal(
+                should_exit=False,
+                action="HOLD",
+                reason=f"MIN_HOLD: {elapsed_sec:.0f}s of {min_hold_sec:.0f}s elapsed",
+                urgency=0.0,
+            )
+
         # --- PRIORITY 1: THESIS FAILURE (highest urgency) ---
         # Only close on thesis failure if the trade is NOT already meaningfully
         # profitable. Once in profit past exit_profit_protect_pips, hand it to
@@ -128,15 +155,21 @@ class ExitEngine:
         # every winning trade at scalp size. Once the trade is in profit past
         # `exit_profit_protect_pips`, hand it to the trailing manager instead of
         # closing here. Losing/flat trades are still cut instantly (correct).
+        # Gated by config. Measured 2026-07-23 across 109 real FX trades this is
+        # the only net-negative exit gate: n=33, net -69.8p, expectancy -2.12p.
+        # thesis_failure (+43.5p) and exhaustion (+4.9p) are both net positive.
+        # Disabled deliberately on that evidence; set True to restore.
+        adverse_enabled = self.config.get("exit_engine_enable_adverse_impulse", True)
         adverse_min_ticks = self.config.get("adverse_impulse_min_ticks", 30)
-        
+
         # Check tick efficiency defensively from velocity snapshot
         tick_eff = 1.0
         if snapshot and hasattr(snapshot, "velocity") and snapshot.velocity:
             tick_eff = getattr(snapshot.velocity, "tick_efficiency", 1.0)
 
         if (
-            velocity_pct > 70
+            adverse_enabled
+            and velocity_pct > 70
             and displacement == "IMPULSE"
             and not trade_state.last_displacement_direction_favorable
             and trade_state.current_phase in ["ENTRY", "EXPANSION"]

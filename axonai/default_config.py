@@ -162,7 +162,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_min_price_distance_to_trail": 2.0,
     "realtime_max_trail_distance": 15.0,
     "realtime_base_trail_buffer": 7.5,
-    "realtime_min_trail_floor_pips": 4.0,
+    # NOTE: realtime_min_trail_floor_pips is set above (6.0). It used to be
+    # re-declared here as 4.0, and because a later key wins in a dict literal
+    # that silently reverted the 2026-07-17 journal-study widening. Do not
+    # re-add it here.
 
     # ── EOD (End-of-Day) position close ─────────────────────────────────────
     # Force-close all open positions when the trading day winds down, matching
@@ -206,12 +209,28 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # trail + defined SL/TP, to test whether trades ride further without the exhaustion
     # cut. Flip back to True to restore the exhaustion exit.
     "exit_engine_enable_exhaustion": False,
+    # adverse_impulse disabled 2026-07-23. Measured across 109 real FX trades it
+    # is the only net-negative gate: n=33, net -69.8p, expectancy -2.12p, while
+    # thesis_failure is +43.5p and exhaustion +4.9p.
+    "exit_engine_enable_adverse_impulse": False,
+    # Minimum hold before ANY soft gate may close a position. SL/TP still apply
+    # throughout. Measured 2026-07-23: the market's median favourable excursion
+    # is 2.80p at a 15m hold, 5.50p at 60m, 11.32p at 240m, while round-trip
+    # cost is a flat ~0.8-1.2p — so gross opportunity scales with holding time
+    # but cost does not. Our trades were closing in 2-4 minutes with a median
+    # MFE of 2.10p, below even the 15-minute ceiling. 0.0 = previous behaviour.
+    "exit_min_hold_seconds": 3600.0,
 
     # ── Entry: retest directional-approach gate ─────────────────────────────
     # True = a retest trigger requires price to pull away from the anomaly level and then
     # come BACK toward it before firing (fixes SELL-at-bottom / BUY-at-top mistimed entries).
     # False = legacy symmetric-zone behaviour (fire on first momentum stall in the zone).
     "entry_retest_require_approach": True,
+    # Optimistic velocity-decay trigger, disabled 2026-07-23. It transitioned
+    # ARMING -> TRIGGERED without reading `dist` at all (no breakaway, no
+    # location, no retest), and was responsible for the bulk of the 98-99% of
+    # trigger events that skipped RETEST_WAIT entirely. True restores it.
+    "entry_enable_optimistic_decay_trigger": False,
 
     # ── HTF Coherence Dampening ────────────────────────────────────────────
     "htf_opposing_sensitivity_multiplier": 1.5,       # more aggressive exits when HTF opposes
