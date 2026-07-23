@@ -102,15 +102,19 @@ class ExitEngine:
         
         profit_protect_pips = float(self.config.get("exit_profit_protect_pips", 4.0)) * vol_scale
 
-        # --- MINIMUM HOLD GATE ---
+        # --- MINIMUM HOLD (gate-specific) ---
         # Measured 2026-07-23 over 109 real FX trades: median MFE offered was
         # 2.10p, but the market's own median favourable excursion is 2.80p at a
         # 15-minute hold, 5.50p at 60m and 11.32p at 240m, while round-trip cost
-        # is a flat ~0.8-1.2p. The soft gates below were closing trades after
-        # 2-4 minutes, i.e. before even the 15-minute opportunity had formed
-        # (0 stop-loss and 0 take-profit hits in 109 trades — every close came
-        # from a soft gate). Hold the position until it has had time to develop;
-        # SL/TP still protect it throughout. 0.0 restores previous behaviour.
+        # is a flat ~0.8-1.2p. The soft cutters were closing trades after 2-4
+        # minutes, before the opportunity had formed.
+        #
+        # BUT min-hold must NOT gag every gate. thesis_failure is net +43.5p over
+        # those 109 trades — the one soft gate that works — and blanket-suppressing
+        # it for an hour lets a genuinely broken thesis ride on the initial SL. So
+        # min-hold now suppresses only the noise CUTTERS (adverse_impulse,
+        # exhaustion); thesis_failure and the protective RETEST_TRAP hold always
+        # run. exit_min_hold_exempt_thesis=False reverts to suppressing everything.
         elapsed_sec = 0.0
         entry_time = getattr(trade_state, "entry_time", None)
         if isinstance(entry_time, datetime):
@@ -119,8 +123,11 @@ class ExitEngine:
             except (TypeError, ValueError, OverflowError):
                 elapsed_sec = 0.0
         min_hold_sec = float(self.config.get("exit_min_hold_seconds", 0.0))
-        soft_gates_armed = elapsed_sec >= min_hold_sec
-        if not soft_gates_armed:
+        within_min_hold = elapsed_sec < min_hold_sec
+        exempt_thesis = self.config.get("exit_min_hold_exempt_thesis", True)
+        # When exempt_thesis is False, restore the old behaviour: nothing runs
+        # until min-hold elapses.
+        if within_min_hold and not exempt_thesis:
             return ExitSignal(
                 should_exit=False,
                 action="HOLD",
@@ -129,6 +136,8 @@ class ExitEngine:
             )
 
         # --- PRIORITY 1: THESIS FAILURE (highest urgency) ---
+        # Always eligible: the trade's own reason-for-being is gone. Never gated by
+        # min-hold (it is the measured-positive gate).
         # Only close on thesis failure if the trade is NOT already meaningfully
         # profitable. Once in profit past exit_profit_protect_pips, hand it to
         # VelocityTrailingManager which will lock gains via SL — cutting here
@@ -169,6 +178,7 @@ class ExitEngine:
 
         if (
             adverse_enabled
+            and not within_min_hold  # noise cutter — suppressed during min-hold
             and velocity_pct > 70
             and displacement == "IMPULSE"
             and not trade_state.last_displacement_direction_favorable
@@ -211,6 +221,7 @@ class ExitEngine:
 
         if (
             exhaustion_enabled
+            and not within_min_hold  # noise cutter — suppressed during min-hold
             and trade_state.current_phase == "EXHAUSTION"
             and velocity_pct < exhaustion_vel_max
             and decay_ratio >= 0.80

@@ -225,6 +225,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # but cost does not. Our trades were closing in 2-4 minutes with a median
     # MFE of 2.10p, below even the 15-minute ceiling. 0.0 = previous behaviour.
     "exit_min_hold_seconds": 3600.0,
+    # min-hold is gate-SPECIFIC: True suppresses only the noise cutters
+    # (adverse_impulse, exhaustion) during the hold window while thesis_failure
+    # and the RETEST_TRAP protective hold keep running. thesis_failure is net
+    # +43.5p over 109 trades, so gagging it for an hour would throw away the one
+    # soft gate that works. False = legacy behaviour (suppress everything until
+    # the window elapses).
+    "exit_min_hold_exempt_thesis": True,
 
     # ── Entry: retest directional-approach gate ─────────────────────────────
     # True = a retest trigger requires price to pull away from the anomaly level and then
