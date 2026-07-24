@@ -527,6 +527,11 @@ class ReversalModel:
             )
             # Carry the confluence score for sizing/observability regardless.
             entry_decision.signal_quality = max(entry_decision.signal_quality, round(score, 2))
+            # Raw gate score, kept SEPARATE from signal_quality (which is max'd with
+            # the state-machine quality above and therefore over-reports). This is the
+            # exact number compared to the per-pair floor; logged per trade so we can
+            # test whether a higher score actually predicts a better outcome.
+            entry_decision.confluence_score = round(score, 2)
             if not allow:
                 entry_decision.is_valid_entry = False
                 entry_decision.skip_reason = reason

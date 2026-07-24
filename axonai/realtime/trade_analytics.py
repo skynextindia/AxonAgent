@@ -87,6 +87,7 @@ class TradeRecord:
     liquidity_void: bool = False
     # Order context
     signal_quality: float = 0.0
+    confluence_score: float = 0.0    # raw unified-gate score at entry (reversal_model ~line 530); signal_quality over-reports
     entry_style: str = ""
     initial_sl_pips: float = 0.0
 
@@ -190,6 +191,9 @@ class TradeAnalytics:
         record.strategy_version = strategy_version
         record.entry_state = str(_g(ed, "state", "") or "")
         record.setup_source = str(getattr(snapshot, "candle_setup_source", "") or "")
+        # Raw confluence score at the gate (not signal_quality, which is inflated by
+        # the state-machine max). This is the number to correlate against pips_profit.
+        record.confluence_score = round(float(_g(ed, "confluence_score", 0.0) or 0.0), 3)
         # Reversal signature (velocity) — the field set our analysis proved matters
         record.vel_pct = round(float(_g(v, "percentile", 0.0)), 2)
         record.vel_tick_eff = round(float(_g(v, "tick_efficiency", 0.0)), 3)
