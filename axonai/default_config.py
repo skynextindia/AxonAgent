@@ -173,6 +173,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_log_events": True,
     "realtime_magic_number": 123456,
     "realtime_default_lot_size": 0.01,
+    # Minimum executable lot for EVERY pair: dynamic risk-sizing scales UP from
+    # here and is never allowed below it (nor below it after correlation scaling).
+    # NOTE: a 1.0-lot floor overrides the risk-% target on small accounts — e.g.
+    # EURUSD 1.0 lot with a 16-pip stop risks ~$160 (~1.6% of a $10k account).
+    "realtime_min_lot": 1.0,
     "realtime_deviation": 20,
     "realtime_min_confluence_conditions": 1,
     "realtime_dry_run": True,
@@ -215,7 +220,7 @@ SYMBOL_CALIBRATION = {
         "pip_size": 0.0001,
         "pip_value_per_lot": 10.0,   # USD-quote pair: ~$10 / pip / 1.0 lot
         "risk_pct": 0.01,
-        "max_lot": 0.10,
+        "max_lot": 2.0,              # hard safety ceiling; 1% risk sizes to ~0.6 lot
         "sl_atr_mult": 2.0,
         "tp_atr_mult": 2.0,
         "min_stop_pips": 16.0,
@@ -230,7 +235,7 @@ SYMBOL_CALIBRATION = {
         # not a constant. None → compute dynamically at order time from live price.
         "pip_value_per_lot": None,
         "risk_pct": 0.01,
-        "max_lot": 0.10,
+        "max_lot": 2.0,              # hard safety ceiling; 1% risk sizes to ~1.0 lot
         "sl_atr_mult": 2.0,
         "tp_atr_mult": 2.0,
         "min_stop_pips": 16.0,

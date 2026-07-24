@@ -136,14 +136,20 @@ class MT5TradeExecutor:
         tp = round(tp, digits)
         price = round(price, digits)
 
-        # 3. Dynamic Position Sizing based on Account Equity & Risk Percentage exactly as requested
+        # 3. Risk-based dynamic position sizing for BOTH pairs. The lot is derived
+        # from account equity, the configured risk %, and the actual stop distance,
+        # so every trade risks the same slice of the account regardless of pair.
+        # This is NOT gated by realtime_dry_run: dry-run never blocked real order
+        # routing here, it only forced a misleading fixed 1.0 lot (which left the
+        # lead pair EURUSD stuck at 1.0 while followers were shrunk by the
+        # correlation size_scale below). Sizing now runs for EURUSD and USDJPY alike.
+        # Execution lot bounds — apply to EVERY pair. Dynamic risk-sizing scales
+        # UP from ``min_lot`` (>= 1.0 by default) and is capped at ``max_lot``.
+        min_lot = self.config.get("realtime_min_lot", 1.0)
+        max_lot = self.config.get("realtime_max_lot", 0.10)
+
         acc = mt5.account_info()
-        is_mock_env = self.config.get("realtime_dry_run", False)
-        
-        if is_mock_env:
-            lot = 1.00
-            logger.info("TradeExecutor: Dryrun active. Using fixed lot size: 1.00")
-        elif acc:
+        if acc:
             account_equity = acc.equity if acc else 10000.0
             risk_pct = self.config.get("realtime_risk_pct", 0.01)  # risk_pct from config default 0.01
             risk_amount = account_equity * risk_pct
@@ -152,23 +158,24 @@ class MT5TradeExecutor:
             # $/pip/lot: pinned by config for USD-quote pairs (~$10), or derived
             # from the live price for USD-base pairs (e.g. USDJPY ≈ $6–7).
             pip_value_per_lot = self._pip_value_per_lot(symbol_info, price, pip)
-            lot_size = round(risk_amount / (sl_pips * pip_value_per_lot), 2)
-            max_lot = self.config.get("realtime_max_lot", 0.10)
-            lot_size = max(0.01, min(lot_size, max_lot))  # hard limits
+            risk_lot = round(risk_amount / (sl_pips * pip_value_per_lot), 2)
+            # Floor at min_lot (>= 1.0 lot for every pair), cap at max_lot.
+            lot_size = max(min_lot, min(risk_lot, max_lot))
             lot = lot_size
-            
+
             logger.info(
-                "TradeExecutor: Account equity: %.2f | Risk amount: %.2f | "
-                "SL pips: %.2f | Calculated lot: %.4f | Final lot: %.2f",
-                account_equity, risk_amount, sl_pips, lot_size, lot
+                "TradeExecutor: Account equity: %.2f | Risk amount: %.2f | SL pips: %.2f | "
+                "Risk lot: %.4f | bounds [%.2f, %.2f] | Final lot: %.2f",
+                account_equity, risk_amount, sl_pips, risk_lot, min_lot, max_lot, lot
             )
         else:
-            lot = self.default_lot_size
-            logger.info("TradeExecutor: Using default lot size: %.2f", lot)
+            lot = max(min_lot, self.default_lot_size)
+            logger.info("TradeExecutor: No account info; using min-lot floor: %.2f", lot)
 
         # Correlation-driven position-size scaling (Phase 4); 1.0 = unchanged.
+        # Never let the scaled lot fall below the min_lot execution floor.
         if size_scale != 1.0:
-            lot = max(0.01, round(lot * size_scale, 2))
+            lot = max(min_lot, round(lot * size_scale, 2))
 
         # Prepare request
         request = {
