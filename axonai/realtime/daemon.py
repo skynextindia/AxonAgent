@@ -948,10 +948,11 @@ class AxonDaemon:
                     })
                 continue
 
-            # EOD hard-flat window: bar new entries until the trading day rolls.
+            # EOD entry cutoff: bar NEW entries 23:00→06:00 IST (open trades are
+            # still held + engine-managed; they flatten ~5 min before the rollover).
             if self._eod_flat_blocked:
                 self._events_skipped += 1
-                logger.info("SKIPPED (EOD hard-flat window; entries blocked until new trading day)")
+                logger.info("SKIPPED (EOD entry cutoff 23:00-06:00 IST; no new entries)")
                 if dashboard:
                     self._broadcast({
                         "type": "event",
@@ -962,7 +963,7 @@ class AxonDaemon:
                         "details": event.details,
                         "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                         "status": "skipped",
-                        "reason": "EOD hard-flat window",
+                        "reason": "EOD entry cutoff (23:00-06:00 IST)",
                         "events_detected": self._events_detected,
                         "events_fired": self._events_fired,
                         "events_skipped": self._events_skipped,
@@ -1118,29 +1119,33 @@ class AxonDaemon:
     def _trading_day(self, now_utc: datetime):
         """Calendar date of the current trading day.
 
-        The forex day is treated as rolling at the NY liquidity-end boundary
-        (``ny_close``): ticks at/after ny_close belong to the next trading day.
-        Both the EOD hard-flat re-entry block and the per-pair SL lockout key
-        off this so "once per day" and "until a new trading day" stay consistent.
+        The trading day is anchored to the morning resume boundary
+        (``eod_resume_utc``, 00:30 UTC = 06:00 IST): a tick before 06:00 IST
+        still belongs to the previous trading day. The per-pair SL lockout and
+        the once-a-night pre-rollover flatten both key off this, so "until the
+        next trading day" means "until the 06:00 IST session reset" — a stop-out
+        in the overnight hold window no longer bars the pair through the next day.
         """
-        _, _, _, ny_close = get_dst_session_hours(now_utc)
+        resume = float(self.config.get("eod_resume_utc", 0.5))
         utc_hour = now_utc.hour + now_utc.minute / 60.0
         d = now_utc.date()
-        if utc_hour >= ny_close:
-            d = d + timedelta(days=1)
+        if utc_hour < resume:
+            d = d - timedelta(days=1)
         return d
 
     def _check_daily_reset(self, now_utc: datetime) -> None:
-        """Clear per-day guards when the trading day rolls (at ny_close)."""
+        """Clear per-day guards at the 06:00 IST session reset (trading-day roll)."""
         td = self._trading_day(now_utc)
         if self._last_trading_day is None:
             self._last_trading_day = td
             return
         if td != self._last_trading_day:
             self._last_trading_day = td
-            if self._eod_flat_blocked or self._sl_locked_out:
-                logger.info("Daily reset: new trading day %s; clearing EOD block + SL lockout", td)
-            self._eod_flat_blocked = False
+            # The nightly EOD blackout (_check_eod_hard_flat) now owns
+            # _eod_flat_blocked on its own fixed-UTC schedule, so only the
+            # per-pair SL lockout is cleared on the trading-day roll.
+            if self._sl_locked_out:
+                logger.info("Daily reset: new trading day %s; clearing SL lockout", td)
             self._sl_locked_out = False
 
     def _maybe_engage_sl_lockout(self, reason: str, pips: float = 0.0) -> None:
@@ -1167,34 +1172,54 @@ class AxonDaemon:
             self._sl_locked_out = True
 
     def _check_eod_hard_flat(self, now_utc: datetime) -> None:
-        """Force-close ALL open positions near the NY-session liquidity end.
+        """End-of-day handling: entry cutoff, hold, pre-rollover flatten, resume.
 
-        Fires once per trading day inside ``[ny_close - minutes_before, ny_close)``
-        and then bars new entries until the trading day rolls, so the pair goes
-        flat into the thin post-NY liquidity window regardless of P&L.
+        Three fixed points each trading day (all UTC; the no-new-entry window
+        wraps past midnight):
+          * ``eod_entry_cutoff_utc`` (23:00 IST): stop opening NEW positions.
+            Open trades are HELD and left to the engine's own exits
+            (trailing/SL/TP) — nothing is force-closed here, so a losing trade
+            keeps its chance to recover into the daily close.
+          * ``eod_flatten_before_close_min`` before the NY 5pm daily rollover
+            (DST-aware: ny_close + 3h, ~20:55 UTC = ~02:25 IST): force-flat ALL
+            remaining positions once, so nothing is carried into the close.
+          * ``eod_resume_utc`` (06:00 IST): the block lifts and the trading day
+            resets (see ``_trading_day``), so new entries resume as normal.
+
+        This method is the sole runtime owner of ``_eod_flat_blocked``.
         """
         if not self.config.get("eod_hard_flat_enabled", True):
+            self._eod_flat_blocked = False
             return
-        minutes_before = float(self.config.get("eod_hard_flat_minutes_before", 10))
-        _, _, _, ny_close = get_dst_session_hours(now_utc)
+
+        cutoff = float(self.config.get("eod_entry_cutoff_utc", 17.5))   # 23:00 IST
+        resume = float(self.config.get("eod_resume_utc", 0.5))          # 06:00 IST
         utc_hour = now_utc.hour + now_utc.minute / 60.0
-        cutoff = ny_close - minutes_before / 60.0
-        if not (cutoff <= utc_hour < ny_close):
-            return
 
-        td = self._trading_day(now_utc)
-        if td == self._eod_flat_tradeday:
-            # Already flatted for this trading day; keep the entry block on.
-            self._eod_flat_blocked = True
-            return
+        # 1) No-new-entry window [cutoff, resume), wrapping past midnight UTC.
+        #    Positions stay open and engine-managed; only NEW entries are barred.
+        self._eod_flat_blocked = (utc_hour >= cutoff) or (utc_hour < resume)
 
-        closed = self._close_all_positions("EOD Hard Flat (NY liquidity end)")
-        self._eod_flat_tradeday = td
-        self._eod_flat_blocked = True
-        logger.info(
-            "AxonDaemon: EOD hard-flat at %.2fh UTC (ny_close=%.2f): closed %d position(s); "
-            "entries blocked until new trading day", utc_hour, ny_close, closed,
-        )
+        # 2) Pre-rollover flatten: force-close ALL remaining positions once, a few
+        #    minutes before the NY 5pm daily rollover (ny_close + 3h, DST-aware).
+        _, _, _, ny_close = get_dst_session_hours(now_utc)
+        rollover = (ny_close + 3.0) % 24.0
+        before_min = float(self.config.get("eod_flatten_before_close_min", 5))
+        flat_after = (rollover - before_min / 60.0) % 24.0             # ~20:55 UTC / 02:25 IST
+
+        # Flatten window [flat_after, resume), wrapping past midnight UTC. Keyed to
+        # the trading day so it fires exactly once per night (and again after a
+        # mid-window restart, which re-adopts and then flattens open positions).
+        if (utc_hour >= flat_after) or (utc_hour < resume):
+            td = self._trading_day(now_utc)
+            if td != self._eod_flat_tradeday:
+                closed = self._close_all_positions("EOD Flat (pre-rollover)")
+                self._eod_flat_tradeday = td
+                logger.info(
+                    "AxonDaemon: EOD pre-rollover flat at %.2fh UTC (rollover=%.2fh, ~02:25 IST) — "
+                    "force-closed %d position(s); entries stay blocked until %.2fh UTC (06:00 IST)",
+                    utc_hour, rollover, closed, resume,
+                )
 
     def _check_pre_news_close(self, bid: float, ask: float) -> None:
         """Flatten ALL open positions (profit or loss) within 5 minutes before a

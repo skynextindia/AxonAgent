@@ -153,10 +153,22 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_auto_sessions_min_samples": 3,    # samples needed before auto kicks in
     "realtime_auto_sessions_spread_mult": 25.0, # range must be >= this * avg spread
     "realtime_auto_sessions_rel_floor": 0.40,   # range must be >= this * best session
-    # EOD hard-flat: close ALL positions near the NY liquidity-end each trading day
-    # and bar re-entry through the tight pre-close window.
+    # End-of-day handling (all times UTC / DST-independent — IST has no DST):
+    #  * eod_entry_cutoff_utc (17:30 UTC = 23:00 IST): stop opening NEW positions.
+    #    Open trades are HELD and left to the engine's own exits (trailing/SL/TP)
+    #    — NOT force-closed here.
+    #  * eod_flatten_before_close_min before the NY 5pm rollover (DST-aware,
+    #    ~20:55 UTC = ~02:25 IST): force-flat ALL remaining positions once, so
+    #    nothing is carried into the daily market close.
+    #  * eod_resume_utc (00:30 UTC = 06:00 IST): reset the trading day and resume
+    #    new entries. The no-new-entry window wraps past midnight UTC.
     "eod_hard_flat_enabled": True,
-    "eod_hard_flat_minutes_before": 10,         # minutes before ny_close to flatten
+    "eod_entry_cutoff_utc": 17.5,               # 23:00 IST — no NEW entries after this
+    "eod_flatten_before_close_min": 5,          # flatten this many min before the NY 5pm rollover
+    "eod_resume_utc": 0.5,                       # 06:00 IST — reset day + resume entries
+    # Legacy session-transition profit-close is superseded by the pre-rollover
+    # flatten above (which holds winners too until the daily close); keep it off.
+    "eod_close_enabled": False,
     "realtime_level_reset_atr_multiple": 2.0,
     "realtime_log_events": True,
     "realtime_magic_number": 123456,

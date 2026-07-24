@@ -24,7 +24,7 @@ def _make_daemon():
 
 
 def _jul(day, h, m):
-    # July → US-EDT → trading day rolls at ny_close = 18:00 UTC.
+    # Trading day now rolls at eod_resume_utc = 00:30 UTC (06:00 IST session reset).
     return datetime(2026, 7, day, h, m, tzinfo=timezone.utc)
 
 
@@ -71,16 +71,20 @@ class TestSlLockout(unittest.TestCase):
         self.assertTrue(d._sl_locked_out)
         d._check_daily_reset(_jul(22, 12, 0))                   # same trading day → still locked
         self.assertTrue(d._sl_locked_out)
-        d._check_daily_reset(_jul(22, 18, 30))                  # rolled past ny_close → cleared
+        d._check_daily_reset(_jul(22, 20, 0))                   # past old ny_close, still same day → STILL locked
+        self.assertTrue(d._sl_locked_out)
+        d._check_daily_reset(_jul(23, 0, 30))                   # 06:00 IST → new trading day → cleared
         self.assertFalse(d._sl_locked_out)
 
     def test_lockout_survives_until_roll(self):
         d = _make_daemon()
         d._check_daily_reset(_jul(22, 9, 0))
         d._maybe_engage_sl_lockout("Stop Loss (SL) Hit", pips=-8.0)
-        for h in (10, 13, 16, 17):
-            d._check_daily_reset(_jul(22, h, 0))
-            self.assertTrue(d._sl_locked_out, f"cleared too early at {h}:00")
+        # Survives all the way to the 06:00 IST reset — including the overnight
+        # hold window past the old ny_close boundary and just before 00:30 UTC.
+        for day, h, m in ((22, 16, 0), (22, 20, 0), (22, 23, 0), (23, 0, 0), (23, 0, 29)):
+            d._check_daily_reset(_jul(day, h, m))
+            self.assertTrue(d._sl_locked_out, f"cleared too early at {day} {h}:{m:02d}")
 
 
 if __name__ == "__main__":
