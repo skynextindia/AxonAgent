@@ -28,6 +28,7 @@ _ENV_OVERRIDES = {
     "AXONAI_REALTIME_DEVIATION": "realtime_deviation",
     "AXONAI_REALTIME_MIN_CONFLUENCE_CONDITIONS": "realtime_min_confluence_conditions",
     "AXONAI_REALTIME_DRY_RUN": "realtime_dry_run",
+    "AXONAI_CORR_REQUIRE_USD_ALIGNMENT": "corr_require_usd_alignment",
 }
 
 
@@ -198,6 +199,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "corr_bias_lookback_bars": 10,      # H1 bars for the lead-pair bias
     "corr_veto_bias_threshold": 0.0015, # |lead return| that vetoes a contradicting entry
     "corr_size_scale_min": 0.25,        # floor for correlation/exposure size scaling
+    "corr_require_usd_alignment": True, # dollar-direction lock: while any position is open,
+                                        # a new entry (lead OR follower) must agree on USD
+                                        # direction with every open position (never trade the
+                                        # negatively-correlated pairs against each other)
     # ── Range extreme gate (reject wrong-end entries) ─────────────────────────
     # Block SELLs fired near the BOTTOM of the recent range (selling into
     # support) and BUYs near the TOP (buying into resistance). Measured against

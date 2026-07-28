@@ -510,6 +510,14 @@ class AxonDaemon:
                 for pos in positions:
                     self._tracked_positions.add(pos.ticket)
                     self._active_trade_initial_sl[pos.ticket] = pos.sl
+                    # Re-seed the correlation book too — without this the engine
+                    # starts blind after a restart and the dollar-direction lock
+                    # would silently allow a conflicting entry while positions are open.
+                    if self.correlation_engine is not None:
+                        self.correlation_engine.register_position(
+                            self.mt5_symbol,
+                            "Buy" if pos.type == 0 else "Sell",   # mt5.POSITION_TYPE_BUY == 0
+                            pos.volume, pos.price_open, pos.ticket)
                 logger.info("AxonDaemon: Pre-populated %d active positions for trailing stop tracking.", len(positions))
         except Exception as pe:
             logger.warning("AxonDaemon: Failed to pre-populate active positions: %s", pe)
@@ -1542,6 +1550,11 @@ class AxonDaemon:
                     atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
                     self._active_trade_atr[ticket] = atr
                     self._active_trade_peak_price[ticket] = trade_result.get("price", 0.0)
+                    if self.correlation_engine is not None:
+                        self.correlation_engine.register_position(
+                            self.mt5_symbol, signal,
+                            trade_result.get("volume", 0.0) or 0.0,
+                            trade_result.get("price", 0.0) or 0.0, ticket)
                 logger.info(
                     "inject_signal: executed %s on %s (scale %.2f) → ticket %s vol %s",
                     signal, self.mt5_symbol, size_scale,

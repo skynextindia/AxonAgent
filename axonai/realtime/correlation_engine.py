@@ -203,7 +203,33 @@ class CorrelationEngine:
             pass
 
         c = _canon(symbol)
-        # The lead pair always trades freely; only followers are gated.
+
+        # Sign of the proposed entry's USD exposure (price-independent).
+        entry_usd = position_usd(symbol, direction, 1.0, 1.0)
+        entry_sign = 1.0 if entry_usd > 0 else -1.0 if entry_usd < 0 else 0.0
+
+        # (lock) Dollar-direction lock — applies to the LEAD pair too, so the rule
+        # never depends on which pair fired first. While ANY position is open, a
+        # new entry must AGREE on dollar direction with every open position:
+        # negatively-correlated pairs (EURUSD↔USDJPY) must be traded in opposite
+        # pair directions, which is the SAME USD direction. Checked per-position
+        # (not on the net) so a conflicted legacy book that nets ~0 still blocks a
+        # new conflicting entry. position_usd's sign already encodes base/quote
+        # inversion, so SELL EURUSD (dollar UP) allows BUY USDJPY, vetoes SELL.
+        if self.config.get("corr_require_usd_alignment", True) and entry_sign != 0:
+            with self._lock:
+                open_positions = list(self._positions.values())
+            for (s, d, l, p) in open_positions:
+                pu = position_usd(s, d, l, p)
+                psign = 1.0 if pu > 0 else -1.0 if pu < 0 else 0.0
+                if psign != 0 and psign != entry_sign:
+                    edir = "UP" if entry_sign > 0 else "DOWN"
+                    odir = "UP" if psign > 0 else "DOWN"
+                    return (False, 0.0,
+                            f"vetoed: {c} {str(direction).upper()} (dollar {edir}) conflicts "
+                            f"with open {s} {str(d).upper()} (dollar {odir})")
+
+        # The lead pair skips the follower-only checks (bias veto / exposure / sizing).
         if c == self.lead:
             return True, 1.0, "lead pair"
 
@@ -211,10 +237,6 @@ class CorrelationEngine:
             corr = self.rolling_corr
             bias = self.lead_bias
             net = sum(position_usd(s, d, l, p) for (s, d, l, p) in self._positions.values())
-
-        # Sign of the proposed entry's USD exposure (price-independent).
-        entry_usd = position_usd(symbol, direction, 1.0, 1.0)
-        entry_sign = 1.0 if entry_usd > 0 else -1.0 if entry_usd < 0 else 0.0
 
         # (c) veto: a USD-strengthening entry contradicts a strong up-bias in the
         # lead (EURUSD up = USD weak), and a USD-weakening entry contradicts a

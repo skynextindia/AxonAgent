@@ -94,13 +94,16 @@ class TestEvaluateEntry(unittest.TestCase):
         self.assertFalse(allow)
         self.assertIn("at cap", reason)
 
-    def test_exposure_hedge_allowed(self):
+    def test_opposite_usd_direction_is_vetoed_by_lock(self):
+        # OLD behavior treated an opposite-USD entry as a risk-reducing hedge and
+        # allowed it. The dollar-direction lock now FORBIDS it: while a long-USD
+        # position is open, a short-USD entry conflicts and is vetoed.
         e = _engine(corr_max_net_usd=100000.0)
         e.lead_bias, e.rolling_corr = 0.0, 0.0
-        e.register_position("USDJPY", "BUY", 1.0, 150.0, ticket=1)  # +100k USD
-        allow, scale, _ = e.evaluate_entry("USDJPY", "Sell")        # reduces net → allow
-        self.assertTrue(allow)
-        self.assertEqual(scale, 1.0)
+        e.register_position("USDJPY", "BUY", 1.0, 150.0, ticket=1)  # +100k USD (dollar UP)
+        allow, _, reason = e.evaluate_entry("USDJPY", "Sell")       # dollar DOWN → conflict
+        self.assertFalse(allow)
+        self.assertIn("conflict", reason)
 
     def test_net_usd_exposure_nets_out(self):
         e = _engine()
@@ -116,6 +119,69 @@ class TestEvaluateEntry(unittest.TestCase):
         allow, scale, _ = e.evaluate_entry("USDJPY", "Buy")
         self.assertTrue(allow)
         self.assertEqual(scale, 1.0)
+
+
+class TestDollarDirectionLock(unittest.TestCase):
+    """While a position is open, both pairs may only enter in the aligned USD
+    direction (negatively-correlated pairs traded in opposite pair directions)."""
+
+    def _eng(self, **cfg):
+        e = _engine(**cfg)
+        e.lead_bias, e.rolling_corr = 0.0, 0.0   # isolate the lock from bias/scale
+        return e
+
+    def test_flat_book_no_constraint(self):
+        e = self._eng()
+        self.assertTrue(e.evaluate_entry("USDJPY", "Buy")[0])
+        self.assertTrue(e.evaluate_entry("USDJPY", "Sell")[0])
+
+    def test_live_case_eurusd_sell_open(self):
+        # EURUSD SELL = dollar UP. USDJPY BUY (dollar UP) allowed; SELL vetoed.
+        e = self._eng()
+        e.register_position("EURUSD", "SELL", 1.0, 1.10, ticket=1)
+        self.assertTrue(e.evaluate_entry("USDJPY", "Buy")[0])
+        allow, _, reason = e.evaluate_entry("USDJPY", "Sell")
+        self.assertFalse(allow)
+        self.assertIn("conflict", reason)
+
+    def test_eurusd_buy_open(self):
+        # EURUSD BUY = dollar DOWN. USDJPY SELL (dollar DOWN) allowed; BUY vetoed.
+        e = self._eng()
+        e.register_position("EURUSD", "BUY", 1.0, 1.10, ticket=1)
+        self.assertTrue(e.evaluate_entry("USDJPY", "Sell")[0])
+        self.assertFalse(e.evaluate_entry("USDJPY", "Buy")[0])
+
+    def test_lead_pair_is_locked_too(self):
+        # USDJPY BUY open = dollar UP. The LEAD (EURUSD) BUY = dollar DOWN → vetoed,
+        # even though the lead skips every other gate. Proves the lead-gating fix.
+        e = self._eng()
+        e.register_position("USDJPY", "BUY", 1.0, 150.0, ticket=1)
+        self.assertFalse(e.evaluate_entry("EURUSD", "Buy")[0])   # dollar DOWN → conflict
+        self.assertTrue(e.evaluate_entry("EURUSD", "Sell")[0])   # dollar UP → aligned
+
+    def test_order_independent(self):
+        # USDJPY-first: USDJPY SELL open = dollar DOWN. Lead EURUSD SELL = dollar UP
+        # → vetoed; EURUSD BUY = dollar DOWN → aligned. Same rule regardless of
+        # which pair fired first.
+        e = self._eng()
+        e.register_position("USDJPY", "SELL", 1.0, 150.0, ticket=1)
+        self.assertFalse(e.evaluate_entry("EURUSD", "Sell")[0])
+        self.assertTrue(e.evaluate_entry("EURUSD", "Buy")[0])
+
+    def test_conflicted_legacy_book_vetoes_either_side(self):
+        # A pre-lock book can hold BOTH sides (nets ~0). Per-position checking
+        # (not net) still vetoes a new entry that opposes EITHER open position.
+        e = self._eng()
+        e.register_position("EURUSD", "SELL", 1.0, 1.10, ticket=1)   # dollar UP
+        e.register_position("USDJPY", "SELL", 1.0, 150.0, ticket=2)  # dollar DOWN
+        self.assertFalse(e.evaluate_entry("USDJPY", "Buy")[0])       # opposes ticket 2
+        self.assertFalse(e.evaluate_entry("EURUSD", "Buy")[0])       # opposes ticket 1
+
+    def test_toggle_off_restores_old_behavior(self):
+        e = self._eng(corr_require_usd_alignment=False)
+        e.register_position("EURUSD", "SELL", 1.0, 1.10, ticket=1)   # dollar UP
+        # Lock off → an opposing-USD entry is allowed again (old hedge behavior).
+        self.assertTrue(e.evaluate_entry("USDJPY", "Sell")[0])
 
 
 if __name__ == "__main__":
