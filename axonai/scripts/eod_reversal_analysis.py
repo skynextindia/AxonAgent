@@ -85,10 +85,50 @@ def _median(vals: List[float]) -> float:
 
 def _quantile(vals: List[float], q: float) -> float:
     vals = sorted(v for v in vals if v is not None)
-    return vals[int(len(vals) * q)] if vals else 0.0
+    if not vals:
+        return 0.0
+    # Clamp: int(len*1.0) indexes one past the end.
+    return vals[max(0, min(len(vals) - 1, int(len(vals) * q)))]
 
 
-def analyze(symbol: str, reversal_pips: float, pre: int, min_events: int) -> None:
+# Minimum share of live confluence-passed triggers each floor must still admit.
+# The floor is derived from PRE-REVERSAL ticks but applied to TRIGGERED ticks,
+# and those two distributions are not the same population: measured
+# 2026-07-27..28, calibration had pushed EURUSD vel_pct 35 -> 60 and tick_eff
+# 0.25 -> 0.48, and only 3 of 162 live triggers (1.9%) survived the full gate
+# stack. Each refit tightened further, because a floor that blocks triggers
+# cannot produce the trades that would argue for loosening it. Capping the floor
+# at a quantile of what live triggers actually produce breaks that ratchet.
+DEFAULT_MIN_TRIGGER_PASS = 0.60
+# Below this many confluence-passed triggers the cap quantile is too noisy to
+# trust; leave the raw floor uncapped rather than loosen it on 3 samples.
+MIN_TRIGGER_SAMPLE = 20
+
+
+def _trigger_feature_pool(rows: List[Dict], keys: List[str]) -> Dict[str, List[float]]:
+    """Feature values at the ticks the reversal-edge gate actually judges.
+
+    Population = TRIGGERED rows that PASSED the confluence gate, since the edge
+    gate only runs downstream of it. A blank skip_reason means it passed; an
+    "edge_gate: ..." skip_reason (written by the daemon's snapshot recorder)
+    also passed confluence and was killed by this very gate, so those rows must
+    stay in the pool — excluding them would re-create the ratchet.
+    """
+    pool: Dict[str, List[float]] = {k: [] for k in keys}
+    for r in rows:
+        if (r.get("entry_state") or "") != "TRIGGERED":
+            continue
+        sr = (r.get("skip_reason") or "").strip()
+        if sr and not sr.startswith("edge_gate:"):
+            continue
+        for k in keys:
+            pool[k].append(_f(r, k))
+    return pool
+
+
+def analyze(symbol: str, reversal_pips: float, pre: int, min_events: int,
+            min_trigger_pass: float = DEFAULT_MIN_TRIGGER_PASS,
+            min_trigger_sample: int = MIN_TRIGGER_SAMPLE) -> None:
     pip = _pip_mult(symbol)
     store = os.path.join("reports", f"engine_snapshots_{symbol}.csv")
     if not os.path.exists(store):
@@ -121,22 +161,55 @@ def analyze(symbol: str, reversal_pips: float, pre: int, min_events: int) -> Non
                         feat[k].append(_f(rows[j], k))
     print(f"[eod] wrote pre-reversal context -> {ctx_path} ({len(pre_rows)} rows)")
 
-    # Derive the REAL per-pair reversal floors from the observed reversals
-    # (q25 = a floor that still catches ~75% of turns). Feeds the LIVE
-    # reversal-edge gate (config reversal_pair_floors). Replaces the old
-    # gate_reversal_pressure_min, which tuned a near-dead signal.
+    # Derive the REAL per-pair reversal floors from the observed reversals.
+    # Feeds the LIVE reversal-edge gate (config reversal_pair_floors). Replaces
+    # the old gate_reversal_pressure_min, which tuned a near-dead signal.
     params: Dict = {}
     if len(events) >= min_events:
         is_gold = "XAU" in symbol.upper()
-        # Floor = 80% of the observed reversal median: selective (keeps out the
-        # chop the system over-trades) yet adaptive per pair/day. q25 would be too
-        # loose and re-open the over-trading. Gold has no clean velocity edge → vol-only.
-        floors = {
+        # Raw floor = 80% of the observed reversal median: selective (keeps out
+        # the chop the system over-trades) yet adaptive per pair/day. Gold has no
+        # clean velocity edge → vol-only.
+        raw = {
             "vel_pct": 0 if is_gold else round(_median(feat["vel_pct"]) * 0.8, 0),
             "vol_pips": round(_median(feat["vol_pips"]) * 0.8, 2),
             "tick_eff": round(_median(feat["tick_eff"]) * 0.8, 2),
         }
+        # Then cap each floor so it still admits at least `min_trigger_pass` of
+        # the live triggers this gate is applied to. Without the cap the two
+        # populations drift apart and the gate silently closes (see
+        # DEFAULT_MIN_TRIGGER_PASS). min() means this can only ever LOOSEN the raw
+        # floor, never tighten it — so it cannot re-open the over-trading.
+        pool = _trigger_feature_pool(rows, ["vel_pct", "vol_pips", "tick_eff"])
+        n_trig = len(pool["vel_pct"])
+        floors = dict(raw)
+        caps: Dict[str, float] = {}
+        if n_trig >= min_trigger_sample:
+            qq = max(0.0, min(1.0, 1.0 - min_trigger_pass))
+            for k, nd in (("vel_pct", 0), ("vol_pips", 2), ("tick_eff", 2)):
+                if is_gold and k == "vel_pct":
+                    continue  # gold floor is pinned at 0 by design
+                caps[k] = round(_quantile(pool[k], qq), nd)
+                floors[k] = min(raw[k], caps[k])
+        else:
+            print(f"[eod] {symbol}: only {n_trig} confluence-passed triggers "
+                  f"(< {min_trigger_sample}); floors left uncapped this run.")
         params["reversal_pair_floors"] = {symbol: floors}
+        # Cap audit + modeled admit-rate: the numbers to watch. If
+        # _modeled_trigger_pass_rate collapses again, the gate is re-closing.
+        params["_floor_raw"] = raw
+        params["_floor_trigger_cap"] = caps
+        params["_floor_capped"] = {k: bool(k in caps and caps[k] < raw[k]) for k in raw}
+        params["_trigger_sample"] = n_trig
+        params["_min_trigger_pass"] = min_trigger_pass
+        if n_trig:
+            ok = sum(
+                1 for i in range(n_trig)
+                if pool["vel_pct"][i] >= floors["vel_pct"]
+                and pool["vol_pips"][i] >= floors["vol_pips"]
+                and pool["tick_eff"][i] >= floors["tick_eff"]
+            )
+            params["_modeled_trigger_pass_rate"] = round(ok / n_trig, 3)
         # Observed medians for transparency (not consumed as thresholds)
         params["_observed_pre_reversal_medians"] = {
             "vel_pct": round(_median(feat["vel_pct"]), 2),

@@ -2614,6 +2614,26 @@ class AxonDaemon:
             "near_level_type": getattr(lc, "nearest_level_type", "") or "",
             "near_level_price": round(float(getattr(lc, "nearest_level_price", 0.0) or 0.0), 5),
         }
+        # Reversal-edge gate verdict. That gate (_reversal_edge_ok) runs in the
+        # entry path AFTER this row is written, so its rejections were invisible
+        # here: a TRIGGERED tick blocked by a regime/velocity floor looked
+        # identical in the store to one that reached the broker. Measured
+        # 2026-07-27..28 it killed 44% of surviving triggers with no trace.
+        # Replayed here (pure read of config + snapshot, no side effects, only on
+        # TRIGGERED ticks) so funnel analysis can see every kill stage. The gate
+        # is only reached when the confluence gate passed, so this can never
+        # overwrite a confluence skip_reason.
+        if (
+            not row["skip_reason"]
+            and row["entry_state"] == "TRIGGERED"
+            and getattr(ed, "is_valid_entry", True)
+        ):
+            try:
+                _edge_ok, _edge_why = self._reversal_edge_ok(snapshot)
+                if not _edge_ok:
+                    row["skip_reason"] = f"edge_gate: {_edge_why}"
+            except Exception:
+                pass
         # Daily-range position features: where price sits in today's range
         # (0=day low, 1=day high) and how much of a normal day (ADR) is used.
         # Feeds the reversal-zone model — turns cluster at range edges on
