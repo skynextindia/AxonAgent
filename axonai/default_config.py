@@ -194,6 +194,15 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "corr_bias_lookback_bars": 10,      # H1 bars for the lead-pair bias
     "corr_veto_bias_threshold": 0.0015, # |lead return| that vetoes a contradicting entry
     "corr_size_scale_min": 0.25,        # floor for correlation/exposure size scaling
+    # ── Range extreme gate (reject wrong-end entries) ─────────────────────────
+    # Block SELLs fired near the BOTTOM of the recent range (selling into
+    # support) and BUYs near the TOP (buying into resistance). Measured against
+    # the prior N closed M15 candles (live_evidence._m15_candles, seeded from
+    # ~10 days of history at init so it is valid immediately after a restart) —
+    # NOT the tiny currently-forming candle the old gate used.
+    "range_gate_lookback": 20,          # closed M15 candles that define the range (~5h)
+    "range_gate_edge": 0.25,            # block SELL if pos < edge (lower quarter = support);
+                                        # block BUY if pos > 1-edge (upper quarter = resistance)
     "peak_detector_rule_c_enabled": False,
     "trade_risk_pct": 0.01,
     "realtime_use_pinpoint_price": False,
@@ -202,6 +211,32 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "indicator_rsi_length": 14,
     "indicator_ema_fast": 12,
     "indicator_ema_slow": 26,
+    # ── A→B order mirroring / execution node (default OFF) ─────────────────────
+    # The lead ("brain") forwards each entry/close DECISION (never a price) to a
+    # second, execution-only terminal, which re-sizes to its OWN equity and
+    # resolves its OWN broker ticker/pip. See mirror_client.py + exec_node.py.
+    "mirror_enabled": False,                 # lead side: forward decisions to the exec node
+    "mirror_url": "ws://127.0.0.1:8770",     # exec-node inbound WebSocket URL
+    "exec_node_mode": False,                 # this process is an execution node (detection OFF)
+    "exec_node_max_lot": 5.0,                # exec node: conservative per-pair lot ceiling
+    "exec_node_magic_offset": 500000,        # exec node: distinct magic = lead magic + offset
+    # ── Prop-firm compliance guard (default OFF; see risk_guard.py) ───────────
+    # Adds the two limits a funded account is killed by and which the plain
+    # daily breaker does NOT model: an OVERALL drawdown floor measured from the
+    # initial balance, and a daily limit measured on BROKER SERVER days. When a
+    # limit is breached the guard both blocks new entries AND flattens open
+    # positions (a floating loss running past the line is the usual way an
+    # account dies). Defaults match FundingPips 2-Step Standard.
+    "prop_guard_enabled": False,             # enable per-account (funded terminals only)
+    "prop_initial_balance": None,            # None → seed from the account's first balance
+    "prop_max_drawdown_pct": 10.0,           # overall floor from initial balance
+    "prop_max_drawdown_trailing": False,     # False = static floor; True = ratchets to equity highs
+    "prop_daily_loss_pct": 5.0,              # daily loss limit (server day)
+    # Trip at (100 - buffer)% of each limit so the real breach line is never
+    # touched: 20% buffer → daily trips at 4% and the 10% floor trips at 8%.
+    "prop_safety_buffer_pct": 20.0,
+    "prop_flatten_on_breach": True,          # close open positions on breach, not just block
+    "prop_state_file": "reports/prop_guard.json",
 })
 
 

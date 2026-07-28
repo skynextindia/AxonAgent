@@ -87,6 +87,30 @@ def main():
                         help="Maximum daily drawdown percent limit (e.g. 5.0 for FTMO)")
     parser.add_argument("--max-daily-loss-amount", type=float, default=None,
                         help="Maximum daily loss amount limit (e.g. 5000.0 for FTMO)")
+    parser.add_argument("--exec-node", action="store_true",
+                        help="Run as an execution node: self-detection OFF; receives entry/close "
+                             "decisions from a lead brain and executes them with the engine's own "
+                             "order management, sized to THIS account.")
+    parser.add_argument("--exec-port", type=int, default=8770,
+                        help="Execution-node inbound signal WebSocket port (with --exec-node)")
+    parser.add_argument("--mirror-url", type=str, default=None,
+                        help="Lead brain: forward each entry/close decision to this execution "
+                             "node URL, e.g. ws://127.0.0.1:8770")
+    parser.add_argument("--mt5-symbol-suffix", type=str, default=None,
+                        help="Broker symbol suffix override (e.g. .i for Eightcap)")
+    parser.add_argument("--prop-firm", action="store_true",
+                        help="Enable the prop-firm compliance guard for THIS account only: "
+                             "overall drawdown floor + server-day daily loss limit, and "
+                             "flatten-on-breach. Applies solely to this process/account.")
+    parser.add_argument("--prop-max-drawdown-pct", type=float, default=None,
+                        help="Prop overall drawdown %% from initial balance (default 10.0)")
+    parser.add_argument("--prop-daily-loss-pct", type=float, default=None,
+                        help="Prop daily loss limit %% (default 5.0)")
+    parser.add_argument("--prop-trailing-drawdown", action="store_true",
+                        help="Overall drawdown floor trails equity highs (e.g. Zero accounts) "
+                             "instead of being static from the initial balance")
+    parser.add_argument("--prop-initial-balance", type=float, default=None,
+                        help="Prop starting balance baseline (default: seed from the account)")
     args = parser.parse_args()
 
     symbols = [s.strip() for s in args.symbols.split(",")] if args.symbols else [args.symbol]
@@ -172,6 +196,24 @@ def main():
             config["risk_max_daily_drawdown_pct"] = args.max_daily_drawdown_pct
         if args.max_daily_loss_amount is not None:
             config["risk_max_daily_loss_amount"] = args.max_daily_loss_amount
+        if args.mt5_symbol_suffix is not None:
+            config["mt5_symbol_suffix"] = args.mt5_symbol_suffix
+        if args.exec_node:
+            config["exec_node_mode"] = True
+        if args.mirror_url:
+            config["mirror_enabled"] = True
+            config["mirror_url"] = args.mirror_url
+        # Prop-firm guard: scoped to THIS process/account only.
+        if args.prop_firm:
+            config["prop_guard_enabled"] = True
+        if args.prop_max_drawdown_pct is not None:
+            config["prop_max_drawdown_pct"] = args.prop_max_drawdown_pct
+        if args.prop_daily_loss_pct is not None:
+            config["prop_daily_loss_pct"] = args.prop_daily_loss_pct
+        if args.prop_trailing_drawdown:
+            config["prop_max_drawdown_trailing"] = True
+        if args.prop_initial_balance is not None:
+            config["prop_initial_balance"] = args.prop_initial_balance
 
         # Set environment variables from final config so parameterless mt5_initialize() gets them
         if config.get("mt5_terminal_path"):
@@ -187,15 +229,41 @@ def main():
         if config.get("risk_max_daily_loss_amount") is not None:
             os.environ["AXONAI_RISK_MAX_DAILY_LOSS_AMOUNT"] = str(config["risk_max_daily_loss_amount"])
 
+        if args.exec_node:
+            print(f"  EXECUTION-NODE mode (self-detection OFF) — inbound signals on ws://127.0.0.1:{args.exec_port}")
+        if args.mirror_url:
+            print(f"  LEAD order mirror ENABLED → forwarding decisions to {args.mirror_url}")
+        if args.prop_firm:
+            print(f"  PROP-FIRM GUARD ON (this account only): "
+                  f"max DD {config['prop_max_drawdown_pct']}% "
+                  f"({'trailing' if config.get('prop_max_drawdown_trailing') else 'static'}), "
+                  f"daily {config['prop_daily_loss_pct']}%, "
+                  f"buffer {config['prop_safety_buffer_pct']}%, flatten-on-breach")
+
         if len(symbols) > 1:
             # Multi-pair: one daemon thread per pair over a shared MT5 connection.
             from axonai.realtime.supervisor import DaemonSupervisor
             print(f"  Multi-pair mode: {', '.join(symbols)}")
             print("  Dashboard + Daemons running. Press Ctrl+C to stop.")
             supervisor = DaemonSupervisor(symbols, config)
+            if args.exec_node:
+                # Execution node: expose an inbound server that routes forwarded
+                # decisions to the per-pair daemons the supervisor just built.
+                from axonai.realtime.exec_node import ExecNodeServer
+                ExecNodeServer(supervisor.daemons, port=args.exec_port).start()
             supervisor.start()  # blocks until stopped, then tears down MT5
         else:
             daemon = AxonDaemon(symbol=symbols[0], config=config)
+            # Lead, single-pair: attach a mirror client (multi-pair uses the
+            # supervisor's shared one instead).
+            if args.mirror_url and not args.exec_node:
+                from axonai.realtime.mirror_client import MirrorClient
+                daemon.mirror_client = MirrorClient(config["mirror_url"])
+                daemon.mirror_client.start()
+            # Execution node: expose the inbound server BEFORE the blocking start.
+            if args.exec_node:
+                from axonai.realtime.exec_node import ExecNodeServer
+                ExecNodeServer({symbols[0]: daemon}, port=args.exec_port).start()
             daemon.start()
 
             print("  Dashboard + Daemon running. Press Ctrl+C to stop.")

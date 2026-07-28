@@ -65,6 +65,18 @@ class DaemonSupervisor:
                 config_overrides=self.correlation_engine.calibrated_overrides(sym),
             )
 
+        # Lead-side order mirror: one shared client forwards every pair's
+        # entry/close DECISIONS to the execution node (best-effort, fail-open).
+        # Off unless mirror_enabled; an execution node itself never sets this.
+        self.mirror_client = None
+        if base_config.get("mirror_enabled"):
+            from axonai.realtime.mirror_client import MirrorClient
+            url = base_config.get("mirror_url", "ws://127.0.0.1:8770")
+            self.mirror_client = MirrorClient(url)
+            for d in self.daemons.values():
+                d.mirror_client = self.mirror_client
+            logger.info("DaemonSupervisor: order mirror ENABLED → %s", url)
+
         self._threads: List[threading.Thread] = []
         self._stopping = threading.Event()
         self._stopped = False
@@ -80,6 +92,9 @@ class DaemonSupervisor:
             signal.signal(signal.SIGTERM, self._on_signal)
         except ValueError:
             pass  # not on the main thread
+
+        if self.mirror_client is not None:
+            self.mirror_client.start()
 
         for sym, d in self.daemons.items():
             t = threading.Thread(
@@ -122,6 +137,11 @@ class DaemonSupervisor:
                 d.stop()
             except Exception as e:
                 logger.error("DaemonSupervisor: error stopping %s: %s", sym, e)
+        if self.mirror_client is not None:
+            try:
+                self.mirror_client.stop()
+            except Exception as e:
+                logger.error("DaemonSupervisor: error stopping mirror client: %s", e)
         # The supervisor owns the shared, process-wide MT5 connection.
         mt5_shutdown()
         self._stopped = True

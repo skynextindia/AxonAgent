@@ -29,8 +29,9 @@ from axonai.realtime.trade_executor import MT5TradeExecutor
 from axonai.realtime.api_server import get_dashboard
 from cli.stats_handler import StatsCallbackHandler
 from axonai.realtime.news_guard import NewsGuard
+from axonai.realtime.alerts import send_alert
 from axonai.realtime.session_tuner import SessionTuner
-from axonai.default_config import resolve_symbol_config
+from axonai.default_config import resolve_symbol_config, _canonical_symbol
 
 logger = logging.getLogger(__name__)
 
@@ -119,6 +120,21 @@ class AxonDaemon:
         self._events_fired: int = 0
         self._events_skipped: int = 0
         self._start_time: Optional[datetime] = None
+
+        # ── A→B order mirror (lead side) + execution-node mode (follower side) ──
+        # Lead: a MirrorClient forwards each entry/close decision (set externally
+        # by the supervisor / launcher when ``mirror_enabled``). Follower: this
+        # process only executes decisions injected from the lead — its own
+        # detection is gated off, and it re-sizes to THIS account with a distinct
+        # magic and its own conservative lot ceiling.
+        # Prop-firm guard state (inert unless prop_guard_enabled on this process).
+        self._prop_flattened = False
+        self._last_prop_check = 0.0
+
+        self.mirror_client = None
+        self._exec_node = bool(config.get("exec_node_mode", False))
+        if self._exec_node:
+            self._apply_exec_node_overrides()
 
     @staticmethod
     def _get_session_details(now_utc: datetime) -> list:
@@ -613,6 +629,13 @@ class AxonDaemon:
         except Exception as e:
             logger.error("Error in EOD hard-flat check: %s", e, exc_info=True)
 
+        # Prop-firm limits: feed live equity + flatten on breach (no-op unless
+        # prop_guard_enabled on THIS account's process).
+        try:
+            self._check_prop_risk()
+        except Exception as e:
+            logger.error("Error in prop risk check: %s", e, exc_info=True)
+
         # EOD (legacy profit-only) force-close check on session transition
         try:
             self._check_eod_close(bid, ask)
@@ -768,6 +791,13 @@ class AxonDaemon:
 
             self._events_detected += 1
 
+            # Execution-node mode: this terminal never acts on its OWN detected
+            # signals — entries arrive only via inject_signal() from the lead
+            # brain. Position management (trailing / EOD / exits) still runs
+            # natively in _on_tick, so B has full order management of its trades.
+            if self._exec_node:
+                continue
+
             # Filter: Only allow Advanced Microstructure Peak Reversals (Rule A & Rule B)
             is_peak = event.event_type == EventType.PEAK_DETECTION
             peak_type = event.details.get("peak_type", "") if is_peak else ""
@@ -809,23 +839,14 @@ class AxonDaemon:
                             is_gate_passed = False
                             gate_reason = f"counter daily trend (trend: DOWN, trade: {direction})"
                         else:
-                            # 3. M15 Candle Extreme Gate Check (Avoid buying at the top or selling at the bottom of a candle)
-                            m15_builder = self.tick_engine.candle_builders.get("M15")
-                            if m15_builder and m15_builder.current:
-                                m15_high = m15_builder.current.high
-                                m15_low = m15_builder.current.low
-                                m15_range = m15_high - m15_low
-                                if m15_range > 0:
-                                    relative_pos = (event.price - m15_low) / m15_range
-                                    if direction == "SELL" and relative_pos < 0.65:
-                                        is_gate_passed = False
-                                        gate_reason = f"Sell triggered in lower part of M15 range (relative pos: {relative_pos:.2f})"
-                                    elif direction == "BUY" and relative_pos > 0.35:
-                                        is_gate_passed = False
-                                        gate_reason = f"Buy triggered in upper part of M15 range (relative pos: {relative_pos:.2f})"
-                                    else:
-                                        logger.info("M15 EXTREME GATE PASSED: %s relative position inside active M15 candle is %.2f", direction, relative_pos)
-                            
+                            # 3. Range Extreme Gate — reject entries at the WRONG END of the
+                            #    real prior range: selling into support (bottom of the range)
+                            #    or buying into resistance (top). See _range_extreme_gate.
+                            passed, reason = self._range_extreme_gate(direction, event.price)
+                            if not passed:
+                                is_gate_passed = False
+                                gate_reason = reason
+
                             if is_gate_passed:
                                 logger.info("LIVE PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f is %.2f pips from %s level %.5f. Trend=%s, Trade=%s",
                                             event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
@@ -1037,6 +1058,9 @@ class AxonDaemon:
                                 self.mt5_symbol, signal,
                                 trade_result.get("volume", 0.0) or 0.0,
                                 trade_result.get("price", 0.0) or 0.0, ticket)
+                    # Mirror this entry decision to the execution node (best-effort;
+                    # lead side only — a no-op when mirror_client is None).
+                    self._mirror_send({"cmd": "enter", "signal": signal, "size_scale": size_scale})
             except Exception as ex_err:
                 logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
             
@@ -1368,6 +1392,173 @@ class AxonDaemon:
 
         return closed_count
 
+    # ── prop-firm compliance ──────────────────────────────────────────────────
+    def _check_prop_risk(self) -> None:
+        """Feed live equity to the risk guard and flatten if a limit is breached.
+
+        No-op unless ``prop_guard_enabled`` is set on THIS process's config, so a
+        non-prop account is completely unaffected.
+
+        Two jobs the plain breaker cannot do on its own:
+          * ``update_equity`` normally only runs when a signal fires, so a
+            floating loss could sail past the limit unseen between signals. Here
+            it is refreshed on a timer from live account info.
+          * On breach, open positions are CLOSED — blocking new entries alone
+            does not stop an open trade from breaching the account.
+        """
+        rg = getattr(self.trade_executor_opt, "risk_guard", None)
+        if rg is None or not getattr(rg, "prop_enabled", False):
+            return
+        if not mt5 or not mt5.terminal_info():
+            return
+
+        import time as pytime
+        now = pytime.time()
+        # Account info is a terminal round-trip; a few times a second is plenty.
+        if now - getattr(self, "_last_prop_check", 0.0) < 2.0:
+            return
+        self._last_prop_check = now
+
+        acc = mt5.account_info()
+        if not acc:
+            return
+        rg.update_equity(acc.equity, acc.balance)
+
+        halted, reason = rg.is_halted(acc.equity)
+        if not halted:
+            self._prop_flattened = False
+            return
+
+        if not getattr(rg, "flatten_on_breach", True) or self._prop_flattened:
+            return
+        # A breach usually happens during a violent move — exactly when a close
+        # can be requoted, hit off-quotes, or find the terminal briefly gone. So
+        # the "flattened" latch is set ONLY after open positions are verified
+        # gone; otherwise this retries on the next check rather than believing a
+        # failed close succeeded and leaving a losing position running.
+        logger.critical("=" * 60)
+        logger.critical("PROP RISK BREACH — flattening %s: %s", self.mt5_symbol, reason)
+        logger.critical("=" * 60)
+        try:
+            closed = self._close_all_positions("Risk limit breach")
+        except Exception as e:
+            logger.error("Prop risk breach: flatten attempt failed on %s: %s",
+                         self.mt5_symbol, e, exc_info=True)
+            closed = 0
+
+        remaining = self._open_position_count()
+        if remaining != 0:
+            # >0 = still open; -1 = could not verify. Both mean "not proven flat".
+            logger.critical(
+                "Prop risk breach: %s NOT verified flat after closing %d "
+                "(remaining=%s) — will retry on next check",
+                self.mt5_symbol, closed, "unknown" if remaining < 0 else remaining)
+            return  # leave _prop_flattened False so the next tick retries
+
+        self._prop_flattened = True
+        logger.critical("Prop risk breach: %s is flat (closed %d position(s)); entries halted.",
+                        self.mt5_symbol, closed)
+        try:
+            send_alert(f"PROP RISK BREACH on {self.mt5_symbol}: {reason} "
+                       f"— closed {closed} position(s); entries halted.", self.config)
+        except Exception as e:
+            logger.error("Prop risk breach: alert failed: %s", e)
+
+    def _open_position_count(self) -> int:
+        """Open positions for this symbol belonging to this strategy's magic."""
+        try:
+            if not mt5 or not mt5.terminal_info():
+                return -1  # unknown; treated as "not verified flat"
+            positions = mt5.positions_get(symbol=self.mt5_symbol)
+            if not positions:
+                return 0
+            return sum(1 for p in positions if p.magic == self.trade_executor_opt.magic)
+        except Exception as e:
+            logger.warning("Prop risk: could not verify open positions: %s", e)
+            return -1
+
+    # ── A→B order mirror ──────────────────────────────────────────────────────
+    def _apply_exec_node_overrides(self) -> None:
+        """Follower terminal: re-size to THIS account with a distinct magic + cap.
+
+        ``executor.config`` IS ``self.config`` (same dict), so bounding
+        ``realtime_max_lot`` here directly caps the executor's sizing.
+        """
+        ml = self.config.get("exec_node_max_lot")
+        if ml:
+            self.config["realtime_max_lot"] = float(ml)
+        off = int(self.config.get("exec_node_magic_offset", 0) or 0)
+        if off:
+            self.trade_executor_opt.magic += off
+            self.config["realtime_magic_number"] = self.trade_executor_opt.magic
+        logger.info(
+            "AxonDaemon[%s]: EXECUTION-NODE mode — magic=%d, max_lot=%s (self-detection OFF)",
+            self.mt5_symbol, self.trade_executor_opt.magic,
+            self.config.get("realtime_max_lot"),
+        )
+
+    def _mirror_send(self, payload: dict) -> None:
+        """Forward a trade DECISION to the execution node (lead side, best-effort).
+
+        Never raises and never blocks the trading path: if the mirror is disabled
+        (``mirror_client is None``) or the node is unreachable, the decision is
+        just logged as not mirrored. Only the decision crosses the wire — never a
+        price — so a different-broker node re-derives ticker/pip/SL/TP/size itself.
+        """
+        mc = self.mirror_client
+        if mc is None:
+            return
+        try:
+            payload.setdefault("symbol", _canonical_symbol(self.mt5_symbol))
+            mc.send(payload)
+        except Exception as e:
+            logger.warning("AxonDaemon: mirror forward failed (non-fatal): %s", e)
+
+    def inject_signal(self, signal: str, size_scale: float = 1.0, source: str = "mirror"):
+        """Execute an entry routed from the lead brain (execution-node mode).
+
+        Bypasses detection + the entry gauntlet — the lead already applied every
+        gate — and runs the engine's OWN order management (``execute_signal``),
+        which sizes from THIS terminal's equity and resolves THIS broker's
+        ticker/pip. Tracks the resulting position so the daemon's native trailing
+        / EOD / exit management picks it up. Returns the executor result or None.
+        """
+        if signal not in ("Buy", "Sell", "Overweight", "Underweight"):
+            logger.info("inject_signal: ignoring non-entry signal %r", signal)
+            return None
+        trade_result = None
+        try:
+            trade_result = self.trade_executor.execute_signal(
+                self.mt5_symbol, signal, self.live_state, size_scale)
+            if trade_result:
+                ticket = trade_result.get("order")
+                if ticket:
+                    self._tracked_positions.add(ticket)
+                    self._active_trade_initial_sl[ticket] = trade_result.get("sl")
+                    self._active_trade_system[ticket] = source
+                    atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
+                    self._active_trade_atr[ticket] = atr
+                    self._active_trade_peak_price[ticket] = trade_result.get("price", 0.0)
+                logger.info(
+                    "inject_signal: executed %s on %s (scale %.2f) → ticket %s vol %s",
+                    signal, self.mt5_symbol, size_scale,
+                    trade_result.get("order"), trade_result.get("volume"))
+            else:
+                logger.info(
+                    "inject_signal: %s on %s produced no fill (position open or rejected)",
+                    signal, self.mt5_symbol)
+        except Exception as e:
+            logger.error("inject_signal: execution error: %s", e, exc_info=True)
+        return trade_result
+
+    def inject_close(self, reason: str = "mirror close") -> int:
+        """Force-flatten this symbol's positions on request from the lead brain."""
+        try:
+            return self._close_all_positions(reason)
+        except Exception as e:
+            logger.error("inject_close: error: %s", e, exc_info=True)
+            return 0
+
     def _log_stats(self):
         """Log daemon statistics."""
         if self._start_time:
@@ -1432,6 +1623,47 @@ class AxonDaemon:
         }
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(json.dumps(entry, cls=SafeJSONEncoder) + '\n')
+
+    def _range_extreme_gate(self, direction: str, price: float):
+        """Reject wrong-end entries against the REAL prior range.
+
+        A reversal system must sell into resistance (top of range) and buy into
+        support (bottom) — never the opposite. Returns ``(passed, reason)``.
+
+        The range is the prior ``range_gate_lookback`` *closed* M15 candles from
+        ``live_evidence._m15_candles`` (seeded from ~10 days of history at init,
+        so it is valid immediately after a restart — unlike the tick-engine
+        builder history, which starts empty). A SELL must sit at ``>= 1-edge`` of
+        that range, a BUY at ``<= edge``. There is deliberately NO silent bypass:
+        the old gate measured only the currently-forming M15 candle and skipped
+        entirely when its range was 0, which let SELLs fire deep at support.
+        """
+        lookback = int(self.config.get("range_gate_lookback", 20))
+        edge = float(self.config.get("range_gate_edge", 0.25))
+        m15 = list(getattr(self.live_evidence, "_m15_candles", []))[-lookback:]
+        if len(m15) < max(5, lookback // 2):
+            # Insufficient history (seeding failed / brand-new symbol): fail SAFE
+            # by refusing the entry rather than firing blind. Skipping a trade
+            # never loses money; a blind wrong-end entry does.
+            return False, f"range gate: insufficient M15 history ({len(m15)} candles)"
+        rng_hi = max(c.high for c in m15)
+        rng_lo = min(c.low for c in m15)
+        rng = rng_hi - rng_lo
+        if rng <= 0:
+            # Degenerate range (every candle identical): no extreme to test.
+            return True, ""
+        # rel: 0.0 = bottom of range (support), 1.0 = top (resistance). Block only
+        # WRONG-END entries — a SELL in the lower ``edge`` fraction (selling into
+        # support) or a BUY in the upper ``edge`` fraction (buying into
+        # resistance). Mid-range and correct-end entries pass untouched.
+        rel = (price - rng_lo) / rng
+        if direction == "SELL" and rel < edge:
+            return False, f"SELL at/near support: pos {rel:.2f} of {lookback}xM15 range (need >= {edge:.2f})"
+        if direction == "BUY" and rel > (1.0 - edge):
+            return False, f"BUY at/near resistance: pos {rel:.2f} of {lookback}xM15 range (need <= {1.0 - edge:.2f})"
+        logger.info("RANGE EXTREME GATE PASSED: %s at pos %.2f of %dxM15 range [%.5f-%.5f]",
+                    direction, rel, lookback, rng_lo, rng_hi)
+        return True, ""
 
     def _manage_trailing_stops(self, bid: float, ask: float):
         """Manage trailing stop modifications on active MT5 positions."""
@@ -1629,6 +1861,9 @@ class AxonDaemon:
             # Per-pair SL lockout (F4): engage only on a real *losing* stop-out
             # (pips < 0), never on a profitable trailed stop wearing the same label.
             self._maybe_engage_sl_lockout(reason, pips)
+            # Mirror the exit to the execution node so the follower flattens the
+            # matching position too (best-effort; idempotent if B is already flat).
+            self._mirror_send({"cmd": "close", "reason": reason, "ticket": ticket})
             if self.correlation_engine is not None:
                 self.correlation_engine.unregister_position(ticket)
 

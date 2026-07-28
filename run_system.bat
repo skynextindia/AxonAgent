@@ -26,18 +26,20 @@ echo ========================================================
 echo.
 echo  1. Start Daemon - EURUSD only (Dashboard + Engine)
 echo  2. Start Daemon - Multi-Pair EURUSD + USDJPY (Dashboard + Engines)
-echo  3. Run Intraday Backtester (M15 Simulation)
-echo  4. Start MT5 Bridge Service (relays to WSL clients on port 8765)
-echo  5. Exit
+echo  3. Analyze Trade History (MAE / MFE / Drawdown)
+echo  4. Run Intraday Backtester (M15 Simulation)
+echo  5. Start MT5 Bridge Service (relays to WSL clients on port 8765)
+echo  6. Exit
 echo.
 echo ========================================================
-set /p choice="Select an option (1-5): "
+set /p choice="Select an option (1-6): "
 
 if "%choice%"=="1" goto daemon
 if "%choice%"=="2" goto daemon_multi
-if "%choice%"=="3" goto backtester
-if "%choice%"=="4" goto bridge
-if "%choice%"=="5" goto exit
+if "%choice%"=="3" goto analyze
+if "%choice%"=="4" goto backtester
+if "%choice%"=="5" goto bridge
+if "%choice%"=="6" goto exit
 goto menu
 
 :daemon
@@ -69,6 +71,25 @@ start http://localhost:8000
 echo.
 echo [2/2] Running daemon engines (one thread per pair)...
 .venv\Scripts\python.exe run.py --direct --symbols "EURUSD,USDJPY"
+echo.
+pause
+goto menu
+
+:analyze
+cls
+echo ========================================================
+echo  Trade History Analysis - MAE / MFE / Drawdown
+echo ========================================================
+echo.
+echo  Requires the MT5 terminal to be running and logged in.
+echo  READ-ONLY: this never opens, modifies, or closes any trade.
+echo.
+set /p adays="How many days back to analyze (default 30): "
+if "%adays%"=="" set adays=30
+echo.
+echo Analyzing the last %adays% day(s) of closed trades...
+echo.
+.venv\Scripts\python.exe analyze_trades.py --days %adays%
 echo.
 pause
 goto menu
