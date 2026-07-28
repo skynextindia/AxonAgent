@@ -22,6 +22,7 @@ from axonai.dataflows.mt5_data import mt5_initialize, mt5_shutdown
 from axonai.realtime.risk_guard import RiskGuard
 from axonai.realtime.daemon import AxonDaemon
 from axonai.realtime.correlation_engine import CorrelationEngine
+from axonai.realtime.alerts import send_alert
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,8 @@ class DaemonSupervisor:
             logger.info("DaemonSupervisor: order mirror ENABLED → %s", url)
 
         self._threads: List[threading.Thread] = []
+        self._thread_by_symbol: Dict[str, threading.Thread] = {}
+        self._dead_alerted: set = set()          # symbols already flagged as dead (no alert spam)
         self._stopping = threading.Event()
         self._stopped = False
 
@@ -103,6 +106,7 @@ class DaemonSupervisor:
             )
             t.start()
             self._threads.append(t)
+            self._thread_by_symbol[sym] = t
 
         logger.info(
             "DaemonSupervisor: started %d pair(s): %s",
@@ -112,10 +116,54 @@ class DaemonSupervisor:
         try:
             while not self._stopping.is_set():
                 time.sleep(1)
+                self._check_thread_liveness()
         except KeyboardInterrupt:
             pass
         finally:
             self.stop_all()
+
+    def _check_thread_liveness(self) -> None:
+        """Detect a daemon thread that died outside of shutdown and act on it.
+
+        The old loop only slept — a crashed pair thread was logged once by
+        ``_run_daemon`` and then abandoned, so that pair's trailing / breakeven /
+        EOD management silently stopped. The open position still carries its
+        broker-side entry stop-loss (so it is NOT unprotected), but it will no
+        longer be trailed, moved to breakeven, or flattened at EOD. The original
+        bug was the *silence*; make it loud, and optionally flatten.
+        """
+        if self._stopping.is_set():
+            return
+        for sym, t in self._thread_by_symbol.items():
+            if t.is_alive() or sym in self._dead_alerted:
+                continue
+            self._dead_alerted.add(sym)
+            logger.critical(
+                "DaemonSupervisor: pair %s daemon thread has DIED — trailing/breakeven/EOD "
+                "are NO LONGER running for it. Open positions keep their broker SL but are "
+                "no longer managed. Manual attention needed.", sym,
+            )
+            try:
+                send_alert(
+                    f"AxonAi: {sym} daemon thread DIED — stop-management halted for {sym}. "
+                    f"Positions retain their entry SL but are no longer trailed/flattened. "
+                    f"Restart required.", self.base_config,
+                )
+            except Exception as e:
+                logger.error("DaemonSupervisor: liveness alert failed for %s: %s", sym, e)
+            # Opt-in safety net: flatten the abandoned pair so no position is left
+            # unmanaged. Off by default (the position still has its entry SL, and
+            # auto-closing on a transient thread death may be undesirable).
+            if self.base_config.get("supervisor_flatten_on_thread_death", False):
+                try:
+                    d = self.daemons.get(sym)
+                    closed = d._close_all_positions("supervisor: daemon thread died") if d else 0
+                    logger.critical(
+                        "DaemonSupervisor: flattened %s after thread death (%d position(s) closed).",
+                        sym, closed,
+                    )
+                except Exception as e:
+                    logger.error("DaemonSupervisor: flatten-on-death failed for %s: %s", sym, e)
 
     def _run_daemon(self, symbol: str, daemon: AxonDaemon) -> None:
         try:

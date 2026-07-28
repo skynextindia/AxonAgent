@@ -185,6 +185,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # mode too — required for live trailing stops, post-trade cooldowns, and the
     # per-pair SL lockout. Turn off to revert to dry-run-only monitoring.
     "realtime_manage_positions_live": True,
+    # Supervisor watchdog: if a pair's daemon thread dies, always alert loudly.
+    # Set True to ALSO flatten that pair's positions (they keep their entry SL
+    # regardless, so this is an opt-in extra safety net, not a requirement).
+    "supervisor_flatten_on_thread_death": False,
     # Cross-pair correlation engine (multi-pair only; see correlation_engine.py).
     "corr_engine_enabled": True,
     "corr_lead_symbol": "EURUSD",       # the pair that trades ungated; others follow

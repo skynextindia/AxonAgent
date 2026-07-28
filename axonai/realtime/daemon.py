@@ -20,7 +20,7 @@ try:
 except ImportError:
     mt5 = None
 
-from axonai.dataflows.mt5_data import mt5_initialize, mt5_shutdown, _to_mt5_symbol, get_broker_tz_offset
+from axonai.dataflows.mt5_data import mt5_initialize, mt5_shutdown, _to_mt5_symbol, get_broker_tz_offset, mt5_lock
 from axonai.realtime.event_types import EventPriority, LiveCandle, MarketEvent, EventType
 from axonai.realtime.tick_engine import TickEngine
 from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence, get_dst_session_hours
@@ -98,6 +98,7 @@ class AxonDaemon:
         self._active_trade_system: dict[int, str] = {}
         self._active_trade_atr: dict[int, float] = {}
         self._active_trade_peak_price: dict[int, float] = {}
+        self._sl_fail_alert_ts: dict[int, float] = {}   # per-ticket throttle for SL-modify-failure alerts
 
         # Layer 5: Economic news calendar guard
         self.news_guard = NewsGuard(config)
@@ -1326,7 +1327,8 @@ class AxonDaemon:
                 "type_filling": mt5.ORDER_FILLING_IOC,
             }
 
-            res = mt5.order_send(request)
+            with mt5_lock:
+                res = mt5.order_send(request)
             if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                 logger.info("Close-all: closed position %d (%.2f profit) — %s",
                             pos.ticket, pos.profit, reason)
@@ -1381,7 +1383,8 @@ class AxonDaemon:
                     "type_filling": mt5.ORDER_FILLING_IOC,
                 }
                 
-                res = mt5.order_send(request)
+                with mt5_lock:
+                    res = mt5.order_send(request)
                 if res and res.retcode == mt5.TRADE_RETCODE_DONE:
                     logger.info("EOD: Successfully closed profitable position %d (+%.2f profit)", pos.ticket, pos.profit)
                     closed_count += 1
@@ -1728,17 +1731,8 @@ class AxonDaemon:
                 if pos.sl < target_sl:
                     logger.info("AxonDaemon: Trailing SL triggered for BUY ticket %d. Modifying SL: %.5f -> %.5f",
                                 ticket, pos.sl, target_sl)
-                    request = {
-                        "action": mt5.TRADE_ACTION_SLTP,
-                        "position": ticket,
-                        "symbol": self.mt5_symbol,
-                        "sl": target_sl,
-                        "tp": pos.tp,
-                    }
-                    res = mt5.order_send(request)
-                    if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                        logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
-                            
+                    self._modify_sl(ticket, target_sl, pos.tp, "BUY")
+
             elif pos.type == mt5.POSITION_TYPE_SELL:
                 # Update peak price using the ask price
                 self._active_trade_peak_price[ticket] = min(self._active_trade_peak_price[ticket], ask)
@@ -1767,16 +1761,44 @@ class AxonDaemon:
                 if pos.sl > target_sl or pos.sl == 0.0:
                     logger.info("AxonDaemon: Trailing SL triggered for SELL ticket %d. Modifying SL: %.5f -> %.5f",
                                 ticket, pos.sl, target_sl)
-                    request = {
-                        "action": mt5.TRADE_ACTION_SLTP,
-                        "position": ticket,
-                        "symbol": self.mt5_symbol,
-                        "sl": target_sl,
-                        "tp": pos.tp,
-                    }
-                    res = mt5.order_send(request)
-                    if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                        logger.info("AxonDaemon: Modify SL successful for ticket %d", ticket)
+                    self._modify_sl(ticket, target_sl, pos.tp, "SELL")
+
+    def _modify_sl(self, ticket: int, target_sl: float, tp: float, side: str) -> bool:
+        """Send a lock-serialized SLTP modify; log + alert (throttled) on failure.
+
+        The old code only logged on SUCCESS, so a broker-rejected trail update
+        (requote, off-quotes, momentary disconnect) was swallowed silently and
+        the stop never advanced without anyone knowing. Now a failure is logged
+        every tick (cheap, useful for forensics) and raises a throttled alert
+        (once per 60s per ticket). The trailing loop re-evaluates every tick, so
+        a transient rejection is naturally retried on the next pass.
+        """
+        request = {
+            "action": mt5.TRADE_ACTION_SLTP,
+            "position": ticket,
+            "symbol": self.mt5_symbol,
+            "sl": target_sl,
+            "tp": tp,
+        }
+        with mt5_lock:
+            res = mt5.order_send(request)
+        if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+            logger.info("AxonDaemon: Modify SL successful for %s ticket %d -> %.5f", side, ticket, target_sl)
+            self._sl_fail_alert_ts.pop(ticket, None)
+            return True
+        rc = getattr(res, "retcode", None)
+        cm = getattr(res, "comment", "no result")
+        logger.warning("AxonDaemon: Modify SL FAILED for %s ticket %d (retcode=%s %s); "
+                       "SL stays at broker value, will retry next tick", side, ticket, rc, cm)
+        now = time.time()
+        if now - self._sl_fail_alert_ts.get(ticket, 0.0) > 60.0:
+            self._sl_fail_alert_ts[ticket] = now
+            try:
+                send_alert(f"SL trail modify FAILED on {self.mt5_symbol} {side} ticket {ticket} "
+                           f"(retcode={rc} {cm}) — stop not advanced.", self.config)
+            except Exception as e:
+                logger.error("SL-modify alert failed: %s", e)
+        return False
 
     def _check_for_closed_positions(self, bid: float, ask: float):
         """Detect closed positions and log outcomes."""
