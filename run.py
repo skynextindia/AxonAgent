@@ -159,22 +159,30 @@ def main():
         handlers=[logging.StreamHandler(), file_handler],
     )
 
-    # ── singleton guard: refuse to start if another instance already owns the
-    # dashboard port. Catches accidental double-launches regardless of shell,
+    # ── singleton guard: refuse to start if another instance already owns a port
+    # this process needs. Catches accidental double-launches regardless of shell,
     # PATH-python vs .venv-python, or which .bat/IDE fired the second one.
-    # An exec-node runs headless (no dashboard) so we skip the check for it.
-    if not args.exec_node:
-        import socket
+    #
+    # The exec-node is NOT exempt: it serves a dashboard on args.port AND binds
+    # the mirror server on args.exec_port, so two exec-nodes racing for those
+    # ports is exactly how a system-python node and a .venv node both came up and
+    # split the dashboards. Guard both ports so the second launch cleanly refuses
+    # instead of winning a non-deterministic race.
+    import socket
+    guard_ports = [(args.host, args.port, "Dashboard")]
+    if args.exec_node:
+        guard_ports.append((args.host, args.exec_port, "Mirror-server"))
+    for _host, _port, _what in guard_ports:
         s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         try:
-            s.bind((args.host, args.port))
+            s.bind((_host, _port))
         except OSError as e:
             print("=" * 60)
             print(f"  ANOTHER AXONAI INSTANCE IS ALREADY RUNNING")
-            print(f"  Dashboard port {args.host}:{args.port} is bound ({e}).")
+            print(f"  {_what} port {_host}:{_port} is bound ({e}).")
             print(f"  Refusing to start a duplicate — trading the same account")
-            print(f"  from two processes is dangerous. Stop the other first:")
-            print(f"    powershell \"Get-NetTCPConnection -LocalPort {args.port} -State Listen | %% {{ Stop-Process -Id $_.OwningProcess -Force }}\"")
+            print(f"  from two processes is dangerous. Stop the other first")
+            print(f"  (run_system.bat option 7 kills all AxonAI processes).")
             print("=" * 60)
             sys.exit(2)
         finally:

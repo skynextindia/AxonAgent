@@ -150,7 +150,8 @@ echo.
 echo [1/2] Launching Eightcap LEAD in a new window...
 start "AxonAI - Eightcap LEAD" cmd /k ".venv\Scripts\python.exe run.py --direct --symbols "EURUSD,USDJPY" --mirror-url ws://127.0.0.1:8770"
 echo         (waiting 8 seconds for the exec-node port to be available before the follower connects)
-timeout /t 8 > nul
+echo         (do not press a key — the wait must complete so the two windows start in order)
+timeout /t 8 /nobreak > nul
 echo [2/2] Launching FundingPips EXEC-NODE in a new window...
 start "AxonAI - FundingPips EXEC-NODE" cmd /k ".venv\Scripts\python.exe run.py --direct --symbols "EURUSD,USDJPY" --mt5-path "C:\Program Files\MetaTrader 5\terminal64.exe" --port 8001 --exec-node --prop-firm --prop-initial-balance 100000 --prop-max-drawdown-pct 6.0 --prop-daily-loss-pct 3.0"
 echo.
