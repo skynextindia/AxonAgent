@@ -109,7 +109,7 @@ class MT5TradeExecutor:
         # Portfolio-level pre-trade gate (concurrent cap + daily realized-loss
         # halt). Only runs for order-placing signals so HOLD ticks stay cheap.
         if signal in ("Buy", "Overweight", "Sell", "Underweight", "BuyLimit", "SellLimit"):
-            allowed, reason = self._portfolio_gate(signal)
+            allowed, reason = self._portfolio_gate(signal, symbol)
             if not allowed:
                 logger.warning("PORTFOLIO GUARD — trade rejected: %s", reason)
                 return {"success": False, "reason": reason}
@@ -143,7 +143,7 @@ class MT5TradeExecutor:
             logger.error("PortfolioGuard: position query failed (%s) — allowing trade", e)
             return []
 
-    def _portfolio_gate(self, signal: str) -> tuple[bool, str]:
+    def _portfolio_gate(self, signal: str, symbol: Optional[str] = None) -> tuple[bool, str]:
         """Run the account-wide PortfolioGuard for an order-placing signal."""
         positions = self._get_all_open_positions()
         try:
@@ -151,7 +151,9 @@ class MT5TradeExecutor:
         except Exception:
             realized = 0.0
         direction = "BUY" if signal in ("Buy", "Overweight", "BuyLimit") else "SELL"
-        return self.portfolio_guard.check(positions, realized, intended_direction=direction)
+        return self.portfolio_guard.check(
+            positions, realized, intended_direction=direction, intended_symbol=symbol
+        )
 
     def send_order(self, symbol: str, order_type: int, live_state: Optional[Any] = None, sl: Optional[float] = None, tp: Optional[float] = None, price: Optional[float] = None) -> Optional[dict]:
         """Send a market order with dynamic SL/TP and position sizing to MT5."""

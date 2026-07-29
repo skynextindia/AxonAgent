@@ -87,6 +87,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "max_concurrent_positions": 5,       # max simultaneous open positions across ALL symbols (0 = disabled)
     "max_daily_loss_usd": 500.0,         # halt new entries once the day's realized loss hits this (0 = disabled)
     "max_same_direction_positions": 0,   # correlation cap: max same-direction concurrent (0 = disabled)
+    # Currency-exposure cap (2026-07-30): net signed units per currency across all
+    # open positions. All 4 traded pairs share a USD leg, so USDJPY BUY and
+    # AUDUSD SELL are BOTH +USD -- one doubled 'long USD' bet that stopped out
+    # together on 07-30 (-200 in 23min). 1 = allow offsetting pairs but block
+    # stacking the same currency direction; 0 = disabled. (count-based; assumes
+    # equal-size trades.)
+    "max_currency_exposure": 1,
     # ── Reversal-edge entry filter (data-derived; additive veto, only blocks) ──
     # From winners-vs-losers analysis: RANGE_CHOP loses; reversals fire at a
     # per-pair velocity climax. Gold has NO clean velocity edge, so it uses a
