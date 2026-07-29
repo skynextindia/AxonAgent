@@ -54,10 +54,21 @@ def get_windows_host_ip():
 
 def main():
     import logging
+    from logging.handlers import RotatingFileHandler
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+    os.makedirs(log_dir, exist_ok=True)
+    file_handler = RotatingFileHandler(
+        os.path.join(log_dir, "daemon.log"),
+        maxBytes=10 * 1024 * 1024,   # 10 MB per file
+        backupCount=10,              # keep 10 rolls → ~100 MB cap
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(logging.Formatter(
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[logging.StreamHandler()]
+        handlers=[logging.StreamHandler(), file_handler],
     )
     parser = argparse.ArgumentParser(description="AxonAI Dashboard")
     parser.add_argument("--bridge", action="store_true", help="Force bridge mode (WSL)")
