@@ -246,6 +246,16 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "prop_safety_buffer_pct": 20.0,
     "prop_flatten_on_breach": True,          # close open positions on breach, not just block
     "prop_state_file": "reports/prop_guard.json",
+    # ── Consistency rule (payout gate; NOT a hard breach) ──────────────────────
+    # FundingPips 2-Step Pro forbids any single trading day from exceeding 45%
+    # of total realized profit. Unlike a DD breach, tripping this does NOT kill
+    # the account — but it BLOCKS the payout. Enforcement here BLOCKS NEW
+    # ENTRIES for the day if today's realized would push the ratio past the
+    # (buffered) threshold; open positions are left alone (flattening would
+    # only ADD to today's realized and make the ratio worse).
+    "prop_consistency_pct": 45.0,            # firm's rule; 0 = disabled
+    # Profit-target notice (informational, not a halt):
+    "prop_profit_target_pct": 6.0,           # 2-Step Pro Phase 1; 0 = disabled
 })
 
 

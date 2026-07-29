@@ -244,5 +244,95 @@ class TestDisabledIsInert(_GuardCase):
         self.assertEqual(g._today(), str(date.today()))
 
 
+class TestConsistencyRule(_GuardCase):
+    """The 45% payout gate: block NEW entries when today's day-PnL crosses
+    the buffered ratio (36% with the default 20% buffer). Never flattens.
+    """
+
+    def _guard_pro(self, **over):
+        # 2-Step Pro: 6% overall, 3% daily, 45% consistency, 20% buffer.
+        pro = dict(prop_max_drawdown_pct=6.0, prop_daily_loss_pct=3.0,
+                   prop_consistency_pct=45.0)
+        pro.update(over)
+        return self._guard(**pro)
+
+    def test_no_profit_yet_never_blocks(self):
+        g = self._guard_pro()
+        g.update_equity(100_000.0, 100_000.0)  # flat account
+        allowed, _ = g.entry_allowed(100_000.0, 100_000.0)
+        self.assertTrue(allowed)
+
+    def test_day_below_threshold_allows(self):
+        # $5000 total profit, today +$1500 = 30% (< 36% buffered) → allowed.
+        g = self._guard_pro()
+        g.update_equity(105_000.0, 105_000.0)
+        g.record_trade_result(1_500.0)
+        allowed, reason = g.entry_allowed(105_000.0, 105_000.0)
+        self.assertTrue(allowed, msg=reason)
+
+    def test_day_at_threshold_blocks_new_entries(self):
+        # $4000 total profit, today +$2000 = 50% → over 36% buffered → block.
+        g = self._guard_pro()
+        g.update_equity(104_000.0, 104_000.0)
+        g.record_trade_result(2_000.0)
+        allowed, reason = g.entry_allowed(104_000.0, 104_000.0)
+        self.assertFalse(allowed)
+        self.assertIn("CONSISTENCY", reason)
+
+    def test_consistency_never_triggers_flatten_path(self):
+        # is_halted must stay clean — daemon's flatten-on-breach must not fire
+        # from a payout-gate trip (flattening would make the day worse).
+        g = self._guard_pro()
+        g.update_equity(104_000.0, 104_000.0)
+        g.record_trade_result(2_000.0)  # 50% concentration
+        halted, _ = g.is_halted(104_000.0)
+        self.assertFalse(halted, "consistency trip must NOT halt/flatten")
+        # But is_tripped (executor's gate) must be True.
+        self.assertTrue(g.is_tripped)
+
+    def test_best_day_persists_across_days(self):
+        # Yesterday was concentrated; today is calm. The rule still blocks
+        # because best_day / total > threshold.
+        g = self._guard_pro()
+        g.update_equity(104_000.0, 104_000.0)
+        g.record_trade_result(2_000.0)                                   # yesterday's big day
+        g.daily_pnl = {"date": "9999-01-01", "start_equity": 0.0, "realized_pnl": 0.0}
+        g.update_equity(104_000.0, 104_000.0)                            # new day, no trades
+        allowed, reason = g.entry_allowed(104_000.0, 104_000.0)
+        self.assertFalse(allowed)
+        self.assertIn("CONSISTENCY", reason)
+
+    def test_disabled_when_pct_is_zero(self):
+        g = self._guard_pro(prop_consistency_pct=0.0)
+        g.update_equity(104_000.0, 104_000.0)
+        g.record_trade_result(2_000.0)
+        allowed, _ = g.entry_allowed(104_000.0, 104_000.0)
+        self.assertTrue(allowed)
+
+    def test_losing_day_never_sets_the_gate(self):
+        # A -$2000 day should not become the "best day" and should not block.
+        g = self._guard_pro()
+        g.update_equity(103_000.0, 103_000.0)
+        g.record_trade_result(-2_000.0)
+        allowed, _ = g.entry_allowed(103_000.0, 103_000.0)
+        self.assertTrue(allowed)
+        self.assertEqual(g.prop_state.get("best_day_pnl", 0.0), 0.0)
+
+
+class TestProfitTargetNotice(_GuardCase):
+    def test_target_logged_once_and_does_not_halt(self):
+        # 2-Step Pro: 6% target from 100k = 106k.
+        g = self._guard(prop_profit_target_pct=6.0, prop_max_drawdown_pct=6.0,
+                        prop_daily_loss_pct=3.0)
+        g.update_equity(106_500.0, 106_500.0)
+        # trigger via entry_allowed (which calls _check_profit_target)
+        allowed, _ = g.entry_allowed(106_500.0, 106_500.0)
+        self.assertTrue(allowed, "profit target is a notice, not a halt")
+        self.assertTrue(g._target_hit_logged)
+        # Second call must not re-log (idempotent).
+        allowed2, _ = g.entry_allowed(107_000.0, 107_000.0)
+        self.assertTrue(allowed2)
+
+
 if __name__ == "__main__":
     unittest.main()

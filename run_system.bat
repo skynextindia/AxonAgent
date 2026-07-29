@@ -132,8 +132,11 @@ echo.
 echo  FundingPips uses NO symbol suffix (verified: EURUSD, USDJPY).
 echo  Eightcap keeps its .i suffix from default_config.
 echo.
-echo  Prop-guard on FundingPips: 10%% overall floor, 5%% daily, 20%% buffer
-echo  (real trip lines: 8%% overall, 4%% daily) on a 100,000 baseline.
+echo  Prop-guard on FundingPips 2-Step Pro (100,000 baseline):
+echo    - Overall drawdown 6%%       (trips at 4.8%% with 20%% buffer)
+echo    - Daily loss      3%%       (trips at 2.4%%)
+echo    - Consistency     45%%       (trips at 36%%; blocks new entries only)
+echo    - Profit target   6%%       (informational log; no halt)
 echo.
 start "" http://localhost:8000
 start "" http://localhost:8001
@@ -143,7 +146,7 @@ start "AxonAI - Eightcap LEAD" cmd /k ".venv\Scripts\python.exe run.py --direct 
 echo         (waiting 8 seconds for the exec-node port to be available before the follower connects)
 timeout /t 8 > nul
 echo [2/2] Launching FundingPips EXEC-NODE in a new window...
-start "AxonAI - FundingPips EXEC-NODE" cmd /k "set AXONAI_MT5_SYMBOL_SUFFIX=&& .venv\Scripts\python.exe run.py --direct --symbols "EURUSD,USDJPY" --mt5-path "C:\Program Files\MetaTrader 5\terminal64.exe" --port 8001 --exec-node --prop-firm --prop-initial-balance 100000"
+start "AxonAI - FundingPips EXEC-NODE" cmd /k "set AXONAI_MT5_SYMBOL_SUFFIX=&& .venv\Scripts\python.exe run.py --direct --symbols "EURUSD,USDJPY" --mt5-path "C:\Program Files\MetaTrader 5\terminal64.exe" --port 8001 --exec-node --prop-firm --prop-initial-balance 100000 --prop-max-drawdown-pct 6.0 --prop-daily-loss-pct 3.0"
 echo.
 echo Both processes launched. Watch each window for startup logs.
 echo Watch reports\daemon.log for gate/lock/prop-guard decisions.

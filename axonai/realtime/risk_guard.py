@@ -35,6 +35,12 @@ class RiskGuard:
         buf = float(config.get("prop_safety_buffer_pct", 20.0))
         # Trip at (100-buffer)% of each limit so the real breach line is never hit.
         self.safety_factor = max(0.0, min(1.0, 1.0 - buf / 100.0))
+        # Consistency rule (payout gate — NOT a hard breach; blocks new entries
+        # but never flattens, since flattening would only enlarge the day).
+        self.consistency_pct = float(config.get("prop_consistency_pct", 0.0))
+        # Profit target: informational one-shot log line (does not halt trading).
+        self.profit_target_pct = float(config.get("prop_profit_target_pct", 0.0))
+        self._target_hit_logged = False
         self.prop_state_file = config.get("prop_state_file", "reports/prop_guard.json")
         self.breach_reason = ""
         self.prop_state = self._load_prop_state() if self.prop_enabled else {}
@@ -142,6 +148,7 @@ class RiskGuard:
     def update_equity(self, current_equity: float, current_balance: float):
         """Seed daily starting equity on first call of the day."""
         self.current_equity = current_equity
+        self._last_balance = float(current_balance or 0.0)
         today = self._today()
         # Daily baseline: use the HIGHER of equity and balance. If the day's first
         # observation lands after price has already moved (fresh deploy, restart,
@@ -173,6 +180,16 @@ class RiskGuard:
 
         self.daily_pnl["realized_pnl"] += pnl
         self._save_daily_pnl()
+        # Ratchet the phase's best single-day realized profit for the consistency
+        # check. Only positive days count — a losing day never sets the payout
+        # gate. Persists in prop_state so it survives across restarts.
+        if self.prop_enabled:
+            today_pnl = float(self.daily_pnl["realized_pnl"])
+            if today_pnl > 0:
+                best = float(self.prop_state.get("best_day_pnl", 0.0) or 0.0)
+                if today_pnl > best:
+                    self.prop_state["best_day_pnl"] = today_pnl
+                    self._save_prop_state()
 
     # ── prop-firm limits ──────────────────────────────────────────────────────
     def drawdown_floor(self) -> float:
@@ -288,10 +305,87 @@ class RiskGuard:
             
         return False, ""
 
+    # ── consistency rule (payout gate; blocks new entries, never flattens) ───
+    def _consistency_blocked(self, current_balance: float) -> tuple[bool, str]:
+        """Would opening a NEW entry today risk the 45% consistency rule?
+
+        The rule: no single trading day may exceed X% of total realized profit.
+        We block new entries once today's realized ratio crosses the buffered
+        threshold, so an in-progress winning day cannot inflate further and lock
+        payout. Never flattens — flattening only enlarges today's realized.
+        """
+        if not self.prop_enabled or self.consistency_pct <= 0:
+            return False, ""
+        initial = float(self.prop_state.get("initial_balance", 0.0) or 0.0)
+        if initial <= 0 or current_balance <= 0:
+            return False, ""
+        total_profit = float(current_balance) - initial
+        today_pnl = float(self.daily_pnl.get("realized_pnl", 0.0) or 0.0)
+        best = float(self.prop_state.get("best_day_pnl", 0.0) or 0.0)
+        worst_day = max(today_pnl, best)
+        # Only meaningful once there is positive net profit and a positive day.
+        if total_profit <= 0 or worst_day <= 0:
+            return False, ""
+        threshold = self.consistency_pct * self.safety_factor
+        ratio = 100.0 * worst_day / total_profit
+        if ratio >= threshold:
+            return True, (
+                f"CONSISTENCY block: worst-day {worst_day:+.2f} is {ratio:.1f}% "
+                f"of total profit {total_profit:+.2f} (threshold {threshold:.1f}%, "
+                f"firm's rule {self.consistency_pct:.0f}%) — new entries blocked "
+                f"for the day; open positions untouched")
+        return False, ""
+
+    def _check_profit_target(self, current_equity: float) -> None:
+        """One-shot INFO log when the phase profit target is reached (no halt)."""
+        if not self.prop_enabled or self.profit_target_pct <= 0 or self._target_hit_logged:
+            return
+        initial = float(self.prop_state.get("initial_balance", 0.0) or 0.0)
+        if initial <= 0:
+            return
+        target = initial * (1.0 + self.profit_target_pct / 100.0)
+        if current_equity >= target:
+            self._target_hit_logged = True
+            logger.info(
+                "PROFIT TARGET REACHED: equity %.2f >= %.2f (%.1f%% of %.0f "
+                "initial). Phase 1 pass condition met; continuing to trade — "
+                "watch the consistency rule.",
+                current_equity, target, self.profit_target_pct, initial)
+
+    def entry_allowed(self, current_equity: float, current_balance: float) -> tuple[bool, str]:
+        """Gate for NEW positions: hard halts + payout-gate rules.
+
+        Returns (True, "") when a new entry may proceed; (False, reason) otherwise.
+        Hard halts (DD floor / daily loss) go through is_halted so the daemon's
+        flatten-on-breach path still fires; consistency is added on top here as
+        a block-only rule (never flatten).
+        """
+        halted, reason = self.is_halted(current_equity)
+        if halted:
+            return False, reason
+        self._check_profit_target(current_equity)
+        blocked, why = self._consistency_blocked(current_balance)
+        if blocked:
+            return False, why
+        return True, ""
+
     @property
     def is_tripped(self) -> bool:
-        """Helper checking if circuit breaker has tripped."""
+        """Helper checking if new orders should be REJECTED (hard halt OR payout gate).
+
+        This is the property the executor consults before placing an order, so it
+        must be the union of "hard breach" (is_halted) AND "payout gate" (consistency).
+        Flatten decisions in the daemon separately query is_halted() directly so
+        the consistency rule never triggers a mass-close.
+        """
         if not hasattr(self, "current_equity") or self.current_equity == 0.0:
             return False
         halted, _ = self.is_halted(self.current_equity)
-        return halted
+        if halted:
+            return True
+        # Consistency needs the current balance; fall back to equity when the
+        # daemon hasn't fed a fresh balance in (rare — update_equity is called
+        # each tick). Ratio will still be meaningful.
+        cb = getattr(self, "_last_balance", 0.0) or self.current_equity
+        blocked, _ = self._consistency_blocked(cb)
+        return blocked
