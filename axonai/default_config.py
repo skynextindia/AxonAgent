@@ -270,6 +270,16 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # come BACK toward it before firing (fixes SELL-at-bottom / BUY-at-top mistimed entries).
     # False = legacy symmetric-zone behaviour (fire on first momentum stall in the zone).
     "entry_retest_require_approach": True,
+    # ── Entry: reversal-confirmation gate (2026-07-30) ──────────────────────
+    # After the retest approach, require price to actually roll back over in the
+    # trade's favor by entry_confirm_reversal_pips before triggering, instead of
+    # firing while price is still coming back toward the level. FX diagnostic
+    # (n=121): 52% of LOSING entries never gave >1p favorable (went adverse from
+    # the entry tick) while WINNERS turned almost immediately (MAE med 0.15p).
+    # Confirming a small rollover selects the immediate-turn setups. pips scale
+    # with pair_move_scale. False = legacy (fire on approach without rollover).
+    "entry_require_reversal_confirm": True,
+    "entry_confirm_reversal_pips": 0.8,
     # Optimistic velocity-decay trigger, disabled 2026-07-23. It transitioned
     # ARMING -> TRIGGERED without reading `dist` at all (no breakaway, no
     # location, no retest), and was responsible for the bulk of the 98-99% of

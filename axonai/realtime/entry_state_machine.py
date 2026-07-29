@@ -100,6 +100,16 @@ class EntryStateMachine:
         # velocity-decay exhaustion confirmation (sniper), instead of triggering
         # on the breakout itself. A clear EXHAUSTION signature still triggers now.
         self._require_retest_confirm = bool(self._config.get("entry_require_retest_confirm", True))
+        # Reversal-confirmation gate. After the retest approach, require price to
+        # actually ROLL BACK OVER in the trade's favor by this many pips before
+        # triggering, instead of firing while price is still coming back toward the
+        # level. Diagnostic 2026-07-30 (n=121 FX): 52% of losing entries never gave
+        # >1p favorable -- they went adverse from the entry tick -- while winners
+        # turned almost immediately (MAE med 0.15p). Waiting for a small confirmed
+        # reversal selects the immediate-turn setups and drops the never-turn ones.
+        self._require_reversal_confirm = bool(self._config.get("entry_require_reversal_confirm", True))
+        self._confirm_reversal_pips = float(self._config.get("entry_confirm_reversal_pips", 0.8 * _scale))
+        self._confirm_ref: Optional[float] = None  # come-back extreme (signed pips vs level)
         self._prev_net_sign = 0  # displacement-flip detector
 
         # State tracking
@@ -161,6 +171,7 @@ class EntryStateMachine:
         self._retest_start_time = 0.0
         self._arm_start_time = 0.0
         self._prev_net_sign = 0
+        self._confirm_ref = None
         self._triggered_time = 0.0
         self._last_reason = "Reset"
 
@@ -632,6 +643,7 @@ class EntryStateMachine:
             else:
                 self._retest_start_time = ts
                 self._retest_extreme = 0.0
+                self._confirm_ref = None
                 self._transition(STATE_RETEST_WAIT, f"Breakaway impulse ({disp.classification}); awaiting velocity-decay retest confirmation.")
 
     def _evaluate_retest_wait(
@@ -700,6 +712,25 @@ class EntryStateMachine:
                 coming_back = dist < self._retest_extreme - 0.2 * zone_width
             approached = pulled_away and coming_back
 
+        # Reversal-confirmation: once price has pulled away and is coming back,
+        # record the come-back extreme (closest return to the level), then require
+        # price to roll back over by _confirm_reversal_pips in the trade's favor
+        # before triggering. This is what separates the immediate-turn winners
+        # (MAE med 0.15p) from the never-turn losers (52% of losses that never
+        # gave >1p favorable). Tracked every tick so the rollover is measured off
+        # the true peak of the come-back, not whatever tick we happened to see.
+        reversal_confirmed = True
+        if self._require_reversal_confirm:
+            if abs(self._retest_extreme) >= zone_width:  # a real pull-away happened
+                if self._anomaly_direction == "SELL":
+                    self._confirm_ref = dist if self._confirm_ref is None else max(self._confirm_ref, dist)
+                    reversal_confirmed = dist <= self._confirm_ref - self._confirm_reversal_pips
+                else:
+                    self._confirm_ref = dist if self._confirm_ref is None else min(self._confirm_ref, dist)
+                    reversal_confirmed = dist >= self._confirm_ref + self._confirm_reversal_pips
+            else:
+                reversal_confirmed = False  # no pull-away yet -> nothing to confirm
+
         if in_zone:
             decay = _num(velocity, "decay_ratio", 1.0)
 
@@ -709,14 +740,17 @@ class EntryStateMachine:
                 self._transition(STATE_INVALIDATED, f"High momentum on retest (decay={decay:.2f}). Breakout threat.")
                 return
 
-            # Trigger confirm: relaxed to just decay < 0.6 (candle setup already filtered noise)
-            # Old: decay < 0.4 AND tr_10 < tr_300 * 0.6 (dual condition — too strict)
-            if decay < 0.6 and approached:
+            # Trigger confirm: decay decayed + directional retest approach + a
+            # confirmed reversal rollover (price turned back in our favor).
+            if decay < 0.6 and approached and reversal_confirmed:
                 if (ts - self._arm_start_time) >= self._min_stall_duration:
                     self._retest_outcomes["confirmed"] = self._retest_outcomes.get("confirmed", 0) + 1
-                    self._transition(STATE_TRIGGERED, f"Retest confirmed (decay={decay:.2f}, dist={dist:+.1f}p off extreme {self._retest_extreme:+.1f}p). Reversal trigger.")
+                    self._transition(STATE_TRIGGERED, f"Retest confirmed (decay={decay:.2f}, dist={dist:+.1f}p off extreme {self._retest_extreme:+.1f}p, rolled over {self._confirm_reversal_pips:.1f}p). Reversal trigger.")
                 else:
                     logger.debug("EntryRETEST: Stall delay active on retest trigger. Spent %.1fs / %.1fs", ts - self._arm_start_time, self._min_stall_duration)
+            elif decay < 0.6 and approached and not reversal_confirmed:
+                self._retest_outcomes["awaiting_rollover"] = self._retest_outcomes.get("awaiting_rollover", 0) + 1
+                logger.debug("EntryRETEST: approach+decay ok but reversal not confirmed (dist=%.1fp ref=%s). Awaiting %.1fp rollover.", dist, self._confirm_ref, self._confirm_reversal_pips)
             elif decay < 0.6 and not approached:
                 logger.debug("EntryRETEST: decay ok but no directional retest yet (dist=%.1fp extreme=%.1fp). Awaiting return to level.", dist, self._retest_extreme)
 

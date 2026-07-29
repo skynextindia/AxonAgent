@@ -282,12 +282,24 @@ class TestVelocitySpikeQuietMarket:
                      liquidity, regime, mtf, spread=0.1 * 0.0001)
         assert fsm._current_state == STATE_RETEST_WAIT
 
-        # === TICK 6: Price comes BACK toward the level and stalls -> TRIGGERED ===
+        # === TICK 6: Price comes BACK toward the level (no rollover yet) ===
+        # Reversal-confirmation gate (2026-07-30): approach + decay alone no longer
+        # triggers while price is still rising into the top. Held in RETEST_WAIT
+        # until price rolls back over in our favor.
         price = 1.09995  # back to 1.0 pips below the level, off its 4.0 extreme
         velocity = self._make_velocity(percentile=40.0, tick_efficiency=0.5, decay_ratio=0.3)
         displacement = self._make_displacement(DISPLACEMENT_ABSORPTION, net_displacement_pips=-3.0)
 
-        decision = fsm.evaluate(price, base_time + timedelta(seconds=40), velocity,
+        fsm.evaluate(price, base_time + timedelta(seconds=40), velocity,
+                     displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
+        assert fsm._current_state == STATE_RETEST_WAIT
+
+        # === TICK 7: Price ROLLS BACK OVER in our favor -> TRIGGERED ===
+        price = 1.09980  # 2.5 pips below level, rolled 1.5p back down off the come-back
+        velocity = self._make_velocity(percentile=40.0, tick_efficiency=0.5, decay_ratio=0.3)
+        displacement = self._make_displacement(DISPLACEMENT_ABSORPTION, net_displacement_pips=-5.0)
+
+        decision = fsm.evaluate(price, base_time + timedelta(seconds=45), velocity,
                                 displacement, liquidity, regime, mtf, spread=0.1 * 0.0001)
         assert fsm._current_state == STATE_TRIGGERED
         assert decision.is_valid_entry is True
