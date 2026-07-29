@@ -124,6 +124,27 @@ def main():
                         help="Prop starting balance baseline (default: seed from the account)")
     args = parser.parse_args()
 
+    # ── singleton guard: refuse to start if another instance already owns the
+    # dashboard port. Catches accidental double-launches regardless of shell,
+    # PATH-python vs .venv-python, or which .bat/IDE fired the second one.
+    # An exec-node runs headless (no dashboard) so we skip the check for it.
+    if not args.exec_node:
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.bind((args.host, args.port))
+        except OSError as e:
+            print("=" * 60)
+            print(f"  ANOTHER AXONAI INSTANCE IS ALREADY RUNNING")
+            print(f"  Dashboard port {args.host}:{args.port} is bound ({e}).")
+            print(f"  Refusing to start a duplicate — trading the same account")
+            print(f"  from two processes is dangerous. Stop the other first:")
+            print(f"    powershell \"Get-NetTCPConnection -LocalPort {args.port} -State Listen | %% {{ Stop-Process -Id $_.OwningProcess -Force }}\"")
+            print("=" * 60)
+            sys.exit(2)
+        finally:
+            s.close()
+
     symbols = [s.strip() for s in args.symbols.split(",")] if args.symbols else [args.symbol]
     symbols = [s for s in symbols if s]
 
