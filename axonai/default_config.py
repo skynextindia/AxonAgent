@@ -301,7 +301,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # never vetoes. 0.0 = disabled; recommended 1.0 by the data. Off by default so
     # the direction-aware veto is confirmed on a restarted session before it gates
     # live money.
-    "entry_min_room_pips": 0.0,
+    # Enabled 2026-07-30: FX realized-trade cohorts (n=121, gold excluded) show
+    # room>=1p netted +0.29p/46% win vs room<1p -0.72p/32% win -- the cleanest
+    # single W/L split in the book. 1.0 vetoes the losing bucket, keeps the winner.
+    "entry_min_room_pips": 1.0,
 
     # Regime-avoidance veto for reversal entries. Signal-level feature importance
     # over 809k old-engine snapshot ticks: fading in TREND_EXPANSION netted -0.62p
@@ -311,7 +314,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Empty = disabled. Candidate values ["TREND_EXPANSION", "COMPRESSION"], kept
     # off until a restarted session confirms these regimes stay negative under the
     # corrected entry engine (old-engine snapshots computed the evidence).
-    "entry_avoid_regimes": [],
+    # Enabled 2026-07-30: FX realized-trade cohorts (n=121, gold excluded) show
+    # fading in TREND_CONTINUATION is the worst regime (-0.39p/36% win, n=67) --
+    # these are fades INTO a live trend (tonight's USDJPY -101.67 SL was one).
+    # RANGE_CHOP fades were the best (+0.16p/53%), so only the trend regime is
+    # vetoed, not chop. Regime taxonomy is the live daemon's, not the old-engine
+    # TREND_EXPANSION study above.
+    "entry_avoid_regimes": ["TREND_CONTINUATION"],
 
     # ── HTF Coherence Dampening ────────────────────────────────────────────
     "htf_opposing_sensitivity_multiplier": 1.5,       # more aggressive exits when HTF opposes
