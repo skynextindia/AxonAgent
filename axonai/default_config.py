@@ -104,6 +104,17 @@ DEFAULT_CONFIG = _apply_env_overrides({
         "AUDUSD": [],
         "XAUUSD": [],
     },
+    # Per-pair conviction floor INSIDE an allowed chop regime. AUD reversals
+    # live in RANGE_CHOP (see reversal_block_regimes), so the pair is not chop-
+    # blocked — but 2026-07-30 live showed the losers there were NEUTRAL /
+    # reversal_pressure=0 fades, while the one exhaustion+revP=1.0 setup did not
+    # run to SL. So instead of blocking chop (which would kill ~93% of AUD's
+    # reversal window), require real conviction when trading in these regimes:
+    # pass only if displacement is EXHAUSTION or reversal_pressure >= floor.
+    # Empty/unset for a pair = no extra gate (other pairs stay byte-identical).
+    "reversal_chop_conviction": {
+        "AUDUSD": {"regimes": ["RANGE_CHOP"], "min_reversal_pressure": 0.6},
+    },
     "reversal_require_location": False,   # enable after location logging is validated live
     "reversal_location_max_pips": {"default": 8.0, "XAUUSD": 60.0},
     # Floors sit between p25 and p50 of LIVE TRIGGERED distributions (measured

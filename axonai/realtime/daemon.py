@@ -2374,6 +2374,18 @@ class AxonDaemon:
             brs = brs.get(sym, brs.get("default", []))
         if rg in (brs or []):
             return False, f"regime={rg}"
+        # 1b. Conviction floor inside an allowed chop regime (per-pair). For a
+        # pair whose reversals live in chop (so it is NOT chop-blocked above),
+        # still demand real conviction there: displacement EXHAUSTION or
+        # reversal_pressure >= floor. Blocks the NEUTRAL / revP=0 fades that ran
+        # to full SL on 2026-07-30 without closing the pair's edge window.
+        cc = (cfg.get("reversal_chop_conviction", {}) or {}).get(sym)
+        if cc and rg in (cc.get("regimes", []) or []):
+            disp_cls = getattr(getattr(snapshot, "displacement", None), "classification", "") or ""
+            mtf = getattr(self.reversal_model, "_last_mtf_state", None)
+            revp = float(getattr(mtf, "reversal_pressure", 0.0) or 0.0) if mtf else 0.0
+            if disp_cls != "EXHAUSTION" and revp < float(cc.get("min_reversal_pressure", 0.6)):
+                return False, f"chop_low_conviction(revp={revp:.2f})"
         # 2. Per-pair velocity/vol/tick floors (gold = vol-only)
         floors = (cfg.get("reversal_pair_floors", {}) or {}).get(sym, {})
         v = getattr(snapshot, "velocity", None)
