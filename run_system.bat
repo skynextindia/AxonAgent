@@ -30,10 +30,11 @@ echo  3. Analyze Trade History (MAE / MFE / Drawdown)
 echo  4. Run Intraday Backtester (M15 Simulation)
 echo  5. Start MT5 Bridge Service (relays to WSL clients on port 8765)
 echo  6. Start BOTH: Eightcap (LEAD) + FundingPips (EXEC-NODE, 100k prop-guard)
-echo  7. Exit
+echo  7. Kill ALL AxonAI processes (any run.py python, free ports 8000/8001)
+echo  8. Exit
 echo.
 echo ========================================================
-set /p choice="Select an option (1-7): "
+set /p choice="Select an option (1-8): "
 
 if "%choice%"=="1" goto daemon
 if "%choice%"=="2" goto daemon_multi
@@ -41,7 +42,8 @@ if "%choice%"=="3" goto analyze
 if "%choice%"=="4" goto backtester
 if "%choice%"=="5" goto bridge
 if "%choice%"=="6" goto dual
-if "%choice%"=="7" goto exit
+if "%choice%"=="7" goto killall
+if "%choice%"=="8" goto exit
 goto menu
 
 :daemon
@@ -150,6 +152,35 @@ start "AxonAI - FundingPips EXEC-NODE" cmd /k "set AXONAI_MT5_SYMBOL_SUFFIX=&& .
 echo.
 echo Both processes launched. Watch each window for startup logs.
 echo Watch reports\daemon.log for gate/lock/prop-guard decisions.
+echo.
+pause
+goto menu
+
+:killall
+cls
+echo ========================================================
+echo  Killing ALL AxonAI processes
+echo ========================================================
+echo.
+echo  Targets: any python.exe whose command line contains "run.py"
+echo           (both .venv-python real traders and system-python zombies)
+echo  Also verifies ports 8000 and 8001 are freed afterwards.
+echo.
+echo  Does NOT touch: MT5 terminals, browser tabs, dashboard windows.
+echo.
+set /p killconfirm="Type YES to confirm kill: "
+if /I not "%killconfirm%"=="YES" (
+    echo Aborted — no processes killed.
+    pause
+    goto menu
+)
+echo.
+echo Stopping matching processes...
+powershell -NoProfile -Command "$p = Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -match 'run\.py' }; if ($p) { $p | ForEach-Object { Write-Host ('  killing PID ' + $_.ProcessId + '  --  ' + $_.CommandLine.Substring(0, [Math]::Min(90, $_.CommandLine.Length))); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } } else { Write-Host '  (none running)' }"
+timeout /t 2 > nul
+echo.
+echo Verifying...
+powershell -NoProfile -Command "$p = Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -match 'run\.py' }; if ($p) { Write-Host '  STILL RUNNING:'; $p | ForEach-Object { Write-Host ('    PID ' + $_.ProcessId) } } else { Write-Host '  CLEAN: no run.py processes remain' }; foreach ($port in 8000,8001) { $c = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue; if ($c) { Write-Host ('  PORT ' + $port + ' STILL BOUND by PID ' + $c.OwningProcess) } else { Write-Host ('  PORT ' + $port + ' FREE') } }"
 echo.
 pause
 goto menu
