@@ -94,6 +94,27 @@ def mt5_initialize(
         logger.warning("MT5 initialize failed: %s", err)
         return False
 
+    # Verify we attached to the terminal we ASKED for. mt5.initialize(path=...)
+    # connects to an already-running terminal, and when two are open (the
+    # Eightcap "brain" + the FundingPips node) it can silently attach to the
+    # WRONG one — feeding the wrong account's prices/positions into this process.
+    # A wrong data feed must fail LOUD, never trade on it. Only enforced when a
+    # path was explicitly requested (the analyzer/default path leaves it None).
+    if terminal_path:
+        info = mt5.terminal_info()
+        connected = os.path.normcase((getattr(info, "path", "") or "").rstrip("\\/"))
+        wanted = os.path.normcase(os.path.dirname(terminal_path).rstrip("\\/"))
+        if connected and wanted and connected != wanted:
+            company = getattr(info, "company", "?")
+            mt5.shutdown()
+            raise RuntimeError(
+                f"MT5 attached to the WRONG terminal: requested '{wanted}' but "
+                f"connected to '{connected}' ({company}). Refusing to start — this "
+                f"would run the strategy on the wrong account's data. Make sure the "
+                f"requested terminal is running and logged in, then relaunch."
+            )
+        logger.info("MT5 terminal verified: %s (%s)", connected, getattr(info, "company", "?"))
+
     _initialized = True
     atexit.register(mt5_shutdown)
 
