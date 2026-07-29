@@ -19,7 +19,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,10 @@ from axonai.realtime.velocity_normalizer import NormalizedVelocity
 from axonai.realtime.displacement_engine import DisplacementState, DISPLACEMENT_IMPULSE, DISPLACEMENT_TRAP, DISPLACEMENT_ABSORPTION
 from axonai.realtime.liquidity_engine import LiquidityState
 from axonai.realtime.mtf_context import MTFState
-from axonai.realtime.regime_engine import RegimeState, REGIME_RANGE_CHOP, REGIME_EXHAUSTION, REGIME_REVERSAL
+
+if TYPE_CHECKING:
+    from axonai.realtime.regime_engine import RegimeState
+    from axonai.realtime.market_context import MarketContext
 
 
 # ── Entry States ─────────────────────────────────────────────────────────
@@ -46,6 +49,7 @@ class EntryDecision:
     direction: Optional[str] = None              # "BUY" or "SELL"
     signal_quality: float = 0.0                  # 0.0 to 1.0
     reason: str = "Awaiting anomaly"
+    skip_reason: str = ""                         # populated by reversal-confluence gate veto (observability)
 
     # New optional fields (populated by daemon.py dependency injection)
     entry_location_context: Optional[dict] = None      # from LocationEngine
@@ -58,9 +62,16 @@ class EntryStateMachine:
     """Stateful trade entry execution manager."""
 
     def __init__(self, timeout_sec: float = 120.0, pip_mult: float = 0.0001):
+        # Late import to avoid circular dependency
+        from axonai.realtime.regime_engine import REGIME_RANGE_CHOP, REGIME_EXHAUSTION, REGIME_REVERSAL
+
+        self.REGIME_RANGE_CHOP = REGIME_RANGE_CHOP
+        self.REGIME_EXHAUSTION = REGIME_EXHAUSTION
+        self.REGIME_REVERSAL = REGIME_REVERSAL
+
         self._pip = pip_mult
         self._timeout_sec = timeout_sec
-        
+
         # State tracking
         self._current_state = STATE_IDLE
         self._anomaly_time: float = 0.0
@@ -91,7 +102,7 @@ class EntryStateMachine:
         velocity: NormalizedVelocity,
         displacement: DisplacementState,
         liquidity: LiquidityState,
-        regime: RegimeState,
+        regime: "RegimeState",
         mtf: MTFState,
     ) -> EntryDecision:
         """Evaluate conditions and transition states."""
@@ -129,18 +140,127 @@ class EntryStateMachine:
         # 3. Decision generation
         is_trigger = self._current_state == STATE_TRIGGERED
         quality = self._calculate_quality(regime, mtf) if is_trigger else 0.0
-        
+
         reason = self._last_reason
         if is_trigger:
             reason = f"Displacement away from trap confirmed ({self._anomaly_type})"
-            
+
+        # Include direction when actively tracking an anomaly (not in IDLE or INVALIDATED)
+        tracking_anomaly = self._current_state in (STATE_ANOMALY, STATE_ARMING, STATE_TRIGGERED)
         return EntryDecision(
             state=self._current_state,
             is_valid_entry=is_trigger,
-            direction=self._anomaly_direction if is_trigger else None,
+            direction=self._anomaly_direction if tracking_anomaly else None,
             signal_quality=round(quality, 2),
             reason=reason
         )
+
+    def evaluate_with_context(
+        self,
+        price: float,
+        timestamp: datetime,
+        market_context: "MarketContext",
+    ) -> EntryDecision:
+        """
+        Evaluate entry decision using MarketContext quality scores.
+
+        Uses quality scores from MarketContext to make smarter decisions:
+        - Skips entry if stop_hunt_detected (false reversal)
+        - Waits for confirmation if displacement_phase is EARLY
+        - Skips if reversal_confidence is too low (ambiguous)
+        - Allows entry when displacement_phase is CONFIRMED
+        - Scales signal_quality based on signal_agreement_score
+
+        Args:
+            price: Current market price
+            timestamp: Tick time
+            market_context: MarketContext with quality scores
+
+        Returns:
+            EntryDecision with improved quality scoring
+        """
+        # Extract components from market_context for normal state machine evaluation
+        decision = self.evaluate(
+            price=price,
+            timestamp=timestamp,
+            velocity=market_context.velocity,
+            displacement=market_context.displacement,
+            liquidity=market_context.liquidity,
+            regime=market_context.regime,
+            mtf=market_context.mtf,
+        )
+
+        # Now enhance decision based on MarketContext quality scores
+        # Layer 1: Stop Hunting Detection (high priority filter)
+        if market_context.stop_hunt_detected:
+            if market_context.stop_hunt_phase == "HUNTING":
+                # Active stop hunting, skip entry (false reversal)
+                return EntryDecision(
+                    state=decision.state,
+                    is_valid_entry=False,
+                    direction=decision.direction,
+                    signal_quality=0.0,
+                    reason=f"Stop hunting detected ({market_context.stop_hunt_phase}). Skipping entry.",
+                )
+            elif market_context.stop_hunt_phase == "SWEEPING":
+                # Stops being swept, wait for reversal confirmation
+                return EntryDecision(
+                    state=decision.state,
+                    is_valid_entry=False,
+                    direction=decision.direction,
+                    signal_quality=decision.signal_quality * 0.5,
+                    reason="Stops being swept. Awaiting reversal confirmation.",
+                )
+            # If stop_hunt_phase == "REVERSING", allow normal evaluation to proceed
+
+        # Layer 2: Reversal Lag Detection (timing optimization)
+        if market_context.reversal_lag_ticks > 5:
+            # Signal too delayed, opportunity likely passed
+            return EntryDecision(
+                state=decision.state,
+                is_valid_entry=False,
+                direction=decision.direction,
+                signal_quality=0.0,
+                reason=f"Signal lagged {market_context.reversal_lag_ticks} ticks. Opportunity expired.",
+            )
+
+        # Layer 3: Displacement Phase Check (confirmation gate)
+        if self._current_state in (STATE_ANOMALY, STATE_ARMING):
+            if market_context.displacement_phase == "EARLY":
+                # Signal just forming, wait for confirmation
+                return EntryDecision(
+                    state=decision.state,
+                    is_valid_entry=False,
+                    direction=decision.direction,
+                    signal_quality=decision.signal_quality * 0.6,
+                    reason="Displacement in EARLY phase. Waiting for confirmation.",
+                )
+            elif market_context.displacement_phase == "CONFIRMED":
+                # Signal confirmed, upgrade quality
+                decision.signal_quality = min(1.0, decision.signal_quality * 1.2)
+
+        # Layer 4: Reversal Confidence Threshold (ambiguity filter)
+        if market_context.reversal_confidence < 50.0:
+            # Ambiguous signal, skip entry
+            return EntryDecision(
+                state=decision.state,
+                is_valid_entry=False,
+                direction=decision.direction,
+                signal_quality=0.0,
+                reason=f"Reversal confidence too low ({market_context.reversal_confidence:.0f}%). Ambiguous.",
+            )
+
+        # Layer 5: Signal Agreement Scoring (consensus weighting)
+        agreement_weight = market_context.signal_agreement_score / 100.0
+        decision.signal_quality = decision.signal_quality * agreement_weight
+
+        # Layer 6: Entry Window Expiration (opportunity closing)
+        if market_context.entry_window_closing and market_context.ticks_until_confirmation_expires < 5:
+            # Window closing fast, raise urgency
+            if decision.is_valid_entry:
+                decision.reason = f"{decision.reason} (URGENT: {market_context.ticks_until_confirmation_expires} ticks to expiration)"
+
+        return decision
 
     def _transition(self, new_state: str, reason: str) -> None:
         old_state = self._current_state
@@ -155,9 +275,13 @@ class EntryStateMachine:
         """Look for the initial anomaly (Microstructure Peak)."""
         # Anomaly criteria: High velocity + low tick efficiency (Climax)
         is_climax = vel.is_unusual and vel.tick_efficiency < 0.2
-        
+
         # Or an active liquidity sweep
         is_sweep = len(liq.active_sweeps) > 0
+
+        # Diagnostic: Log why no anomaly detected
+        if not is_climax and not is_sweep:
+            logger.debug("EntryIDLE: No anomaly. vel_unusual=%s eff=%.3f sweeps=%d", vel.is_unusual, vel.tick_efficiency, len(liq.active_sweeps))
         
         # Infer expected reversal direction
         direction = ""
@@ -255,14 +379,14 @@ class EntryStateMachine:
             else:
                 self._transition(STATE_TRIGGERED, "Displacement away from trap confirmed.")
 
-    def _calculate_quality(self, regime: RegimeState, mtf: MTFState) -> float:
+    def _calculate_quality(self, regime: "RegimeState", mtf: MTFState) -> float:
         """Calculate a 0.0 to 1.0 confidence score for the entry."""
         score = 0.5 # Base
         
         # Regime alignment
-        if regime.regime in (REGIME_REVERSAL, REGIME_EXHAUSTION):
+        if regime.regime in (self.REGIME_REVERSAL, self.REGIME_EXHAUSTION):
             score += 0.2
-        elif regime.regime == REGIME_RANGE_CHOP:
+        elif regime.regime == self.REGIME_RANGE_CHOP:
             score += 0.1
             
         # MTF Context

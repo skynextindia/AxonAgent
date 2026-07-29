@@ -89,16 +89,20 @@ def serialize_position(p):
 async def handle_client(websocket):
     """Handle connection from daemon client."""
     remote = websocket.remote_address
-    print(f"Client connected to execution bridge: {remote}")
-    
+    # Routine dashboard polls (positions_get/account_info) open a short-lived
+    # connection every tick; logging each one floods the console. Only surface
+    # non-poll commands below.
+    _QUIET_CMDS = {"positions_get", "account_info"}
+
     try:
         async for message in websocket:
             try:
                 req = json.loads(message)
                 req_type = req.get("action", "")
                 
-                print(f"Execution command: {req_type} from {remote}")
-                
+                if req_type not in _QUIET_CMDS:
+                    print(f"Execution command: {req_type} from {remote}")
+
                 if req_type == "open":
                     # Send order request
                     symbol = req.get("symbol")
@@ -257,7 +261,7 @@ async def handle_client(websocket):
                         for d in deals:
                             deal_list.append({
                                 "ticket": int(d.ticket),
-                                "position": int(d.position),
+                                "position": int(getattr(d, "position_id", getattr(d, "position", 0))),
                                 "entry": int(d.entry),
                                 "type": int(d.type),
                                 "price": float(d.price),
@@ -284,6 +288,26 @@ async def handle_client(websocket):
                     else:
                         response = {"success": False, "reason": "failed_to_get_account_info"}
                     await websocket.send(json.dumps(response))
+
+                elif req_type == "symbol_info":
+                    sym = req.get("symbol")
+                    s_info = mt5.symbol_info(sym) if sym else None
+                    if s_info:
+                        response = {
+                            "success": True,
+                            "point": s_info.point,
+                            "digits": s_info.digits,
+                            "trade_tick_value": s_info.trade_tick_value,
+                            "trade_tick_size": s_info.trade_tick_size,
+                            # Broker volume constraints — required by 1%-lock sizing
+                            # so bridge mode honours min/step/max like direct mode.
+                            "volume_min": s_info.volume_min,
+                            "volume_step": s_info.volume_step,
+                            "volume_max": s_info.volume_max,
+                        }
+                    else:
+                        response = {"success": False, "error": f"Could not get symbol info for {sym}"}
+                    await websocket.send(json.dumps(response))
                     
                 elif req_type == "ping":
                     await websocket.send(json.dumps({"type": "pong"}))
@@ -295,7 +319,7 @@ async def handle_client(websocket):
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:
-        print(f"Client disconnected from execution bridge: {remote}")
+        pass
 
 
 # ── HTTP health check ──────────────────────────────────────────────

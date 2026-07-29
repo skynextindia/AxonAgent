@@ -210,13 +210,24 @@ class TickEngine(threading.Thread):
         """Lazy-load and initialize MT5."""
         try:
             import MetaTrader5 as mt5
-            kwargs = {}
+
+            # Use the wrapper function instead of calling mt5.initialize() directly
+            # This ensures we use the correct feed terminal path and caching logic
+            from axonai.dataflows.mt5_data import mt5_initialize
             term_path = self.config.get("mt5_terminal_path")
-            if term_path:
-                kwargs["path"] = term_path
-            if not mt5.initialize(**kwargs):
-                logger.error("TickEngine: MT5 init failed: %s", mt5.last_error())
+            logger.info("[TICKENGINE] _init_mt5: Calling mt5_initialize with term_path=%s", term_path)
+            if not mt5_initialize(term_path):
+                logger.error("[TICKENGINE] _init_mt5: MT5 init failed with path=%s", term_path)
                 return False
+
+            # Verify terminal is connected
+            term_info = mt5.terminal_info()
+            if not term_info or not term_info.connected:
+                logger.error("[TICKENGINE] _init_mt5: Terminal not connected after init. term_info=%s", term_info)
+                return False
+            logger.info("[TICKENGINE] _init_mt5: Connected to %s (company=%s, path=%s)",
+                       term_info.name, term_info.company, term_info.path)
+
             # Bind the live MT5 handle so _poll_ticks / _preseed read real data.
             # Without this, self._mt5 stays None and the engine silently falls
             # back to the simulated stale-feed loop (~1 mock tick / 10s).
@@ -224,9 +235,10 @@ class TickEngine(threading.Thread):
             # Ensure symbol visible
             info = mt5.symbol_info(self.symbol)
             if info is None:
-                logger.error("TickEngine: Symbol %s not found", self.symbol)
+                logger.error("[TICKENGINE] _init_mt5: Symbol %s not found in terminal. Available suffixes to try: '', 'm', '_i', '.pro'", self.symbol)
                 return False
             if not info.visible:
+                logger.info("[TICKENGINE] _init_mt5: Making symbol %s visible", self.symbol)
                 mt5.symbol_select(self.symbol, True)
 
             # Get broker spread from symbol info
@@ -324,18 +336,32 @@ class TickEngine(threading.Thread):
         if self._mt5 is None:
             return []
         try:
+            # Verify MT5 connection is still valid before attempting to poll
+            term_info = self._mt5.terminal_info()
+            if term_info is None or not term_info.connected:
+                logger.warning("[MT5_CHECK] Terminal connection lost (connected=%s). Will trigger reconnect.",
+                               term_info.connected if term_info else "None")
+                return []
+
             if self._last_tick_time_msc is None:
                 # First poll — get last 100 ticks
                 from_time = datetime.now(timezone.utc) - timedelta(seconds=10)
+                logger.debug("[POLL_TICKS] First poll: fetching last 100 ticks since %s", from_time)
                 ticks = self._mt5.copy_ticks_from(
                     self.symbol, from_time, 100, self._mt5.COPY_TICKS_ALL
                 )
+                if not ticks or len(ticks) == 0:
+                    logger.warning("[POLL_TICKS] First poll returned no ticks for symbol %s. "
+                                 "Symbol may not exist or have no data.", self.symbol)
             else:
-                # Subsequent polls — get ticks since last known using millisecond timestamp converted to seconds
-                from_sec = int(self._last_tick_time_msc // 1000)
+                # Subsequent polls — get ticks since last known.
+                # Use datetime object (not unix timestamp) for cross-terminal compatibility.
+                from_dt = datetime.fromtimestamp(self._last_tick_time_msc / 1000.0, tz=timezone.utc)
+                logger.debug("[POLL_TICKS] Polling ticks since %s (msc=%d)", from_dt, self._last_tick_time_msc)
                 ticks = self._mt5.copy_ticks_from(
-                    self.symbol, from_sec, 1000, self._mt5.COPY_TICKS_ALL
+                    self.symbol, from_dt, 1000, self._mt5.COPY_TICKS_ALL
                 )
+
             if ticks is None or len(ticks) == 0:
                 return []
 
@@ -348,10 +374,11 @@ class TickEngine(threading.Thread):
 
             if new_ticks:
                 self._last_tick_time_msc = int(new_ticks[-1]['time_msc'])
+                logger.debug("[POLL_TICKS] Got %d new ticks (last msc: %d)", len(new_ticks), self._last_tick_time_msc)
 
             return new_ticks
         except Exception as e:
-            logger.warning("TickEngine poll error: %s", e)
+            logger.warning("[POLL_TICKS] Error polling ticks: %s", e, exc_info=True)
             return []
 
     def _process_tick(self, tick) -> None:
@@ -447,17 +474,55 @@ class TickEngine(threading.Thread):
 
         from axonai.dataflows.mt5_data import get_broker_tz_offset
 
+        stale_counter = 0  # Track consecutive stale ticks to trigger reconnection
+
         while self.running:
             # Check if market is closed (weekend in broker local time) or if the feed is stale
             broker_now = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(hours=self.offset_hours)
-            
+
+            # ADAPTIVE stale threshold based on market session
+            utc_hour = datetime.now(timezone.utc).hour
+            # Slow/low-liquidity ticks are NOT a dead feed. A true disconnect is
+            # caught separately by the [MT5_CHECK] path (terminal_info). These
+            # thresholds only exist to fall back to mock data when the feed is
+            # genuinely gone, so keep them well above normal inter-tick gaps.
+            if 0 <= utc_hour < 9:  # Asian session (very slow)
+                stale_threshold = 60.0
+            elif 9 <= utc_hour < 15:  # London/morning NY
+                stale_threshold = 30.0
+            elif 15 <= utc_hour < 20:  # NY session
+                stale_threshold = 20.0
+            else:  # Evening/night
+                stale_threshold = 45.0
+
             is_stale = False
             if self.latest_timestamp is not None:
-                if (broker_now - self.latest_timestamp).total_seconds() > 10.0:
+                elapsed = (broker_now - self.latest_timestamp).total_seconds()
+                if elapsed > stale_threshold:
                     is_stale = True
-            
+
+            # If feed is stale, try to reconnect before falling back to mock data
+            if is_stale and broker_now.weekday() not in (5, 6):
+                stale_counter += 1
+                if stale_counter == 1:
+                    logger.warning("[STALE_FEED] Data is stale (last tick %.1f seconds ago). Attempting reconnect...",
+                                   (broker_now - self.latest_timestamp).total_seconds() if self.latest_timestamp else 999)
+
+                # After 5 consecutive stale checks (~500ms on default 100ms polling), force reconnect
+                if stale_counter >= 5:
+                    logger.warning("[RECONNECT] Force-reconnecting to MT5 due to stale feed (5+ stale checks)...")
+                    self._mt5 = None  # Clear cached MT5 handle
+                    if self._init_mt5():
+                        logger.info("[RECONNECT] Successfully reconnected to MT5")
+                        stale_counter = 0
+                    else:
+                        logger.error("[RECONNECT] Failed to reconnect to MT5")
+                        stale_counter = 0  # Reset and try again next cycle
+            else:
+                stale_counter = 0  # Reset counter when feed is not stale
+
             # If weekend or stale feed (offline/no connection), simulate live price action to keep dashboard alive
-            if broker_now.weekday() in (5, 6) or is_stale:
+            if broker_now.weekday() in (5, 6) or (is_stale and self._mt5 is None):
                 last_price = self.mid_price if self.latest_bid > 0.0 else 1.16110
                 import random
                 pip_unit = 0.01 if "JPY" in self.symbol.upper() else 0.0001
@@ -473,10 +538,10 @@ class TickEngine(threading.Thread):
                 spread_val = spread_pips * pip_unit
                 mock_bid = new_mid - spread_val / 2.0
                 mock_ask = new_mid + spread_val / 2.0
-                
+
                 # Update latest timestamp to current time to avoid locking loop
                 self.latest_timestamp = broker_now
-                
+
                 mock_tick = {
                     'bid': mock_bid,
                     'ask': mock_ask,
@@ -489,8 +554,10 @@ class TickEngine(threading.Thread):
                 continue
 
             new_ticks = self._poll_ticks()
-            for tick in new_ticks:
-                self._process_tick(tick)
+            if new_ticks:
+                for tick in new_ticks:
+                    self._process_tick(tick)
+                stale_counter = 0  # Reset stale counter when we get real ticks
             time.sleep(self.poll_interval_ms / 1000.0)
 
         logger.info("TickEngine stopped. Total ticks processed: %d", self._tick_count)

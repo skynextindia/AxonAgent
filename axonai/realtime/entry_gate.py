@@ -16,8 +16,8 @@ from dataclasses import dataclass
 from typing import Optional, Iterable
 
 EXHAUSTION_PEAKS = ("velocity_exhaustion", "microstructure_exhaustion")
-SR_PROXIMITY_PIPS = 5.0
-DEFAULT_MIN_QUALITY = 0.55
+SR_PROXIMITY_PIPS = 7.0  # Moderate: was 5.0, relaxed to 7.0
+DEFAULT_MIN_QUALITY = 0.55  # Back to 0.55 (was 0.50 - too loose)
 
 
 @dataclass
@@ -66,10 +66,11 @@ def evaluate_peak_entry(
     confirmed = details.get("peak_confirmed", False)
     intensity = details.get("intensity", "MEDIUM")
 
-    # Intensity / confidence gate (backtester :594-603)
-    if intensity not in ("HIGH", "MEDIUM"):
+    # Intensity / confidence gate
+    if intensity not in ("HIGH", "MEDIUM"):  # Reject LOW intensity (only HIGH/MEDIUM)
         return EntryDecision(False, skip_reason=f"intensity {intensity}")
-    if intensity == "HIGH" and not confirmed and confidence < 0.6:
+    # Confidence requirement for unconfirmed peaks
+    if intensity == "HIGH" and not confirmed and confidence < 0.55:  # Moderate: 0.55 (was 0.40)
         return EntryDecision(False, skip_reason=f"HIGH peak unconfirmed (conf={confidence:.2f})")
 
     # Direction (fail closed)
@@ -78,25 +79,26 @@ def evaluate_peak_entry(
         return EntryDecision(False, skip_reason="indeterminate entry direction")
     reason = f"{direction} Microstructure Peak ({peak_type})"
 
-    # S/R proximity — must be within 5 pips of an active level (backtester :612-627)
-    closest_dist = float("inf")
-    closest_lvl = None
-    for lvl in price_levels:
-        if not getattr(lvl, "is_active", True):
-            continue
-        dist = abs(event.price - lvl.price) / pip_mult
-        if dist < closest_dist:
-            closest_dist = dist
-            closest_lvl = lvl
-    if closest_lvl is None or closest_dist > SR_PROXIMITY_PIPS:
-        return EntryDecision(False, direction=direction,
-                             skip_reason=f"not near S/R zone (closest {closest_dist:.2f} pips)")
+    # S/R proximity — DISABLED (intraday decisions based on current-day data only)
+    # closest_dist = float("inf")
+    # closest_lvl = None
+    # for lvl in price_levels:
+    #     if not getattr(lvl, "is_active", True):
+    #         continue
+    #     dist = abs(event.price - lvl.price) / pip_mult
+    #     if dist < closest_dist:
+    #         closest_dist = dist
+    #         closest_lvl = lvl
+    # if closest_lvl is None or closest_dist > SR_PROXIMITY_PIPS:
+    #     return EntryDecision(False, direction=direction,
+    #                          skip_reason=f"not near S/R zone (closest {closest_dist:.2f} pips)")
 
-    # H4 daily-trend alignment (backtester :629-636)
-    if trend_h4 == "up" and direction != "BUY":
-        return EntryDecision(False, direction=direction, skip_reason="counter H4 uptrend")
-    if trend_h4 == "down" and direction != "SELL":
-        return EntryDecision(False, direction=direction, skip_reason="counter H4 downtrend")
+    # H4 daily-trend alignment — DISABLED (intraday decisions only; MTF should not
+    # override current-day market direction)
+    # if trend_h4 == "up" and direction != "BUY":
+    #     return EntryDecision(False, direction=direction, skip_reason="counter H4 uptrend")
+    # if trend_h4 == "down" and direction != "SELL":
+    #     return EntryDecision(False, direction=direction, skip_reason="counter H4 downtrend")
 
     # Confluence quality score (backtester :641-653)
     if intensity == "MEDIUM":
