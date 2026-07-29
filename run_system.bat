@@ -29,17 +29,19 @@ echo  2. Start Daemon - Multi-Pair EURUSD + USDJPY (Dashboard + Engines)
 echo  3. Analyze Trade History (MAE / MFE / Drawdown)
 echo  4. Run Intraday Backtester (M15 Simulation)
 echo  5. Start MT5 Bridge Service (relays to WSL clients on port 8765)
-echo  6. Exit
+echo  6. Start BOTH: Eightcap (LEAD) + FundingPips (EXEC-NODE, 100k prop-guard)
+echo  7. Exit
 echo.
 echo ========================================================
-set /p choice="Select an option (1-6): "
+set /p choice="Select an option (1-7): "
 
 if "%choice%"=="1" goto daemon
 if "%choice%"=="2" goto daemon_multi
 if "%choice%"=="3" goto analyze
 if "%choice%"=="4" goto backtester
 if "%choice%"=="5" goto bridge
-if "%choice%"=="6" goto exit
+if "%choice%"=="6" goto dual
+if "%choice%"=="7" goto exit
 goto menu
 
 :daemon
@@ -113,6 +115,38 @@ echo  Starting MT5 Bridge Service (Port 8765)
 echo ========================================================
 echo.
 .venv\Scripts\python.exe windows\mt5_bridge.py --port 8765
+echo.
+pause
+goto menu
+
+:dual
+cls
+echo ========================================================
+echo  Starting BOTH terminals — Eightcap (LEAD) + FundingPips
+echo ========================================================
+echo.
+echo  Eightcap  : brain / detection  --^> dashboard http://localhost:8000
+echo  FundingPips: exec-node / prop-guard --^> dashboard http://localhost:8001
+echo  Decisions relay lead ==^> node over ws://127.0.0.1:8770
+echo.
+echo  FundingPips uses NO symbol suffix (verified: EURUSD, USDJPY).
+echo  Eightcap keeps its .i suffix from default_config.
+echo.
+echo  Prop-guard on FundingPips: 10%% overall floor, 5%% daily, 20%% buffer
+echo  (real trip lines: 8%% overall, 4%% daily) on a 100,000 baseline.
+echo.
+start "" http://localhost:8000
+start "" http://localhost:8001
+echo.
+echo [1/2] Launching Eightcap LEAD in a new window...
+start "AxonAI - Eightcap LEAD" cmd /k ".venv\Scripts\python.exe run.py --direct --symbols "EURUSD,USDJPY" --mirror-url ws://127.0.0.1:8770"
+echo         (waiting 8 seconds for the exec-node port to be available before the follower connects)
+timeout /t 8 > nul
+echo [2/2] Launching FundingPips EXEC-NODE in a new window...
+start "AxonAI - FundingPips EXEC-NODE" cmd /k "set AXONAI_MT5_SYMBOL_SUFFIX=&& .venv\Scripts\python.exe run.py --direct --symbols "EURUSD,USDJPY" --mt5-path "C:\Program Files\MetaTrader 5\terminal64.exe" --port 8001 --exec-node --prop-firm --prop-initial-balance 100000"
+echo.
+echo Both processes launched. Watch each window for startup logs.
+echo Watch reports\daemon.log for gate/lock/prop-guard decisions.
 echo.
 pause
 goto menu
