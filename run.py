@@ -53,23 +53,6 @@ def get_windows_host_ip():
 # ── Main ───────────────────────────────────────────────────────────
 
 def main():
-    import logging
-    from logging.handlers import RotatingFileHandler
-    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
-    os.makedirs(log_dir, exist_ok=True)
-    file_handler = RotatingFileHandler(
-        os.path.join(log_dir, "daemon.log"),
-        maxBytes=10 * 1024 * 1024,   # 10 MB per file
-        backupCount=10,              # keep 10 rolls → ~100 MB cap
-        encoding="utf-8",
-    )
-    file_handler.setFormatter(logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"))
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[logging.StreamHandler(), file_handler],
-    )
     parser = argparse.ArgumentParser(description="AxonAI Dashboard")
     parser.add_argument("--bridge", action="store_true", help="Force bridge mode (WSL)")
     parser.add_argument("--direct", action="store_true", help="Force direct MT5 mode (Windows)")
@@ -123,6 +106,37 @@ def main():
     parser.add_argument("--prop-initial-balance", type=float, default=None,
                         help="Prop starting balance baseline (default: seed from the account)")
     args = parser.parse_args()
+
+    # ── logging: PER-INSTANCE log file ────────────────────────────────────────
+    # Configured AFTER arg parsing because the filename depends on the role. The
+    # lead and the execution node run from the SAME working directory, so a
+    # single "daemon.log" meant two RotatingFileHandlers on one path: on Windows
+    # the 10 MB rollover then fails with a sharing violation (the peer holds an
+    # open handle without FILE_SHARE_DELETE), logging swallows it via
+    # handleError, and the file grows past its cap forever. Worse, the two
+    # accounts' records interleave with nothing to tell them apart. One file per
+    # role fixes both; %(process)d makes any future merge attributable.
+    instance_tag = "_node" if args.exec_node else ""
+    # Exported so the dashboard can pick it up in its constructor: _load_session()
+    # runs before any daemon (and therefore any config) is registered.
+    os.environ["AXONAI_INSTANCE_TAG"] = instance_tag
+    import logging
+    from logging.handlers import RotatingFileHandler
+    log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")
+    os.makedirs(log_dir, exist_ok=True)
+    log_fmt = "%(asctime)s [%(levelname)s] pid%(process)d %(name)s: %(message)s"
+    file_handler = RotatingFileHandler(
+        os.path.join(log_dir, f"daemon{instance_tag}.log"),
+        maxBytes=10 * 1024 * 1024,   # 10 MB per file
+        backupCount=10,              # keep 10 rolls → ~100 MB cap
+        encoding="utf-8",
+    )
+    file_handler.setFormatter(logging.Formatter(log_fmt))
+    logging.basicConfig(
+        level=logging.INFO,
+        format=log_fmt,
+        handlers=[logging.StreamHandler(), file_handler],
+    )
 
     # ── singleton guard: refuse to start if another instance already owns the
     # dashboard port. Catches accidental double-launches regardless of shell,
@@ -230,6 +244,10 @@ def main():
             config["risk_max_daily_loss_amount"] = args.max_daily_loss_amount
         if args.mt5_symbol_suffix is not None:
             config["mt5_symbol_suffix"] = args.mt5_symbol_suffix
+        # Tag every per-instance report file so the two processes never share a
+        # writer. Empty for the lead, which keeps the historical untagged names
+        # (reports/signals.jsonl etc.) so its dashboard history stays continuous.
+        config["instance_tag"] = instance_tag
         if args.exec_node:
             config["exec_node_mode"] = True
         if args.mirror_url:

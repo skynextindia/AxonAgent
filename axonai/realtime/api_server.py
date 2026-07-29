@@ -64,6 +64,22 @@ class DashboardServer:
         self._load_session()
 
     @staticmethod
+    def _session_file() -> str:
+        """Per-instance dashboard session file (CWD-relative).
+
+        The lead and the execution node each run a dashboard from the SAME
+        working directory. With one shared filename, whichever process saved
+        last decided what BOTH restored on startup — so the FundingPips
+        dashboard could come up showing the Eightcap account's S/R levels and
+        event history, and vice versa. Read from the environment rather than
+        from ``self.daemon.config`` because ``_load_session()`` runs in
+        ``__init__``, before any daemon has been registered.
+        """
+        import os
+        tag = os.environ.get("AXONAI_INSTANCE_TAG", "")
+        return f".axon_session{tag}.json"
+
+    @staticmethod
     def _default_history() -> Dict[str, Any]:
         return {
             "tick": None,
@@ -799,8 +815,15 @@ class DashboardServer:
                 "calendar_data": self.history["calendar_data"],
                 "levels_state": levels_state
             }
-            with open(".axon_session.json", "w") as f:
+            # Atomic: write a temp file then rename over the target. A bare
+            # open(path, "w") truncates in place, so a concurrent reader could
+            # observe a half-written 39 KB payload and start with empty history.
+            import os
+            path = self._session_file()
+            tmp = f"{path}.tmp"
+            with open(tmp, "w") as f:
                 json.dump(state, f, indent=2)
+            os.replace(tmp, path)
         except Exception as e:
             logger.warning("Dashboard API: failed to save session: %s", e)
 
@@ -808,9 +831,10 @@ class DashboardServer:
         """Load session state from disk on startup."""
         import json
         import os
-        if os.path.exists(".axon_session.json"):
+        path = self._session_file()
+        if os.path.exists(path):
             try:
-                with open(".axon_session.json", "r") as f:
+                with open(path, "r") as f:
                     state = json.load(f)
                 with self._lock:
                     self.history["events"] = state.get("events", [])

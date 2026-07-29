@@ -128,7 +128,20 @@ class ExecNodeServer:
         try:
             if cmd == "enter":
                 signal = req.get("signal", "")
-                size_scale = float(req.get("size_scale", 1.0) or 1.0)
+                # Missing/malformed → 1.0, but a legitimate 0.0 must NOT become
+                # full size: `float(x or 1.0)` treats 0.0 as falsy, so a lead
+                # that ever sent size_scale=0 would have opened a FULL-size
+                # position here — the exact opposite of the intent.
+                raw_scale = req.get("size_scale", 1.0)
+                try:
+                    size_scale = 1.0 if raw_scale is None else float(raw_scale)
+                except (TypeError, ValueError):
+                    size_scale = 1.0
+                if size_scale <= 0.0:
+                    logger.info("ExecNodeServer: size_scale=%s on %s → entry declined",
+                                raw_scale, symbol)
+                    return {"ok": False, "cmd": cmd, "symbol": symbol,
+                            "reason": "size_scale <= 0"}
                 res = daemon.inject_signal(signal, size_scale, source="mirror")
                 return {
                     "ok": bool(res), "cmd": cmd, "symbol": symbol,

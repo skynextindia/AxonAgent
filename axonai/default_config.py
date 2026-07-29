@@ -227,6 +227,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "mirror_enabled": False,                 # lead side: forward decisions to the exec node
     "mirror_url": "ws://127.0.0.1:8770",     # exec-node inbound WebSocket URL
     "exec_node_mode": False,                 # this process is an execution node (detection OFF)
+    # Suffix appended to this process's report/state filenames. The lead and the
+    # execution node run from the SAME working directory, so an untagged path
+    # means two OS processes appending to one file: torn writes, and two
+    # different accounts' P&L merged into one stream with no way to tell them
+    # apart. Set by run.py ("" for the lead, "_node" for the exec node).
+    "instance_tag": "",
     "exec_node_max_lot": 5.0,                # exec node: conservative per-pair lot ceiling
     "exec_node_magic_offset": 500000,        # exec node: distinct magic = lead magic + offset
     # ── Prop-firm compliance guard (default OFF; see risk_guard.py) ───────────

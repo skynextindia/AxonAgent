@@ -134,6 +134,7 @@ class AxonDaemon:
 
         self.mirror_client = None
         self._exec_node = bool(config.get("exec_node_mode", False))
+        self._orders_routed = 0          # exec node: entries received from the lead
         if self._exec_node:
             self._apply_exec_node_overrides()
 
@@ -605,6 +606,24 @@ class AxonDaemon:
 
         self._event_loop()
 
+    def _report_path(self, filename: str) -> str:
+        """Build a ``reports/`` path tagged for THIS instance.
+
+        The lead and the execution node run from the same working directory, so
+        an untagged filename means two OS processes appending to one file. That
+        is not just torn writes: the payloads carry raw ``profit`` from two
+        DIFFERENT accounts with no account field, so anything aggregating the
+        file (the dashboard trades view) would sum a live account and a prop
+        account together. ``instance_tag`` is "" for the lead — it keeps the
+        historical untagged names so its existing history stays continuous.
+        """
+        import os
+        tag = self.config.get("instance_tag", "") or ""
+        if tag:
+            stem, ext = os.path.splitext(filename)
+            filename = f"{stem}{tag}{ext}"
+        return os.path.join("reports", filename)
+
     def _broadcast(self, message: dict) -> None:
         """Broadcast a dashboard message tagged with this daemon's symbol.
 
@@ -681,9 +700,19 @@ class AxonDaemon:
             except Exception as e:
                 logger.error("Error managing trailing stops / closed positions: %s", e, exc_info=True)
         
-        # Broadcast tick to dashboard WebSocket
+        # Broadcast tick to dashboard WebSocket.
+        # On an execution node the detection telemetry below is meaningless (the
+        # peak-detector fields never update because detection is off), and
+        # _get_regime_payload recomputes an EMA + the session ranges every 5th
+        # tick. Send only the account payload, which is what actually matters on
+        # a prop account: equity, balance, and the drawdown headroom.
         dashboard = get_dashboard()
-        if dashboard:
+        if dashboard and self._exec_node:
+            if self.tick_engine._tick_count % 5 == 1:
+                acc_payload = self._get_account_payload()
+                if acc_payload:
+                    self._broadcast(acc_payload)
+        elif dashboard:
             imb = self.tick_engine.latest_imbalance
             ticks = self.tick_engine.tick_buffer_list
             velocity = 0.0
@@ -757,7 +786,18 @@ class AxonDaemon:
         self.event_detector.on_candle_close(candle)
         logger.debug("Candle closed: %s @ %.5f (H=%.5f L=%.5f)",
                      candle.timeframe, candle.close, candle.high, candle.low)
-                     
+
+        # Execution node: no chart, no levels, no regime panel — but DO keep the
+        # news calendar warm, because _check_pre_news_close runs natively here and
+        # flattens this account's positions ahead of high-impact releases.
+        if self._exec_node:
+            if candle.timeframe in ("M15", "H1"):
+                try:
+                    self.news_guard.refresh()
+                except Exception as ne:
+                    logger.warning("Failed to refresh NewsGuard on candle close: %s", ne)
+            return
+
         # Broadcast closed candle
         dashboard = get_dashboard()
         if dashboard:
@@ -789,11 +829,14 @@ class AxonDaemon:
         """Main thread: blocks on event queue, fires graph on valid events."""
         import time as pytime
         last_stats_time = pytime.time()
+        # An execution node is deliberately idle, so it reports every 60s rather
+        # than every 10s (~8,600 lines/day → ~1,400).
+        stats_interval = 60.0 if self._exec_node else 10.0
         while self._running:
             try:
                 event = self.event_queue.get(timeout=1.0)
             except queue.Empty:
-                if pytime.time() - last_stats_time > 10.0:
+                if pytime.time() - last_stats_time > stats_interval:
                     self._log_stats()
                     last_stats_time = pytime.time()
                 continue
@@ -1111,14 +1154,14 @@ class AxonDaemon:
         
         # Append to signals.jsonl
         try:
-            with open(os.path.join("reports", "signals.jsonl"), "a", encoding="utf-8") as f:
+            with open(self._report_path("signals.jsonl"), "a", encoding="utf-8") as f:
                 f.write(json.dumps(log_payload) + "\n")
         except Exception as e:
             logger.error("Failed to append to signals.jsonl: %s", e)
-            
+
         # Append to signals.log
         try:
-            with open(os.path.join("reports", "signals.log"), "a", encoding="utf-8") as f:
+            with open(self._report_path("signals.log"), "a", encoding="utf-8") as f:
                 f.write(
                     f"[{timestamp_str}] TICKER: {self.yf_symbol} | EVENT: {event.event_type.value} ({event.priority.name}) "
                     f"| REGIME: {ws.dominant_regime} ({ws.regime_confidence:.2f}) | DECISION: {signal} "
@@ -1537,6 +1580,10 @@ class AxonDaemon:
         if signal not in ("Buy", "Sell", "Overweight", "Underweight"):
             logger.info("inject_signal: ignoring non-entry signal %r", signal)
             return None
+        # getattr-guarded: the mirror tests exercise inject_signal on a daemon
+        # built without __init__, and a telemetry counter must never be the thing
+        # that stops a routed order from reaching the broker.
+        self._orders_routed = getattr(self, "_orders_routed", 0) + 1
         trade_result = None
         try:
             trade_result = self.trade_executor.execute_signal(
@@ -1577,19 +1624,33 @@ class AxonDaemon:
 
     def _log_stats(self):
         """Log daemon statistics."""
-        if self._start_time:
-            uptime = datetime.now() - self._start_time
-            cooldown_rem = max(0.0, (self.event_detector._cooldown_until - datetime.now(timezone.utc if self.event_detector._cooldown_until.tzinfo else None)).total_seconds()) if hasattr(self.event_detector, "_cooldown_until") else 0.0
+        if not self._start_time:
+            return
+        uptime = str(datetime.now() - self._start_time).split(".")[0]
+
+        if self._exec_node:
+            # A follower detects nothing and fires nothing, so the lead's STATS
+            # line would read "events_detected=N | events_fired=0 | skipped=0"
+            # forever — noise that reads as if the node were making decisions.
+            # Report what this process actually does; it is meant to sit idle.
             logger.info(
-                "STATS: uptime=%s | ticks=%d | events_detected=%d | "
-                "events_fired=%d | events_skipped=%d | cooldown_remaining=%.0fs",
-                str(uptime).split(".")[0],
-                self.tick_engine._tick_count,
-                self._events_detected,
-                self._events_fired,
-                self._events_skipped,
-                cooldown_rem,
+                "EXEC-NODE[%s]: uptime=%s | ticks=%d | orders_routed=%d | open=%d",
+                self.mt5_symbol, uptime, self.tick_engine._tick_count,
+                self._orders_routed, len(self._tracked_positions),
             )
+            return
+
+        cooldown_rem = max(0.0, (self.event_detector._cooldown_until - datetime.now(timezone.utc if self.event_detector._cooldown_until.tzinfo else None)).total_seconds()) if hasattr(self.event_detector, "_cooldown_until") else 0.0
+        logger.info(
+            "STATS: uptime=%s | ticks=%d | events_detected=%d | "
+            "events_fired=%d | events_skipped=%d | cooldown_remaining=%.0fs",
+            uptime,
+            self.tick_engine._tick_count,
+            self._events_detected,
+            self._events_fired,
+            self._events_skipped,
+            cooldown_rem,
+        )
 
     def _signal_handler(self, signum, frame):
         """Handle SIGINT/SIGTERM for graceful shutdown."""
@@ -1623,8 +1684,12 @@ class AxonDaemon:
         import json, os
         from datetime import datetime
         os.makedirs('reports', exist_ok=True)
-        log_path = os.path.join('reports', 'dry_run_session.jsonl')
-        
+        # Tagged per instance: today only the lead reaches this call (the exec
+        # node short-circuits _event_loop earlier), but the path itself is shared
+        # and run.py sets realtime_dry_run=True for BOTH processes — so a single
+        # new call site above that short-circuit would make it a two-writer race.
+        log_path = self._report_path('dry_run_session.jsonl')
+
         class SafeJSONEncoder(json.JSONEncoder):
             def default(self, obj):
                 try:
@@ -1782,9 +1847,11 @@ class AxonDaemon:
         The old code only logged on SUCCESS, so a broker-rejected trail update
         (requote, off-quotes, momentary disconnect) was swallowed silently and
         the stop never advanced without anyone knowing. Now a failure is logged
-        every tick (cheap, useful for forensics) and raises a throttled alert
-        (once per 60s per ticket). The trailing loop re-evaluates every tick, so
-        a transient rejection is naturally retried on the next pass.
+        and alerted, both throttled to once per 60s per ticket. The trailing loop
+        re-evaluates every tick, so a transient rejection is naturally retried on
+        the next pass — which is also why the log has to be throttled: an
+        un-throttled warning produced one line per tick for as long as the broker
+        kept rejecting, which is loud enough to bury every other log line.
         """
         request = {
             "action": mt5.TRADE_ACTION_SLTP,
@@ -1801,10 +1868,17 @@ class AxonDaemon:
             return True
         rc = getattr(res, "retcode", None)
         cm = getattr(res, "comment", "no result")
-        logger.warning("AxonDaemon: Modify SL FAILED for %s ticket %d (retcode=%s %s); "
-                       "SL stays at broker value, will retry next tick", side, ticket, rc, cm)
         now = time.time()
-        if now - self._sl_fail_alert_ts.get(ticket, 0.0) > 60.0:
+        due = now - self._sl_fail_alert_ts.get(ticket, 0.0) > 60.0
+        if due:
+            logger.warning("AxonDaemon: Modify SL FAILED for %s ticket %d (retcode=%s %s); "
+                           "SL stays at broker value, retrying every tick "
+                           "(further failures logged at most once per 60s)",
+                           side, ticket, rc, cm)
+        else:
+            logger.debug("AxonDaemon: Modify SL still failing for %s ticket %d (retcode=%s %s)",
+                         side, ticket, rc, cm)
+        if due:
             self._sl_fail_alert_ts[ticket] = now
             try:
                 send_alert(f"SL trail modify FAILED on {self.mt5_symbol} {side} ticket {ticket} "
@@ -1931,10 +2005,10 @@ class AxonDaemon:
                     "reason": reason,
                     "outcome": outcome
                 }
-                with open(os.path.join("reports", "signals.jsonl"), "a", encoding="utf-8") as f:
+                with open(self._report_path("signals.jsonl"), "a", encoding="utf-8") as f:
                     f.write(json.dumps(payload) + "\n")
-                    
-                with open(os.path.join("reports", "signals.log"), "a", encoding="utf-8") as f:
+
+                with open(self._report_path("signals.log"), "a", encoding="utf-8") as f:
                     f.write(f"[{exit_time_str}] {log_msg}\n")
             except Exception as le:
                 logger.error("Failed to write closed position log: %s", le)

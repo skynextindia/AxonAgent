@@ -25,6 +25,11 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
 
+# How long to wait before retrying after a failed refresh. Short enough that a
+# transient outage self-heals well inside a session, long enough that a dead
+# feed is not re-dialled on every candle close.
+_FAILURE_RETRY = timedelta(minutes=20)
+
 
 class NewsGuard:
     """Pair- and impact-aware economic-news blackout filter."""
@@ -50,6 +55,7 @@ class NewsGuard:
         # List of event dicts: {dt, currency, impact, title, forecast, previous, actual}
         self._events: List[dict] = []
         self._last_fetch: Optional[datetime] = None
+        self._retry_after: Optional[datetime] = None
 
     # ── calendar loading ────────────────────────────────────────────────────
     def refresh(self, now_utc: Optional[datetime] = None, force: bool = False) -> int:
@@ -65,6 +71,10 @@ class NewsGuard:
         ):
             return len(self._events)
 
+        # Failure backoff (see the else-branch below for why this is separate).
+        if not force and self._retry_after is not None and now_utc < self._retry_after:
+            return len(self._events)
+
         raw = self._fetch_remote()
         if raw is None:
             raw = self._load_cache()
@@ -74,9 +84,19 @@ class NewsGuard:
         if raw is not None:
             self._events = self._parse(raw)
             self._last_fetch = now_utc
+            self._retry_after = None
             logger.info("NewsGuard: loaded %d calendar events", len(self._events))
         else:
-            logger.warning("NewsGuard: no calendar available (remote + cache failed)")
+            # Back off on failure. The staleness check above cannot help here:
+            # it also requires ``self._events``, which is empty precisely when
+            # the feed is down — so every M15/H1 candle close re-ran a blocking
+            # 15s urllib fetch on the trading path and emitted two warnings,
+            # forever. Gate retries on their own timer instead.
+            self._retry_after = now_utc + _FAILURE_RETRY
+            logger.warning(
+                "NewsGuard: no calendar available (remote + cache failed); "
+                "entry news-blocking is INACTIVE until a refresh succeeds. "
+                "Next retry in %d min.", int(_FAILURE_RETRY.total_seconds() // 60))
         return len(self._events)
 
     def _fetch_remote(self) -> Optional[list]:
@@ -100,8 +120,16 @@ class NewsGuard:
     def _save_cache(self, raw: list) -> None:
         try:
             os.makedirs(os.path.dirname(self._cache_path), exist_ok=True)
-            with open(self._cache_path, "w", encoding="utf-8") as f:
+            # Atomic write. This cache has FOUR writers in a dual-terminal run
+            # (one NewsGuard per pair × two processes) and the path is under
+            # ~/.axonai, identical for both. A truncating open(path, "w") let a
+            # concurrent reader load a half-written file, get None, and silently
+            # run with NO news blocking at all — a safety downgrade, not just a
+            # cosmetic one. Temp-then-replace makes the swap indivisible.
+            tmp = f"{self._cache_path}.{os.getpid()}.tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(raw, f)
+            os.replace(tmp, self._cache_path)
         except Exception as e:
             logger.warning("NewsGuard: failed to cache calendar: %s", e)
 

@@ -74,6 +74,12 @@ class EventDetector:
         self._level_reset_atr_mult = config.get("realtime_level_reset_atr_multiple", 2.0)
         self._log_events = config.get("realtime_log_events", True)
         self._test_mode = config.get("test_mode", False) or not self._log_events
+        # Execution node: entries arrive from the lead brain via
+        # AxonDaemon.inject_signal, and the daemon's event loop discards every
+        # event this detector emits. Running detection anyway burned CPU on every
+        # tick and filled the follower's console with "EVENT DETECTED" lines for
+        # signals it never acts on. See on_tick / on_candle_close.
+        self.exec_node = bool(config.get("exec_node_mode", False))
         self._pip_mult = 0.0001  # Updated on init
 
         # Microstructure Peak & Climax Exhaustion Detector for Optimized system
@@ -147,6 +153,15 @@ class EventDetector:
         if state is None:
             return
 
+        # Execution node: keep ONLY the world-state update. Its atr_14_h1 is what
+        # sizes the SL/TP of orders routed in from the lead (inject_signal), so it
+        # must stay warm — but the evidence rebuild, level-breach scan and peak
+        # detector below all feed an event queue this process throws away, and
+        # they are what fills the follower's console with duplicate work.
+        if self.exec_node:
+            self.live_state.on_tick(bid, ask, timestamp)
+            return
+
         # 1. Session transition
         session_changed = self.live_state.on_tick(bid, ask, timestamp)
         if session_changed is True and state.session != self._previous_session:
@@ -215,6 +230,14 @@ class EventDetector:
 
         state = self.live_state._state
         if state is None:
+            return
+
+        # Execution node: ATR only. atr_14_h1 comes from the candle path, and
+        # inject_signal reads it for every routed order's stop distance — so this
+        # one call is load-bearing. The structural checks below (structure break,
+        # sweep, regime shift, momentum divergence) only emit discarded events.
+        if self.exec_node:
+            self.live_state.on_candle_close(candle)
             return
 
         self._current_trigger_candle = candle
