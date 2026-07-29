@@ -257,7 +257,15 @@ class RiskGuard:
         # A baseline wildly out of scale means the file belongs to a different
         # account (shared/stale state): fall back to the live equity rather than
         # trusting a number that would silently disable the daily limit.
-        if self.prop_enabled and current_equity > 0.0:
+        #
+        # This must run on NON-prop accounts too, and was previously gated on
+        # prop_enabled. Two processes trading different-sized accounts from one
+        # working directory can leave a foreign baseline in either state file, and
+        # the failure is WORSE on the small account: a 100,000 baseline read by a
+        # 10,000 account is a 90% "daily loss", so the breaker trips on the first
+        # tick and silently rejects every order for the rest of the day. Observed
+        # live — reports/daily_pnl.json held a 100k baseline for the 10k account.
+        if current_equity > 0.0:
             if start_eq < current_equity * 0.5 or start_eq > current_equity * 2.0:
                 logger.warning(
                     "RiskGuard: implausible daily baseline %.2f for equity %.2f "

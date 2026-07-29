@@ -235,6 +235,20 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "instance_tag": "",
     "exec_node_max_lot": 5.0,                # exec node: conservative per-pair lot ceiling
     "exec_node_magic_offset": 500000,        # exec node: distinct magic = lead magic + offset
+    # ── Mirror replay + reconcile (lead side) ─────────────────────────────────
+    # Without these the mirror is pure fire-and-forget: any decision made while
+    # the node is down is lost forever and the two accounts silently diverge.
+    "mirror_queue_max": 200,                 # bounded replay queue (oldest dropped past this)
+    # Entries EXPIRE, closes never do. The edge is a microstructure reversal that
+    # is gone in seconds, so replaying a minutes-old entry is not "catching up" —
+    # it opens a brand-new unvetted trade at a price the lead never signalled on.
+    "mirror_entry_ttl_seconds": 45.0,
+    # Reconcile on reconnect is asymmetric on purpose. A position the node holds
+    # and the lead does not is ALWAYS closed (unmanaged risk). A position the lead
+    # holds and the node does not is only ALERTED — filling it late means buying a
+    # move that already happened, possibly one the lead is about to exit. Flat is
+    # fine on a challenge account; wrong-footed is not. Turn this on to fill anyway.
+    "mirror_reconcile_enter": False,
     # ── Prop-firm compliance guard (default OFF; see risk_guard.py) ───────────
     # Adds the two limits a funded account is killed by and which the plain
     # daily breaker does NOT model: an OVERALL drawdown floor measured from the

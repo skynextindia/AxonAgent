@@ -18,6 +18,7 @@ import threading
 import time
 from typing import Dict, List
 
+from axonai.default_config import _canonical_symbol
 from axonai.dataflows.mt5_data import mt5_initialize, mt5_shutdown
 from axonai.realtime.risk_guard import RiskGuard
 from axonai.realtime.daemon import AxonDaemon
@@ -73,10 +74,20 @@ class DaemonSupervisor:
         if base_config.get("mirror_enabled"):
             from axonai.realtime.mirror_client import MirrorClient
             url = base_config.get("mirror_url", "ws://127.0.0.1:8770")
-            self.mirror_client = MirrorClient(url)
+            queue_max = int(base_config.get("mirror_queue_max", 200) or 200)
+            entry_ttl = float(base_config.get("mirror_entry_ttl_seconds", 45.0) or 45.0)
+            self.mirror_client = MirrorClient(
+                url, queue_max=queue_max, entry_ttl=entry_ttl,
+                snapshot_provider=self._mirror_snapshot,
+            )
             for d in self.daemons.values():
                 d.mirror_client = self.mirror_client
-            logger.info("DaemonSupervisor: order mirror ENABLED → %s", url)
+            logger.info(
+                "DaemonSupervisor: order mirror ENABLED → %s (replay queue %d, entry TTL %.0fs, "
+                "reconcile-enter %s)",
+                url, queue_max, entry_ttl,
+                "ON" if base_config.get("mirror_reconcile_enter", False) else "OFF",
+            )
 
         self._threads: List[threading.Thread] = []
         self._thread_by_symbol: Dict[str, threading.Thread] = {}
@@ -121,6 +132,34 @@ class DaemonSupervisor:
             pass
         finally:
             self.stop_all()
+
+    # ── mirror reconcile (lead side) ─────────────────────────────────────────
+    def _mirror_snapshot(self) -> Dict[str, object]:
+        """The lead's live open positions, for the node to converge onto.
+
+        Called by :class:`MirrorClient` on every (re)connect, from its own loop
+        thread. A pair's ABSENCE from ``open`` tells the node "the lead is flat
+        here", which is what authorises it to close an orphan — so a pair whose
+        state could not be read goes into ``unknown`` instead. Omitting it
+        silently would read as "flat" and close a position that is really matched.
+        """
+        open_map: Dict[str, dict] = {}
+        unknown: List[str] = []
+        for sym, d in self.daemons.items():
+            canon = _canonical_symbol(getattr(d, "mt5_symbol", sym))
+            try:
+                state = d.mirror_position_state()
+            except Exception as e:
+                logger.warning("DaemonSupervisor: snapshot read failed for %s: %s", sym, e)
+                unknown.append(canon)
+                continue
+            if not state.get("ok"):
+                logger.warning(
+                    "DaemonSupervisor: snapshot for %s UNVERIFIED — node will skip it", sym)
+                unknown.append(canon)
+            elif state.get("signal"):
+                open_map[canon] = {"signal": state["signal"]}
+        return {"open": open_map, "unknown": unknown}
 
     def _check_thread_liveness(self) -> None:
         """Detect a daemon thread that died outside of shutdown and act on it.

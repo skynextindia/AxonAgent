@@ -1531,6 +1531,39 @@ class AxonDaemon:
             logger.warning("Prop risk: could not verify open positions: %s", e)
             return -1
 
+    def mirror_position_state(self) -> dict:
+        """This symbol's live position summary, for mirror reconcile.
+
+        Three DISTINCT outcomes, because "flat" and "could not read the terminal"
+        must never collapse into one value: reconcile closes orphans, so an
+        unreadable terminal reported as flat would make the other side's position
+        look like a divergence — and close a perfectly good trade.
+
+        * ``{"ok": False}``                            → not verified, act on nothing
+        * ``{"ok": True, "signal": None}``             → verified flat
+        * ``{"ok": True, "signal": "Buy", "count": n}``→ open
+
+        Note ``positions_get`` returns ``()`` when flat but ``None`` on error;
+        those are separated here (``_open_position_count`` folds both to 0).
+        """
+        try:
+            if not mt5 or not mt5.terminal_info():
+                return {"ok": False}
+            positions = mt5.positions_get(symbol=self.mt5_symbol)
+            if positions is None:
+                return {"ok": False}
+            mine = [p for p in positions if p.magic == self.trade_executor_opt.magic]
+            if not mine:
+                return {"ok": True, "signal": None}
+            return {
+                "ok": True,
+                "signal": "Buy" if mine[0].type == mt5.POSITION_TYPE_BUY else "Sell",
+                "count": len(mine),
+            }
+        except Exception as e:
+            logger.warning("mirror_position_state: could not read positions: %s", e)
+            return {"ok": False}
+
     # ── A→B order mirror ──────────────────────────────────────────────────────
     def _apply_exec_node_overrides(self) -> None:
         """Follower terminal: re-size to THIS account with a distinct magic + cap.

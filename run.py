@@ -50,6 +50,27 @@ def get_windows_host_ip():
     return "127.0.0.1"
 
 
+def _single_pair_snapshot(daemon):
+    """Mirror reconcile snapshot for the single-pair lead path.
+
+    Multi-pair goes through ``DaemonSupervisor._mirror_snapshot``; this is the
+    one-daemon equivalent. A pair whose position state cannot be read must land
+    in ``unknown``, never be merely omitted — absence from ``open`` means "the
+    lead is flat" and authorises the node to close its position.
+    """
+    from axonai.default_config import _canonical_symbol
+    canon = _canonical_symbol(getattr(daemon, "mt5_symbol", ""))
+    try:
+        state = daemon.mirror_position_state()
+    except Exception:
+        return {"open": {}, "unknown": [canon]}
+    if not state.get("ok"):
+        return {"open": {}, "unknown": [canon]}
+    if state.get("signal"):
+        return {"open": {canon: {"signal": state["signal"]}}, "unknown": []}
+    return {"open": {}, "unknown": []}
+
+
 # ── Main ───────────────────────────────────────────────────────────
 
 def main():
@@ -300,7 +321,7 @@ def main():
                 # Execution node: expose an inbound server that routes forwarded
                 # decisions to the per-pair daemons the supervisor just built.
                 from axonai.realtime.exec_node import ExecNodeServer
-                ExecNodeServer(supervisor.daemons, port=args.exec_port).start()
+                ExecNodeServer(supervisor.daemons, port=args.exec_port, config=config).start()
             supervisor.start()  # blocks until stopped, then tears down MT5
         else:
             daemon = AxonDaemon(symbol=symbols[0], config=config)
@@ -308,12 +329,18 @@ def main():
             # supervisor's shared one instead).
             if args.mirror_url and not args.exec_node:
                 from axonai.realtime.mirror_client import MirrorClient
-                daemon.mirror_client = MirrorClient(config["mirror_url"])
+                d = daemon  # snapshot provider closes over the single daemon
+                daemon.mirror_client = MirrorClient(
+                    config["mirror_url"],
+                    queue_max=int(config.get("mirror_queue_max", 200) or 200),
+                    entry_ttl=float(config.get("mirror_entry_ttl_seconds", 45.0) or 45.0),
+                    snapshot_provider=lambda: _single_pair_snapshot(d),
+                )
                 daemon.mirror_client.start()
             # Execution node: expose the inbound server BEFORE the blocking start.
             if args.exec_node:
                 from axonai.realtime.exec_node import ExecNodeServer
-                ExecNodeServer({symbols[0]: daemon}, port=args.exec_port).start()
+                ExecNodeServer({symbols[0]: daemon}, port=args.exec_port, config=config).start()
             daemon.start()
 
             print("  Dashboard + Daemon running. Press Ctrl+C to stop.")

@@ -205,6 +205,29 @@ class TestDailyBaseline(_GuardCase):
         self.assertAlmostEqual(g.daily_pnl["start_equity"], 95_500.0)  # reseeded
         self.assertFalse(halted)
 
+    def test_foreign_baseline_rejected_on_NON_prop_account_too(self):
+        # REGRESSION (live blocker, observed 2026-07-30): reports/daily_pnl.json
+        # held start_equity=100000 (the funded account) while the 10k Eightcap
+        # lead read the same file. The sanity reseed was gated on prop_enabled, so
+        # the small account trusted a 100k baseline → 90% "daily loss" → circuit
+        # breaker tripped on the first tick and EVERY order was rejected all day.
+        g = RiskGuard({"prop_guard_enabled": False})
+        g.risk_pnl_log_file = os.path.join(self.tmp, "daily_pnl.json")
+        g.daily_pnl = {"date": g._today(), "start_equity": 100_000.0, "realized_pnl": 0.0}
+        halted, reason = g.is_halted(10_000.0)
+        self.assertFalse(halted, f"foreign baseline still trips the breaker: {reason}")
+        self.assertAlmostEqual(g.daily_pnl["start_equity"], 10_000.0)  # reseeded
+
+    def test_non_prop_real_daily_loss_still_trips(self):
+        # The reseed must not become a blanket amnesty: a plausible baseline (well
+        # inside the 0.5x–2x window) must still enforce the daily limit.
+        g = RiskGuard({"prop_guard_enabled": False, "risk_max_daily_drawdown_pct": 3.0})
+        g.risk_pnl_log_file = os.path.join(self.tmp, "daily_pnl.json")
+        g.daily_pnl = {"date": g._today(), "start_equity": 10_000.0, "realized_pnl": 0.0}
+        halted, _ = g.is_halted(9_600.0)          # -4% of a believable baseline
+        self.assertTrue(halted)
+        self.assertAlmostEqual(g.daily_pnl["start_equity"], 10_000.0)  # NOT reseeded
+
     def test_prop_uses_separate_daily_file(self):
         # The funded process must not share reports/daily_pnl.json with a
         # non-prop process running from the same directory.
