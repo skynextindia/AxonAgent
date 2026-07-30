@@ -126,6 +126,20 @@ def main():
                              "instead of being static from the initial balance")
     parser.add_argument("--prop-initial-balance", type=float, default=None,
                         help="Prop starting balance baseline (default: seed from the account)")
+    parser.add_argument("--skip-falling-knife", action="store_true",
+                        help="Enable the falling-knife entry filter (skip a BUY whose M15 trigger "
+                             "candle closed below its open). Validated net-negative quadrant; "
+                             "default OFF in code, opt-in per launch. Lead-only (no-op on exec-node).")
+    parser.add_argument("--trail-dist", type=float, default=None,
+                        help="Override the trailing-stop distance (× ATR) for all pairs, e.g. 1.0. "
+                             "Default (unset) keeps the validated 0.35. Widening lifts capture; "
+                             "applies to lead AND exec-node. Soak on demo first.")
+    parser.add_argument("--risk-cap-per-trade", type=float, default=None,
+                        help="Cap any single trade's stop-risk at this %% of equity (e.g. 1.5); "
+                             "the lot is trimmed to fit. Prop-account risk rule.")
+    parser.add_argument("--risk-cap-combined", type=float, default=None,
+                        help="Cap TOTAL open stop-risk at this %% of equity (e.g. 2.5); a new entry "
+                             "is shrunk to the remaining budget, or blocked if min-lot won't fit.")
     args = parser.parse_args()
 
     # ── logging: PER-INSTANCE log file ────────────────────────────────────────
@@ -282,6 +296,14 @@ def main():
         if args.mirror_url:
             config["mirror_enabled"] = True
             config["mirror_url"] = args.mirror_url
+        if args.skip_falling_knife:
+            config["entry_skip_falling_knife"] = True
+        if args.trail_dist is not None:
+            config["trail_dist_atr_mult_override"] = args.trail_dist
+        if args.risk_cap_per_trade is not None:
+            config["risk_cap_per_trade_pct"] = args.risk_cap_per_trade
+        if args.risk_cap_combined is not None:
+            config["risk_cap_combined_pct"] = args.risk_cap_combined
         # Prop-firm guard: scoped to THIS process/account only.
         if args.prop_firm:
             config["prop_guard_enabled"] = True

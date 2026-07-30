@@ -177,6 +177,29 @@ class MT5TradeExecutor:
         if size_scale != 1.0:
             lot = max(min_lot, round(lot * size_scale, 2))
 
+        # Prop-account risk caps (config-gated; default off, node-only in practice).
+        # Trim the final lot so THIS trade's stop-risk <= per-trade ceiling AND the
+        # TOTAL open stop-risk (this trade + already-open positions) <= combined
+        # ceiling. Shrink to fit; block only if even min_lot won't fit the budget.
+        cap_pt = self.config.get("risk_cap_per_trade_pct")
+        cap_cb = self.config.get("risk_cap_combined_pct")
+        if acc and (cap_pt or cap_cb):
+            per_pip_risk = sl_pips * pip_value_per_lot          # $ risk per 1.0 lot
+            open_risk = self._account_open_risk_usd() if cap_cb else 0.0
+            lot, blocked, budget = self._apply_risk_caps(
+                lot, min_lot, per_pip_risk, account_equity, cap_pt, cap_cb, open_risk)
+            if blocked:
+                logger.info("TradeExecutor: %s entry BLOCKED by combined risk cap %.1f%% "
+                            "(open risk $%.0f, remaining budget $%.0f < min-lot risk $%.0f)",
+                            symbol, cap_cb or 0.0, open_risk, max(0.0, budget),
+                            min_lot * per_pip_risk)
+                try:
+                    send_alert(f"Risk cap: {symbol} entry blocked — open risk ${open_risk:.0f} "
+                               f"near {cap_cb}% combined cap.", self.config)
+                except Exception:
+                    pass
+                return None
+
         # Prepare request
         request = {
             "action": mt5.TRADE_ACTION_DEAL,
@@ -253,6 +276,61 @@ class MT5TradeExecutor:
         if price and price > 0:
             val = val / price  # USD-base pair: convert quote-currency pip → USD
         return max(val, 0.01)
+
+    @staticmethod
+    def _apply_risk_caps(lot, min_lot, per_pip_risk, equity, cap_pt_pct, cap_cb_pct, open_risk_usd):
+        """Trim `lot` to fit the per-trade and combined stop-risk ceilings.
+
+        Returns (lot, blocked, budget_usd). The dollar budget for THIS trade is
+        min(per-trade %, combined % − already-open risk). `blocked` is True when
+        even `min_lot` exceeds that budget, so the caller should skip the entry.
+        Percentages are given as numbers (1.5 == 1.5%).
+        """
+        budget = float("inf")
+        if cap_pt_pct:
+            budget = min(budget, equity * (cap_pt_pct / 100.0))
+        if cap_cb_pct:
+            budget = min(budget, equity * (cap_cb_pct / 100.0) - open_risk_usd)
+        if budget == float("inf") or per_pip_risk <= 0:
+            return lot, False, budget
+        cap_lot = budget / per_pip_risk
+        if cap_lot < min_lot - 1e-9:
+            return 0.0, True, budget
+        return round(min(lot, cap_lot), 2), False, budget
+
+    def _account_open_risk_usd(self) -> float:
+        """Total stop-loss $-risk across ALL open positions on this account.
+
+        Per position: max(0, entry→SL distance in pips) × $/pip/lot × volume. A
+        position whose SL has trailed to/past breakeven contributes 0 (no
+        downside left), which frees combined-cap budget for a new entry. USD-quote
+        pairs use $10/pip/lot; USD-base (JPY) derive from the live price.
+        """
+        import MetaTrader5 as mt5
+        try:
+            positions = mt5.positions_get()
+        except Exception as e:
+            logger.warning("open-risk: positions_get failed: %s", e)
+            return 0.0
+        if not positions:
+            return 0.0
+        total = 0.0
+        for p in positions:
+            sl = getattr(p, "sl", 0.0) or 0.0
+            if sl <= 0.0:
+                continue
+            sym = p.symbol.upper()
+            pipsz = 0.01 if ("JPY" in sym or "XAU" in sym) else 0.0001
+            if p.type == mt5.POSITION_TYPE_BUY:
+                risk_pips = (p.price_open - sl) / pipsz
+            else:
+                risk_pips = (sl - p.price_open) / pipsz
+            if risk_pips <= 0:
+                continue                                   # SL at/past breakeven
+            px = getattr(p, "price_current", 0.0) or p.price_open
+            pipval = (100000.0 * pipsz / px) if "JPY" in sym else 10.0
+            total += risk_pips * pipval * p.volume
+        return total
 
     def _result_to_dict(self, result, sl: float = 0.0) -> dict:
         """Helper to convert OrderSendResult to a dictionary."""

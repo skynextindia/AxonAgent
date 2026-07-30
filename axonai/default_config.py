@@ -186,6 +186,34 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # mode too — required for live trailing stops, post-trade cooldowns, and the
     # per-pair SL lockout. Turn off to revert to dry-run-only monitoring.
     "realtime_manage_positions_live": True,
+    # --- Entry quality gates (both default OFF; soak in dry-run first) ---
+    # Falling-knife filter: veto a BUY whose M15 trigger candle closed below its
+    # open. Validated 2026-07-30 over 197 trades (2026-06-15..07-30): such BUYs
+    # net -2.0 pips/trade, robust out-of-sample (June & July both negative) and
+    # on both symbols. Skipping them lifted net +37% and win-rate +3.8pts.
+    "entry_skip_falling_knife": False,
+    # No-progress abort: if an open position has not reached
+    # noprogress_abort_min_favorable_pips of favorable excursion within
+    # noprogress_abort_minutes of entry, scratch it at market. Catches
+    # "wrong-from-entry" trades (MFE ~ 0) before they ride to a full stop; the
+    # entry filter above only reaches BUYs, this reaches either side. The minutes
+    # threshold is not derivable from history (MAE/MFE give magnitude, not
+    # timing) — tune it in dry-run.
+    "entry_noprogress_abort": False,
+    "noprogress_abort_minutes": 12.0,
+    "noprogress_abort_min_favorable_pips": 2.0,
+    # The abort closes REAL positions, so it can't be soaked the way the entry
+    # filter can. When True (the default even once the abort is enabled) it only
+    # LOGS the position it would scratch and leaves it open — so you can watch
+    # it decide on the live account before arming it. Set False to actually close.
+    "noprogress_abort_notice_only": True,
+    # Trailing-stop distance override (× ATR). None = use the per-pair
+    # trail_dist_atr_mult (0.35). Set (e.g. 1.0) to widen the trail for ALL pairs
+    # without editing the spec — the daemon reads this in _manage_trailing_stops.
+    # M1-replay over 201 trades: widening 0.35 → 1.0 lifted net ~+40% with the SAME
+    # win rate (trail distance sets capture, not win/loss) and beat 0.35 in both
+    # out-of-sample halves. Applies to lead AND node. Soak on demo before trusting.
+    "trail_dist_atr_mult_override": None,
     # Supervisor watchdog: if a pair's daemon thread dies, always alert loudly.
     # Set True to ALSO flatten that pair's positions (they keep their entry SL
     # regardless, so this is an opt-in extra safety net, not a requirement).
@@ -234,6 +262,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # apart. Set by run.py ("" for the lead, "_node" for the exec node).
     "instance_tag": "",
     "exec_node_max_lot": 5.0,                # exec node: conservative per-pair lot ceiling
+    # Prop-account risk ceilings (config-gated; None = off). Numbers are percent.
+    # per_trade: no single trade's stop-risk may exceed this % of equity (the lot
+    # is trimmed to fit). combined: total open stop-risk across ALL positions may
+    # not exceed this % (a new entry is shrunk to the remaining budget, or blocked
+    # if even min_lot won't fit). Trailed-to-breakeven positions free up budget.
+    "risk_cap_per_trade_pct": None,          # e.g. 1.5  → single-trade stop-risk ≤ 1.5%
+    "risk_cap_combined_pct": None,           # e.g. 2.5  → total open stop-risk ≤ 2.5%
     "exec_node_magic_offset": 500000,        # exec node: distinct magic = lead magic + offset
     # ── Mirror replay + reconcile (lead side) ─────────────────────────────────
     # Without these the mirror is pure fire-and-forget: any decision made while

@@ -98,6 +98,7 @@ class AxonDaemon:
         self._active_trade_system: dict[int, str] = {}
         self._active_trade_atr: dict[int, float] = {}
         self._active_trade_peak_price: dict[int, float] = {}
+        self._active_trade_entry_time: dict[int, float] = {}  # ticket -> wall-clock entry epoch (for no-progress abort)
         self._sl_fail_alert_ts: dict[int, float] = {}   # per-ticket throttle for SL-modify-failure alerts
 
         # Layer 5: Economic news calendar guard
@@ -1049,7 +1050,35 @@ class AxonDaemon:
                 signal = "Buy"
             else:
                 signal = "Sell"
-            
+
+            # Entry filter (default OFF): veto a BUY whose M15 trigger candle
+            # closed below its open — the "falling-knife" long. Validated net
+            # -2.0 pips/trade, robust out-of-sample and on both symbols. Only
+            # applies to M15 triggers (the timeframe the edge was measured on);
+            # if the trigger candle is absent or not M15, the trade is allowed.
+            knife_tc = event.details.get("trigger_candle")
+            if self.config.get("entry_skip_falling_knife", False) and \
+                    self._is_falling_knife_buy(signal, knife_tc):
+                self._events_skipped += 1
+                logger.info("SKIPPED (falling-knife filter: BUY into bearish M15 trigger "
+                            "candle O=%.5f C=%.5f)", knife_tc.get("open"), knife_tc.get("close"))
+                if dashboard:
+                    self._broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": "falling-knife filter (BUY into bearish M15 candle)",
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
+
             system_name = event.details.get("system", "optimized")
             logger.info("EXECUTION (%s): Direct signal: %s", system_name, signal)
             
@@ -1105,6 +1134,7 @@ class AxonDaemon:
                         atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
                         self._active_trade_atr[ticket] = atr
                         self._active_trade_peak_price[ticket] = trade_result.get("price", 0.0)
+                        self._active_trade_entry_time[ticket] = time.time()
                         if self.correlation_engine is not None:
                             self.correlation_engine.register_position(
                                 self.mt5_symbol, signal,
@@ -1335,8 +1365,11 @@ class AxonDaemon:
     def _close_all_positions(self, reason: str) -> int:
         """Close every open position for this symbol/magic, regardless of PnL.
 
-        Used by the pre-news flatten and the manual dashboard close-all button.
-        Fetches the current tick internally so callers need not supply bid/ask.
+        Used by the pre-news flatten, the EOD pre-rollover flatten, the prop-breach
+        flatten, and the manual dashboard close-all button. Each position is closed
+        through _close_position (FOK→IOC fallback); the old inline path hardcoded
+        ORDER_FILLING_IOC and was observed to fail every attempt on the live
+        terminals (2026-07-30 pre-news flatten: 181 consecutive "Unknown" rejects).
         """
         if not mt5 or not mt5.terminal_info():
             logger.warning("Close-all: MT5 not connected, cannot close positions.")
@@ -1346,47 +1379,14 @@ class AxonDaemon:
         if not positions:
             return 0
 
-        tick = mt5.symbol_info_tick(self.mt5_symbol)
-        if not tick:
-            logger.warning("Close-all: no tick for %s, cannot close.", self.mt5_symbol)
-            return 0
-        bid, ask = tick.bid, tick.ask
-
         closed_count = 0
         for pos in positions:
             if pos.magic != self.trade_executor_opt.magic:
                 continue
-
-            if pos.type == mt5.POSITION_TYPE_BUY:
-                close_price = bid
-                close_type = mt5.POSITION_TYPE_SELL
-            else:
-                close_price = ask
-                close_type = mt5.POSITION_TYPE_BUY
-
-            request = {
-                "action": mt5.TRADE_ACTION_DEAL,
-                "symbol": pos.symbol,
-                "volume": pos.volume,
-                "type": close_type,
-                "position": pos.ticket,
-                "price": close_price,
-                "deviation": 20,
-                "magic": pos.magic,
-                "comment": reason[:31],
-                "type_time": mt5.ORDER_TIME_GTC,
-                "type_filling": mt5.ORDER_FILLING_IOC,
-            }
-
-            with mt5_lock:
-                res = mt5.order_send(request)
-            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                logger.info("Close-all: closed position %d (%.2f profit) — %s",
-                            pos.ticket, pos.profit, reason)
+            if self._close_position(pos, reason):
                 closed_count += 1
             else:
-                logger.warning("Close-all: failed to close position %d: %s",
-                               pos.ticket, getattr(res, "comment", "Unknown"))
+                logger.warning("Close-all: failed to close position %d (%s).", pos.ticket, reason)
 
         return closed_count
 
@@ -1408,39 +1408,23 @@ class AxonDaemon:
             if pos.magic != self.trade_executor_opt.magic:
                 continue
 
-            # Calculate profit pips
+            # Calculate profit pips (the actual close price comes from the live
+            # tick inside _close_position; bid/ask here only gate the profit test)
             if pos.type == mt5.POSITION_TYPE_BUY:
                 profit_pips = (bid - pos.price_open) / pip
-                close_price = bid
             else:
                 profit_pips = (pos.price_open - ask) / pip
-                close_price = ask
 
             # ONLY close if in profit!
             if profit_pips > 0:
                 logger.info("EOD: Position %d is in profit (+%.1f pips). Force closing...", pos.ticket, profit_pips)
-                
-                request = {
-                    "action": mt5.TRADE_ACTION_DEAL,
-                    "symbol": pos.symbol,
-                    "volume": pos.volume,
-                    "type": mt5.POSITION_TYPE_SELL if pos.type == mt5.POSITION_TYPE_BUY else mt5.POSITION_TYPE_BUY,
-                    "position": pos.ticket,
-                    "price": close_price,
-                    "deviation": 20,
-                    "magic": pos.magic,
-                    "comment": f"EOD profit close"[:31],
-                    "type_time": mt5.ORDER_TIME_GTC,
-                    "type_filling": mt5.ORDER_FILLING_IOC,
-                }
-                
-                with mt5_lock:
-                    res = mt5.order_send(request)
-                if res and res.retcode == mt5.TRADE_RETCODE_DONE:
-                    logger.info("EOD: Successfully closed profitable position %d (+%.2f profit)", pos.ticket, pos.profit)
+                # Route through _close_position (FOK→IOC fallback). NOTE: this now
+                # honors the `reason` argument for the deal comment; the old inline
+                # path hardcoded "EOD profit close" and ignored `reason`.
+                if self._close_position(pos, reason):
                     closed_count += 1
                 else:
-                    logger.warning("EOD: Failed to close position %d: %s", pos.ticket, getattr(res, "comment", "Unknown"))
+                    logger.warning("EOD: Failed to close position %d (%s).", pos.ticket, reason)
             else:
                 logger.info("EOD: Position %d is in loss (%.1f pips). Leaving open.", pos.ticket, profit_pips)
 
@@ -1790,7 +1774,15 @@ class AxonDaemon:
             
         pip = 0.01 if "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() else 0.0001
         digits = 3 if "JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper() else 5
-        
+
+        # Trail multipliers — now read from config (were hardcoded 0.60/0.80/0.35).
+        # trail_dist honors an optional override so a wider trail can be soaked
+        # without editing the per-pair spec; default keeps the validated 0.35.
+        # Applies to BOTH accounts (each manages its own trail).
+        be_mult = float(self.config.get("be_atr_mult", 0.60))
+        arm_mult = float(self.config.get("trail_trigger_atr_mult", 0.80))
+        trail_mult = self._effective_trail_mult(self.config)
+
         for pos in positions:
             ticket = pos.ticket
             # If we don't have the initial SL recorded, initialize it from pos.sl
@@ -1800,19 +1792,32 @@ class AxonDaemon:
                 atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
                 self._active_trade_atr[ticket] = atr
                 self._active_trade_peak_price[ticket] = pos.price_open
-                
+
             # Ensure ATR and peak price are recorded
             if ticket not in self._active_trade_atr:
                 atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
                 self._active_trade_atr[ticket] = atr
             if ticket not in self._active_trade_peak_price:
                 self._active_trade_peak_price[ticket] = pos.price_open
-                
+            # No-progress-abort clock. For an adopted position (first sight after a
+            # restart) we reset to "now" rather than the true fill time: purely
+            # wall-clock, no server-tz mixing, and it never aborts a position the
+            # instant we re-adopt it — it just grants a fresh window.
+            if ticket not in self._active_trade_entry_time:
+                self._active_trade_entry_time[ticket] = time.time()
+
             atr = self._active_trade_atr[ticket]
             initial_sl = self._active_trade_initial_sl[ticket]
-            
+
             if initial_sl <= 0.0:
                 continue
+
+            # No-progress abort (default OFF): scratch a position that has not
+            # reached the minimum favorable excursion within the time window.
+            # Runs before the trail logic so a dead trade is cut, not trailed.
+            if self.config.get("entry_noprogress_abort", False):
+                if self._maybe_noprogress_abort(pos, bid, ask, pip):
+                    continue
                 
             if pos.type == mt5.POSITION_TYPE_BUY:
                 # Update peak price using the bid price
@@ -1821,11 +1826,11 @@ class AxonDaemon:
                 
                 # Check Breakeven Trigger (0.60 * ATR)
                 profit = bid - pos.price_open
-                be_trigger = 0.60 * atr
+                be_trigger = be_mult * atr
                 
                 # Check Trailing Stop (once peak profit >= 0.80 * ATR, trail by 0.35 * ATR)
                 peak_profit = peak_price - pos.price_open
-                trail_trigger = 0.80 * atr
+                trail_trigger = arm_mult * atr
                 
                 target_sl = pos.sl
                 if profit >= be_trigger:
@@ -1834,7 +1839,7 @@ class AxonDaemon:
                         target_sl = breakeven_sl
                         
                 if peak_profit >= trail_trigger:
-                    trail_distance = 0.35 * atr
+                    trail_distance = trail_mult * atr
                     trail_sl = round(peak_price - trail_distance, digits)
                     if target_sl < trail_sl:
                         target_sl = trail_sl
@@ -1851,11 +1856,11 @@ class AxonDaemon:
                 
                 # Check Breakeven Trigger (0.60 * ATR)
                 profit = pos.price_open - ask
-                be_trigger = 0.60 * atr
+                be_trigger = be_mult * atr
                 
                 # Check Trailing Stop (once peak profit >= 0.80 * ATR, trail by 0.35 * ATR)
                 peak_profit = pos.price_open - peak_price
-                trail_trigger = 0.80 * atr
+                trail_trigger = arm_mult * atr
                 
                 target_sl = pos.sl
                 if profit >= be_trigger:
@@ -1864,7 +1869,7 @@ class AxonDaemon:
                         target_sl = breakeven_sl
                         
                 if peak_profit >= trail_trigger:
-                    trail_distance = 0.35 * atr
+                    trail_distance = trail_mult * atr
                     trail_sl = round(peak_price + trail_distance, digits)
                     if target_sl > trail_sl or target_sl == 0.0:
                         target_sl = trail_sl
@@ -1873,6 +1878,120 @@ class AxonDaemon:
                     logger.info("AxonDaemon: Trailing SL triggered for SELL ticket %d. Modifying SL: %.5f -> %.5f",
                                 ticket, pos.sl, target_sl)
                     self._modify_sl(ticket, target_sl, pos.tp, "SELL")
+
+    @staticmethod
+    def _effective_trail_mult(config) -> float:
+        """Trailing-stop distance (× ATR): the override if set, else the per-pair
+        trail_dist_atr_mult (default 0.35). An explicit 0.0 override is honored."""
+        ov = config.get("trail_dist_atr_mult_override")
+        return float(ov) if ov is not None else float(config.get("trail_dist_atr_mult", 0.35))
+
+    @staticmethod
+    def _is_falling_knife_buy(signal: str, trigger_candle) -> bool:
+        """True if this is a BUY whose M15 trigger candle closed below its open.
+
+        The validated 'falling-knife' long (net -2.0 pips/trade over 197 trades,
+        robust out-of-sample and on both symbols). Only M15 triggers qualify —
+        that is the timeframe the edge was measured on; anything else (or a
+        missing candle) returns False so the trade is allowed through.
+        """
+        if signal != "Buy":
+            return False
+        tc = trigger_candle or {}
+        o, c = tc.get("open"), tc.get("close")
+        return tc.get("timeframe") == "M15" and o is not None and c is not None and c < o
+
+    def _maybe_noprogress_abort(self, pos, bid: float, ask: float, pip: float) -> bool:
+        """Scratch a position that hasn't made progress within the time window.
+
+        Fires only when the peak favorable excursion is still below
+        ``noprogress_abort_min_favorable_pips`` after ``noprogress_abort_minutes``
+        from entry — the "wrong-from-entry" signature (MFE ~ 0). Returns True if
+        the position was closed (caller should skip trailing it this tick).
+        """
+        ticket = pos.ticket
+        entry_t = self._active_trade_entry_time.get(ticket)
+        if entry_t is None:
+            return False
+        age_min = (time.time() - entry_t) / 60.0
+        if age_min < float(self.config.get("noprogress_abort_minutes", 12.0)):
+            return False
+
+        min_fav = float(self.config.get("noprogress_abort_min_favorable_pips", 2.0))
+        peak = self._active_trade_peak_price.get(ticket, pos.price_open)
+        if pos.type == mt5.POSITION_TYPE_BUY:
+            fav_pips = max((bid - pos.price_open) / pip, (peak - pos.price_open) / pip)
+            side = "BUY"
+        else:
+            fav_pips = max((pos.price_open - ask) / pip, (pos.price_open - peak) / pip)
+            side = "SELL"
+        if fav_pips >= min_fav:
+            return False  # made enough progress — let the trail/breakeven logic run
+
+        # Notice-only soak: log the decision but leave the position open, so the
+        # abort can be observed on the live account before it is armed.
+        if self.config.get("noprogress_abort_notice_only", True):
+            logger.info("AxonDaemon: No-progress abort [NOTICE-ONLY] — would scratch %s ticket %d "
+                        "aged %.1fmin, peak favorable %.1f pips (< %.1f). Left open.",
+                        side, ticket, age_min, fav_pips, min_fav)
+            return False
+
+        logger.info("AxonDaemon: No-progress abort — %s ticket %d aged %.1fmin, peak favorable "
+                    "%.1f pips (< %.1f). Scratching at market.", side, ticket, age_min, fav_pips, min_fav)
+        ok = self._close_position(pos, "No-progress abort")
+        if ok:
+            try:
+                send_alert(f"No-progress abort: {self.mt5_symbol} {side} ticket {ticket} scratched "
+                           f"after {age_min:.0f}min (peak favorable {fav_pips:.1f} pips).", self.config)
+            except Exception as e:
+                logger.error("No-progress abort alert failed: %s", e)
+        return ok
+
+    def _close_position(self, pos, reason: str) -> bool:
+        """Market-close a single position, FOK then IOC fallback. Returns True on fill.
+
+        Mirrors the trade-executor's filling-mode fallback (FOK is what works on
+        the Eightcap terminal; the older ``_close_all_positions`` path hardcodes
+        IOC and was observed to fail every attempt). The resulting close is picked
+        up by ``_check_for_closed_positions`` on the next tick, which logs the exit
+        and mirrors it to the exec-node — so no explicit mirror send is needed here.
+        """
+        if not mt5 or not mt5.terminal_info():
+            logger.warning("Close-position: MT5 not connected, cannot close ticket %d.", pos.ticket)
+            return False
+        tick = mt5.symbol_info_tick(self.mt5_symbol)
+        if not tick:
+            logger.warning("Close-position: no tick for %s, cannot close ticket %d.", self.mt5_symbol, pos.ticket)
+            return False
+        if pos.type == mt5.POSITION_TYPE_BUY:
+            close_type, close_price = mt5.POSITION_TYPE_SELL, tick.bid
+        else:
+            close_type, close_price = mt5.POSITION_TYPE_BUY, tick.ask
+        base = {
+            "action": mt5.TRADE_ACTION_DEAL,
+            "symbol": pos.symbol,
+            "volume": pos.volume,
+            "type": close_type,
+            "position": pos.ticket,
+            "price": close_price,
+            "deviation": 20,
+            "magic": pos.magic,
+            "comment": reason[:31],
+            "type_time": mt5.ORDER_TIME_GTC,
+        }
+        for filling in (mt5.ORDER_FILLING_FOK, mt5.ORDER_FILLING_IOC):
+            req = dict(base, type_filling=filling)
+            with mt5_lock:
+                res = mt5.order_send(req)
+            if res and res.retcode == mt5.TRADE_RETCODE_DONE:
+                logger.info("Close-position: closed ticket %d (%.2f profit) — %s",
+                            pos.ticket, pos.profit, reason)
+                return True
+            rc = getattr(res, "retcode", None)
+            cm = getattr(res, "comment", "no result")
+            logger.warning("Close-position: filling=%s failed for ticket %d (retcode=%s %s)",
+                           filling, pos.ticket, rc, cm)
+        return False
 
     def _modify_sl(self, ticket: int, target_sl: float, tp: float, side: str) -> bool:
         """Send a lock-serialized SLTP modify; log + alert (throttled) on failure.
@@ -2072,6 +2191,7 @@ class AxonDaemon:
             self._active_trade_initial_sl.pop(ticket, None)
             self._active_trade_atr.pop(ticket, None)
             self._active_trade_peak_price.pop(ticket, None)
+            self._active_trade_entry_time.pop(ticket, None)
             
             # Apply post-trade global cooldown to prevent immediate reversal trades
             # caused by our own TP/SL orders hitting the market and causing a tick climax
