@@ -879,6 +879,17 @@ class AxonDaemon:
                             closest_dist = dist_pips
                             closest_lvl = lvl
                     
+                    if closest_lvl is not None:
+                        # Persist the level this entry is actually fading onto the
+                        # event, so it reaches signals.jsonl via _log_signal. Without
+                        # it, post-hoc "which level lost?" analysis has to re-derive
+                        # the level from bars and gets it wrong.
+                        event.details["sr_level_type"] = closest_lvl.level_type
+                        event.details["sr_level_price"] = float(closest_lvl.price)
+                        event.details["sr_level_dist_pips"] = round(closest_dist, 2)
+                        event.details["daily_trend"] = getattr(
+                            self.live_evidence, "trend_direction_h4", "sideways")
+
                     if closest_lvl is None or closest_dist > 5.0:
                         is_gate_passed = False
                         gate_reason = f"not near any S/R zone (closest: {closest_dist:.2f} pips)"
@@ -1079,6 +1090,32 @@ class AxonDaemon:
                     })
                 continue
 
+            # Directional BUY-side skips (default OFF; OOS-validated 2026-06/07).
+            # BUYs were net-negative in both months; panic-regime and active-session
+            # (08-16 UTC) BUYs are the worst pockets. Lead-side only — the node
+            # never sees a skipped entry because it is never mirrored.
+            buy_skip = self._buy_skip_reason(
+                signal, ws.dominant_regime, datetime.now(timezone.utc), self.config)
+            if buy_skip:
+                self._events_skipped += 1
+                logger.info("SKIPPED (BUY-skip filter: %s)", buy_skip)
+                if dashboard:
+                    self._broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": f"BUY-skip filter ({buy_skip})",
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
+
             system_name = event.details.get("system", "optimized")
             logger.info("EXECUTION (%s): Direct signal: %s", system_name, signal)
             
@@ -1142,7 +1179,8 @@ class AxonDaemon:
                                 trade_result.get("price", 0.0) or 0.0, ticket)
                     # Mirror this entry decision to the execution node (best-effort;
                     # lead side only — a no-op when mirror_client is None).
-                    self._mirror_send({"cmd": "enter", "signal": signal, "size_scale": size_scale})
+                    self._mirror_send({"cmd": "enter", "signal": signal, "size_scale": size_scale,
+                                       "lead_lot": trade_result.get("volume")})
             except Exception as ex_err:
                 logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
             
@@ -1164,6 +1202,11 @@ class AxonDaemon:
         timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_payload = {
             "timestamp": timestamp_str,
+            # Unambiguous instant. 'timestamp' above is machine-local wall clock,
+            # which cannot be bucketed into trading sessions without knowing the
+            # box's timezone — that ambiguity produced a 3-hour error in session
+            # analysis. Always prefer timestamp_utc for any time-of-day work.
+            "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "system": event.details.get("system", "optimized"),
             "ticker": self.yf_symbol,
             "mt5_symbol": self.mt5_symbol,
@@ -1171,6 +1214,12 @@ class AxonDaemon:
             "event_priority": event.priority.name,
             "event_price": event.price,
             "event_details": event.details,
+            # The S/R level this entry faded (stamped by the peak gate), hoisted to
+            # the top level so analysis never has to reconstruct it.
+            "sr_level_type": event.details.get("sr_level_type"),
+            "sr_level_price": event.details.get("sr_level_price"),
+            "sr_level_dist_pips": event.details.get("sr_level_dist_pips"),
+            "daily_trend": event.details.get("daily_trend"),
             "dominant_regime": ws.dominant_regime,
             "regime_confidence": ws.regime_confidence,
             "volatility": ws.volatility_regime,
@@ -1585,7 +1634,8 @@ class AxonDaemon:
         except Exception as e:
             logger.warning("AxonDaemon: mirror forward failed (non-fatal): %s", e)
 
-    def inject_signal(self, signal: str, size_scale: float = 1.0, source: str = "mirror"):
+    def inject_signal(self, signal: str, size_scale: float = 1.0, source: str = "mirror",
+                      lead_lot: Optional[float] = None):
         """Execute an entry routed from the lead brain (execution-node mode).
 
         Bypasses detection + the entry gauntlet — the lead already applied every
@@ -1604,7 +1654,7 @@ class AxonDaemon:
         trade_result = None
         try:
             trade_result = self.trade_executor.execute_signal(
-                self.mt5_symbol, signal, self.live_state, size_scale)
+                self.mt5_symbol, signal, self.live_state, size_scale, lead_lot)
             if trade_result:
                 ticket = trade_result.get("order")
                 if ticket:
@@ -1886,6 +1936,21 @@ class AxonDaemon:
         ov = config.get("trail_dist_atr_mult_override")
         return float(ov) if ov is not None else float(config.get("trail_dist_atr_mult", 0.35))
 
+    def _deal_time_local(self, epoch) -> datetime:
+        """Convert an MT5 deal/tick epoch to a real local-time instant.
+
+        MT5 stamps deals with the BROKER SERVER wall clock (EET/EEST, UTC+2/+3)
+        packed into a Unix-epoch field, so it is not a true epoch. Feeding it
+        straight to datetime.fromtimestamp() adds the local offset on top of the
+        server offset and over-reports the close time by the broker offset
+        (measured at exactly +3h against tick time). Subtract it first.
+        """
+        try:
+            offset_h = get_broker_tz_offset(self.mt5_symbol)
+        except Exception:
+            offset_h = 0
+        return datetime.fromtimestamp(float(epoch) - offset_h * 3600)
+
     @staticmethod
     def _is_falling_knife_buy(signal: str, trigger_candle) -> bool:
         """True if this is a BUY whose M15 trigger candle closed below its open.
@@ -1900,6 +1965,39 @@ class AxonDaemon:
         tc = trigger_candle or {}
         o, c = tc.get("open"), tc.get("close")
         return tc.get("timeframe") == "M15" and o is not None and c is not None and c < o
+
+    @staticmethod
+    def _buy_skip_reason(signal: str, dominant_regime, now_utc, config) -> Optional[str]:
+        """Reason string if this BUY should be vetoed by a config-gated directional
+        filter, else None. All three gates default OFF.
+
+        Validated OOS on 2026-06 (n=57) and 2026-07 (n=144); a pocket only ships if
+        it is net-negative in BOTH months independently. BUYs were net-negative in
+        both (-40 / -27) while SELLs carried the edge (+103 / +340):
+
+          * panic-regime BUY   -58 (n=8)  / -30 (n=14)
+          * active-session BUY -68 (n=18) / -74 (n=44)   [08-16 UTC]
+
+        The session window is 08-16 UTC and is bucketed on true UTC. An earlier
+        07-12 window was derived from local timestamps mistaken for UTC+3 and was
+        wrong by 3 hours — it skipped hour 07, which is net-POSITIVE in both months
+        (+28 / +29), and missed the negative 12-16 block. Neighbouring windows
+        (08-17, 09-16, 10-16) agree, so the region is stable rather than a
+        knife-edge fit. Caveat: both months shared a down-trend, so this is partly
+        a directional bet, not a pure time-of-day effect.
+        """
+        if signal != "Buy":
+            return None
+        if config.get("entry_skip_all_buy", False):
+            return "all-BUY suppression"
+        if config.get("entry_skip_panic_buy", False) and str(dominant_regime or "").lower() == "panic":
+            return "panic-regime BUY"
+        if config.get("entry_skip_session_buy", False) and now_utc is not None:
+            start = int(config.get("entry_skip_session_buy_start", 8))
+            end = int(config.get("entry_skip_session_buy_end", 16))
+            if start <= now_utc.hour < end:
+                return f"active-session BUY ({start:02d}-{end:02d} UTC)"
+        return None
 
     def _maybe_noprogress_abort(self, pos, bid: float, ask: float, pip: float) -> bool:
         """Scratch a position that hasn't made progress within the time window.
@@ -2091,7 +2189,7 @@ class AxonDaemon:
                     
                 if exit_deal:
                     exit_price = exit_deal.price
-                    exit_time_str = datetime.fromtimestamp(exit_deal.time).strftime("%Y-%m-%d %H:%M:%S")
+                    exit_time_str = self._deal_time_local(exit_deal.time).strftime("%Y-%m-%d %H:%M:%S")
                     profit = exit_deal.profit
                     comment = getattr(exit_deal, "comment", "").lower()
                     
@@ -2144,6 +2242,7 @@ class AxonDaemon:
                 os.makedirs("reports", exist_ok=True)
                 payload = {
                     "timestamp": exit_time_str,
+                    "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
                     "type": "trade_closed",
                     "system": system_name,
                     "ticket": ticket,

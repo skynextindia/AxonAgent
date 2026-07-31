@@ -158,7 +158,8 @@ class ExecNodeServer:
                                 raw_scale, symbol)
                     return {"ok": False, "cmd": cmd, "symbol": symbol,
                             "reason": "size_scale <= 0"}
-                res = daemon.inject_signal(signal, size_scale, source="mirror")
+                lead_lot = req.get("lead_lot")
+                res = daemon.inject_signal(signal, size_scale, source="mirror", lead_lot=lead_lot)
                 return {
                     "ok": bool(res), "cmd": cmd, "symbol": symbol,
                     "ticket": (res or {}).get("order"),

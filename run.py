@@ -140,6 +140,25 @@ def main():
     parser.add_argument("--risk-cap-combined", type=float, default=None,
                         help="Cap TOTAL open stop-risk at this %% of equity (e.g. 2.5); a new entry "
                              "is shrunk to the remaining budget, or blocked if min-lot won't fit.")
+    parser.add_argument("--enforce-max-stop", action="store_true",
+                        help="Hard-cap SL/TP at the per-pair max_stop_pips (USDJPY 10, EURUSD 16) so "
+                             "the stop never widens past the cap regardless of ATR.")
+    parser.add_argument("--node-lot-multiple", type=float, default=None,
+                        help="Exec-node only: size each routed entry to this multiple of the LEAD's "
+                             "executed lot (e.g. 10 → node trades 10× the Eightcap lot).")
+    parser.add_argument("--risk-pct", type=float, default=None,
+                        help="Per-trade risk as %% of equity (e.g. 1.9). Overrides the per-pair "
+                             "risk_pct so every entry sizes to risk this share at its stop.")
+    parser.add_argument("--skip-panic-buy", action="store_true",
+                        help="Veto BUY entries in panic regime (OOS-validated worst BUY pocket).")
+    parser.add_argument("--skip-session-buy", action="store_true",
+                        help="Veto BUY entries inside the active-session window "
+                             "(default 08-16 UTC, the OOS-validated worst BUY block).")
+    parser.add_argument("--session-buy-window", type=str, default=None,
+                        help="Override the --skip-session-buy window as START-END in "
+                             "UTC hours, e.g. 8-16.")
+    parser.add_argument("--skip-all-buy", action="store_true",
+                        help="Suppress ALL BUY entries (full directional short-only bet).")
     args = parser.parse_args()
 
     # ── logging: PER-INSTANCE log file ────────────────────────────────────────
@@ -304,6 +323,22 @@ def main():
             config["risk_cap_per_trade_pct"] = args.risk_cap_per_trade
         if args.risk_cap_combined is not None:
             config["risk_cap_combined_pct"] = args.risk_cap_combined
+        if args.enforce_max_stop:
+            config["enforce_max_stop_pips"] = True
+        if args.node_lot_multiple is not None:
+            config["exec_node_lot_multiple"] = args.node_lot_multiple
+        if args.risk_pct is not None:
+            config["realtime_risk_pct_override"] = args.risk_pct / 100.0
+        if args.skip_panic_buy:
+            config["entry_skip_panic_buy"] = True
+        if args.skip_session_buy:
+            config["entry_skip_session_buy"] = True
+        if args.session_buy_window:
+            _s, _, _e = args.session_buy_window.partition("-")
+            config["entry_skip_session_buy_start"] = int(_s)
+            config["entry_skip_session_buy_end"] = int(_e)
+        if args.skip_all_buy:
+            config["entry_skip_all_buy"] = True
         # Prop-firm guard: scoped to THIS process/account only.
         if args.prop_firm:
             config["prop_guard_enabled"] = True

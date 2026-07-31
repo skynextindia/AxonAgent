@@ -192,6 +192,26 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # net -2.0 pips/trade, robust out-of-sample (June & July both negative) and
     # on both symbols. Skipping them lifted net +37% and win-rate +3.8pts.
     "entry_skip_falling_knife": False,
+    # Directional BUY-side skips (config-gated, default OFF). OOS hunt over
+    # 2026-06 (out-of-sample) and 2026-07 (in-sample) found BUYs net-NEGATIVE in
+    # BOTH months while SELLs carried the entire edge (+103 / +340 pips). The two
+    # worst BUY pockets held on both months: panic-regime BUYs (-58 / -30) and
+    # active-session BUYs 08-16 UTC (-68 / -74).
+    # NOTE: the window is 08-16 UTC, bucketed on TRUE UTC. It was previously
+    # 07-12 ("London"), derived from local timestamps mistaken for UTC+3 — wrong
+    # by 3 hours. That window skipped hour 07 (net-POSITIVE in both months,
+    # +28 / +29) and missed the negative 12-16 block, leaving the combined filter
+    # worth only +38 / +1. On the corrected clock it is worth +142 combined.
+    # Caveat: still partly a directional bet (both months shared a down-trend),
+    # so validate on August live before trusting it wider.
+    #   entry_skip_panic_buy   : skip BUY when dominant_regime == "panic"
+    #   entry_skip_session_buy : skip BUY inside the active-session window (UTC)
+    #   entry_skip_all_buy     : suppress ALL BUY entries (full directional bet)
+    "entry_skip_panic_buy": False,
+    "entry_skip_session_buy": False,
+    "entry_skip_session_buy_start": 8,
+    "entry_skip_session_buy_end": 16,
+    "entry_skip_all_buy": False,
     # No-progress abort: if an open position has not reached
     # noprogress_abort_min_favorable_pips of favorable excursion within
     # noprogress_abort_minutes of entry, scratch it at market. Catches
@@ -214,6 +234,28 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # win rate (trail distance sets capture, not win/loss) and beat 0.35 in both
     # out-of-sample halves. Applies to lead AND node. Soak on demo before trusting.
     "trail_dist_atr_mult_override": None,
+    # Hard SL/TP pip ceiling (config-gated; default OFF). When True, the executor
+    # caps BOTH the stop and the target at the per-pair ``max_stop_pips`` (USDJPY
+    # 10, EURUSD 16) no matter how large 2×ATR or the vol-driven floor grows — so
+    # the stop can never balloon to the 100+ pip widths a high-ATR session
+    # produces. NOTE: a 10-pip USDJPY stop sits inside normal M1 noise, so expect
+    # a much higher stop-out rate; and with a capped target the ATR-scaled trail
+    # (breakeven at 0.60×ATR ≈ 49 USDJPY pips) can't arm before TP is hit.
+    "enforce_max_stop_pips": False,
+    # Exec-node lot mirroring (config-gated, node-only; default OFF). When set, the
+    # node sizes each routed entry to this multiple of the LEAD's executed lot
+    # (e.g. 10.0 → node trades 10× the Eightcap lot), overriding the node's own
+    # risk-based sizing and the correlation size_scale. Still clamped to
+    # ``exec_node_max_lot`` and then trimmed by the per-trade/combined risk caps.
+    "exec_node_lot_multiple": None,
+    # Per-trade risk override (fraction of equity; default None → use the per-pair
+    # spec risk_pct, 0.01). When set (e.g. 0.019), EVERY pair sizes each entry to
+    # risk this share of account equity at its stop distance — overrides the
+    # SYMBOL_CALIBRATION risk_pct on both terminals. With the tight stop caps this
+    # sizes UP (a 16-pip EURUSD stop at 1.9% ≈ 1.2 lead lots / ~12 node lots; a
+    # 10-pip USDJPY stop at 1.9% ≈ 3 lead lots — high notional/leverage, watch
+    # broker margin).
+    "realtime_risk_pct_override": None,
     # Supervisor watchdog: if a pair's daemon thread dies, always alert loudly.
     # Set True to ALSO flatten that pair's positions (they keep their entry SL
     # regardless, so this is an opt-in extra safety net, not a requirement).
@@ -261,7 +303,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # different accounts' P&L merged into one stream with no way to tell them
     # apart. Set by run.py ("" for the lead, "_node" for the exec node).
     "instance_tag": "",
-    "exec_node_max_lot": 5.0,                # exec node: conservative per-pair lot ceiling
+    "exec_node_max_lot": 12.0,               # exec node: per-pair lot ceiling (headroom for 10× lead mirroring)
     # Prop-account risk ceilings (config-gated; None = off). Numbers are percent.
     # per_trade: no single trade's stop-risk may exceed this % of equity (the lot
     # is trimmed to fit). combined: total open stop-risk across ALL positions may
@@ -333,6 +375,7 @@ SYMBOL_CALIBRATION = {
         "sl_atr_mult": 2.0,
         "tp_atr_mult": 2.0,
         "min_stop_pips": 16.0,
+        "max_stop_pips": 16.0,       # hard SL/TP ceiling when enforce_max_stop_pips=True
         "be_atr_mult": 0.60,
         "trail_trigger_atr_mult": 0.80,
         "trail_dist_atr_mult": 0.35,
@@ -348,6 +391,7 @@ SYMBOL_CALIBRATION = {
         "sl_atr_mult": 2.0,
         "tp_atr_mult": 2.0,
         "min_stop_pips": 16.0,
+        "max_stop_pips": 10.0,       # hard SL/TP ceiling when enforce_max_stop_pips=True
         "be_atr_mult": 0.60,
         "trail_trigger_atr_mult": 0.80,
         "trail_dist_atr_mult": 0.35,
@@ -385,6 +429,8 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
         cfg["realtime_risk_pct"] = base.get(
             "realtime_risk_pct", base.get("trade_risk_pct", 0.01)
         )
+        if base.get("realtime_risk_pct_override") is not None:
+            cfg["realtime_risk_pct"] = float(base["realtime_risk_pct_override"])
         # Sensible pip-value default for unlisted pairs: USD-quote (XXXUSD) ≈ $10;
         # USD-base / crosses → None so the executor derives it from the live price.
         if "realtime_pip_value_per_lot" not in cfg:
@@ -396,6 +442,9 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
     )
     cfg["realtime_max_lot"] = spec.get("max_lot", base.get("realtime_max_lot", 0.10))
     cfg["realtime_risk_pct"] = spec.get("risk_pct", base.get("trade_risk_pct", 0.01))
+    _rpo = base.get("realtime_risk_pct_override")
+    if _rpo is not None:
+        cfg["realtime_risk_pct"] = float(_rpo)
     cfg["pip_size"] = spec.get("pip_size", auto_pip)
     # None => compute dynamically at order time (USD-base pairs like USDJPY).
     cfg["realtime_pip_value_per_lot"] = spec.get(
@@ -404,6 +453,7 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
     cfg["sl_atr_mult"] = spec.get("sl_atr_mult", 2.0)
     cfg["tp_atr_mult"] = spec.get("tp_atr_mult", 2.0)
     cfg["min_stop_pips"] = spec.get("min_stop_pips", 16.0)
+    cfg["max_stop_pips"] = spec.get("max_stop_pips", base.get("max_stop_pips"))
     cfg["be_atr_mult"] = spec.get("be_atr_mult", 0.60)
     cfg["trail_trigger_atr_mult"] = spec.get("trail_trigger_atr_mult", 0.80)
     cfg["trail_dist_atr_mult"] = spec.get("trail_dist_atr_mult", 0.35)

@@ -220,6 +220,9 @@ __marimo__/
 
 # AxonAI session and reports
 .axon_session.json
-.axon_session*.json      # per-process variants (e.g. .axon_session_node.json)
+# per-process variants (e.g. .axon_session_node.json). Keep this comment on its
+# own line: .gitignore has no trailing-comment syntax, so a trailing "# ..." is
+# parsed as part of the pattern and the rule silently matches nothing.
+.axon_session*.json
 reports/
 *.csv

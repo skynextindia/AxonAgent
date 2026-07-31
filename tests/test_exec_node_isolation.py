@@ -222,9 +222,11 @@ class TestExecNodeStatsLine(unittest.TestCase):
 class _FakeNodeDaemon:
     def __init__(self):
         self.calls = []
+        self.lead_lots = []
 
-    def inject_signal(self, signal, size_scale, source="mirror"):
+    def inject_signal(self, signal, size_scale, source="mirror", lead_lot=None):
         self.calls.append((signal, size_scale))
+        self.lead_lots.append(lead_lot)
         return {"order": 1, "volume": 1.0}
 
     def inject_close(self, reason):
@@ -267,6 +269,19 @@ class TestSizeScaleGuard(unittest.TestCase):
             {"cmd": "enter", "symbol": "EURUSD", "signal": "Buy", "size_scale": 0.5})
         self.assertTrue(ack["ok"])
         self.assertEqual(fake.calls, [("Buy", 0.5)])
+
+    def test_lead_lot_is_forwarded_for_node_lot_mirroring(self):
+        """The node sizes off the lead's lot (exec_node_lot_multiple), so the
+        lead_lot on the wire must reach inject_signal untouched."""
+        ack, fake = self._dispatch(
+            {"cmd": "enter", "symbol": "EURUSD", "signal": "Buy", "lead_lot": 1.29})
+        self.assertTrue(ack["ok"])
+        self.assertEqual(fake.lead_lots, [1.29])
+
+    def test_absent_lead_lot_forwards_none(self):
+        ack, fake = self._dispatch({"cmd": "enter", "symbol": "EURUSD", "signal": "Buy"})
+        self.assertTrue(ack["ok"])
+        self.assertEqual(fake.lead_lots, [None])
 
 
 # ── 4. news calendar: back off on failure ────────────────────────────────────

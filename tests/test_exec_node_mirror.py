@@ -23,9 +23,11 @@ class _FakeExecutor:
         self.magic = magic
         self.result = result
         self.calls = []
+        self.lead_lots = []
 
-    def execute_signal(self, symbol, signal, live_state, size_scale=1.0):
+    def execute_signal(self, symbol, signal, live_state, size_scale=1.0, lead_lot=None):
         self.calls.append((symbol, signal, size_scale))
+        self.lead_lots.append(lead_lot)
         return self.result
 
 
@@ -118,9 +120,11 @@ class _FakeDaemon:
     def __init__(self):
         self.enter_calls = []
         self.close_reason = None
+        self.lead_lot = None
 
-    def inject_signal(self, signal, size_scale, source="mirror"):
+    def inject_signal(self, signal, size_scale, source="mirror", lead_lot=None):
         self.enter_calls.append((signal, size_scale, source))
+        self.lead_lot = lead_lot
         return {"order": 777, "volume": 5.0}
 
     def inject_close(self, reason):

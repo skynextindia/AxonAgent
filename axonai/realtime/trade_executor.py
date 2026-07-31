@@ -29,12 +29,15 @@ class MT5TradeExecutor:
         self.circuit_breaker = self.risk_guard
 
     def execute_signal(self, symbol: str, signal: str, live_state: Optional[Any] = None,
-                       size_scale: float = 1.0) -> Optional[dict]:
+                       size_scale: float = 1.0, lead_lot: Optional[float] = None) -> Optional[dict]:
         """Convert a 5-tier signal into an MT5 order action.
 
         Signals: Buy, Overweight, Hold, Underweight, Sell
         ``size_scale`` (1.0 = unchanged) multiplies the final lot; the
         correlation engine uses it to shrink correlated exposure (Phase 4).
+        ``lead_lot`` is the lot the LEAD terminal just executed; on an exec node
+        with ``exec_node_lot_multiple`` set, sizing mirrors that lot × the
+        multiple instead of re-deriving risk-based size.
         """
         import MetaTrader5 as mt5
 
@@ -51,15 +54,15 @@ class MT5TradeExecutor:
             return {"success": False, "reason": "circuit_breaker_tripped"}
 
         if signal in ["Buy", "Overweight"]:
-            return self.send_order(symbol, mt5.ORDER_TYPE_BUY, live_state, size_scale)
+            return self.send_order(symbol, mt5.ORDER_TYPE_BUY, live_state, size_scale, lead_lot)
         elif signal in ["Sell", "Underweight"]:
-            return self.send_order(symbol, mt5.ORDER_TYPE_SELL, live_state, size_scale)
+            return self.send_order(symbol, mt5.ORDER_TYPE_SELL, live_state, size_scale, lead_lot)
         else:
             logger.info("TradeExecutor: Signal is %s. No order action taken (HOLD).", signal)
             return None
 
     def send_order(self, symbol: str, order_type: int, live_state: Optional[Any] = None,
-                   size_scale: float = 1.0) -> Optional[dict]:
+                   size_scale: float = 1.0, lead_lot: Optional[float] = None) -> Optional[dict]:
         """Send a market order with dynamic SL/TP and position sizing to MT5."""
         import MetaTrader5 as mt5
 
@@ -124,7 +127,18 @@ class MT5TradeExecutor:
         min_stop_pips = self.config.get("min_stop_pips", 16.0)
         sl_distance = max(atr * sl_mult, min_stop_pips * pip)
         tp_distance = max(atr * tp_mult, min_stop_pips * pip)
-        
+
+        # Hard SL/TP pip ceiling (config-gated). When enforce_max_stop_pips is set,
+        # neither the stop nor the target may exceed the per-pair cap (USDJPY 10,
+        # EURUSD 16) — this OVERRIDES the 2×ATR term and the min_stop floor, so a
+        # high-ATR session can never widen the stop past the cap.
+        if self.config.get("enforce_max_stop_pips"):
+            cap_pips = self.config.get("max_stop_pips")
+            if cap_pips:
+                cap_dist = float(cap_pips) * pip
+                sl_distance = min(sl_distance, cap_dist)
+                tp_distance = min(tp_distance, cap_dist)
+
         sl = entry - sl_distance if direction == "BUY" else entry + sl_distance
         tp = entry + tp_distance if direction == "BUY" else entry - tp_distance
 
@@ -176,6 +190,20 @@ class MT5TradeExecutor:
         # Never let the scaled lot fall below the min_lot execution floor.
         if size_scale != 1.0:
             lot = max(min_lot, round(lot * size_scale, 2))
+
+        # Exec-node lot mirroring (config-gated, node-only). Size to a fixed
+        # multiple of the LEAD's executed lot, OVERRIDING the risk-based lot and
+        # the correlation size_scale (the lead already applied both). Still clamped
+        # to [min_lot, max_lot]; the risk caps below can trim it further.
+        lot_mult = self.config.get("exec_node_lot_multiple")
+        if lot_mult and lead_lot:
+            mirrored = round(float(lead_lot) * float(lot_mult), 2)
+            lot = max(min_lot, min(mirrored, max_lot))
+            logger.info(
+                "TradeExecutor: exec-node lot-mirror %s → lead_lot %.2f × %.1f = %.2f "
+                "(clamped [%.2f, %.2f] → %.2f)",
+                symbol, float(lead_lot), float(lot_mult), mirrored, min_lot, max_lot, lot,
+            )
 
         # Prop-account risk caps (config-gated; default off, node-only in practice).
         # Trim the final lot so THIS trade's stop-risk <= per-trade ceiling AND the
