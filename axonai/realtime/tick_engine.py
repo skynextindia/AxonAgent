@@ -411,6 +411,18 @@ class TickEngine(threading.Thread):
             
             # If weekend or stale feed (offline/no connection), simulate live price action to keep dashboard alive
             if broker_now.weekday() in (5, 6) or is_stale:
+                # A stale feed on a TRADING day usually means the terminal link
+                # dropped (auto-update, crash, broker logout) — not a quiet
+                # market. Self-heal in place: without this the loop would fall
+                # straight through to synthetic ticks and run forever on fake
+                # prices while the account silently stops trading. Weekends are a
+                # genuinely closed market, so skip the reconnect and just simulate.
+                if is_stale and broker_now.weekday() not in (5, 6):
+                    from axonai.dataflows.mt5_data import is_mt5_connected, mt5_reconnect
+                    if not is_mt5_connected() and mt5_reconnect():
+                        self._resync_after_reconnect()
+                        continue
+
                 last_price = self.mid_price if self.latest_bid > 0.0 else 1.16110
                 import random
                 pip_unit = 0.01 if "JPY" in self.symbol.upper() else 0.0001
@@ -440,6 +452,20 @@ class TickEngine(threading.Thread):
             time.sleep(self.poll_interval_ms / 1000.0)
 
         logger.info("TickEngine stopped. Total ticks processed: %d", self._tick_count)
+
+    def _resync_after_reconnect(self) -> None:
+        """Re-select the symbol and force a fresh tick window after the MT5 link
+        was re-established, so real polling resumes cleanly instead of trying to
+        continue from a pre-disconnect tick cursor."""
+        try:
+            if self._mt5 is not None:
+                info = self._mt5.symbol_info(self.symbol)
+                if info is not None and not info.visible:
+                    self._mt5.symbol_select(self.symbol, True)
+            self._last_tick_time_msc = None  # next poll fetches a fresh window
+            logger.info("TickEngine[%s]: real feed resumed after MT5 reconnect", self.symbol)
+        except Exception as e:
+            logger.warning("TickEngine[%s]: post-reconnect resync error: %s", self.symbol, e)
 
     def stop(self):
         """Signal the thread to stop."""

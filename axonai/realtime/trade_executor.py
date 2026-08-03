@@ -66,10 +66,16 @@ class MT5TradeExecutor:
         """Send a market order with dynamic SL/TP and position sizing to MT5."""
         import MetaTrader5 as mt5
 
-        # Check connection
+        # Check connection. The terminal link may have dropped (auto-update,
+        # crash, broker logout); try to self-heal ONCE before dropping this
+        # (possibly mirrored) order — a dropped routed entry is a silently
+        # missed trade on the account. Throttled/serialized inside mt5_reconnect.
         if not mt5.terminal_info():
-            logger.error("TradeExecutor: Not connected to MT5 terminal.")
-            return None
+            from axonai.dataflows.mt5_data import mt5_reconnect
+            if not mt5_reconnect() or not mt5.terminal_info():
+                logger.error("TradeExecutor: Not connected to MT5 terminal.")
+                return None
+            logger.info("TradeExecutor: MT5 link restored via reconnect; proceeding with order.")
 
         # Check symbol info
         symbol_info = mt5.symbol_info(symbol)

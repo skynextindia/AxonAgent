@@ -13,6 +13,7 @@ import atexit
 import logging
 import os
 import threading
+import time
 from datetime import datetime, timedelta
 from typing import Annotated, Dict, List, Optional, Tuple
 
@@ -24,6 +25,14 @@ logger = logging.getLogger(__name__)
 # Lazy import so the module loads even when MetaTrader5 isn't installed
 _mt5 = None
 _initialized = False
+
+# Remembered from the first successful init so a reconnect can target the SAME
+# terminal (which keeps the wrong-terminal guard in mt5_initialize honest).
+# Reconnect is serialized through mt5_lock and throttled so the per-pair tick
+# threads can't hammer initialize() in parallel while a terminal is coming back.
+_terminal_path: Optional[str] = None
+_last_reconnect_ts: float = 0.0
+_reconnect_min_interval: float = 30.0  # seconds between reconnect attempts
 
 # The MetaTrader5 library is not documented as thread-safe. When several daemon
 # threads (one per pair) share one terminal connection, serialize *write* ops
@@ -59,7 +68,7 @@ def mt5_initialize(
     server: Optional[str] = None
 ) -> bool:
     """Connect to the MT5 terminal. Cached — safe to call repeatedly."""
-    global _initialized, _TF_MAP
+    global _initialized, _TF_MAP, _terminal_path
     if _initialized:
         return True
     mt5 = _load_mt5()
@@ -131,6 +140,9 @@ def mt5_initialize(
         "MN1": mt5.TIMEFRAME_MN1,
     })
     logger.info("MT5 connected: %s", mt5.terminal_info())
+    # Remember the resolved path so mt5_reconnect() re-targets the same terminal
+    # (_initialized was already set True above, before the timeframe-map build).
+    _terminal_path = terminal_path
     return True
 
 
@@ -143,6 +155,63 @@ def mt5_shutdown():
         except Exception:
             pass
         _initialized = False
+
+
+def is_mt5_connected() -> bool:
+    """True only if the terminal link is actually live — initialized AND the
+    terminal reports a connection.
+
+    A terminal that was closed and reopened (auto-update, crash, reboot) leaves
+    ``_initialized`` stuck True while ``terminal_info()`` returns None, so the
+    ``_initialized`` flag alone is not proof of a live link. This is the check
+    that distinguishes a genuinely dropped link from a merely quiet feed.
+    """
+    if not _initialized or _mt5 is None:
+        return False
+    try:
+        info = _mt5.terminal_info()
+    except Exception:
+        return False
+    # A live TerminalInfo may omit `connected`; treat its presence as connected.
+    return bool(info is not None and getattr(info, "connected", True))
+
+
+def mt5_reconnect() -> bool:
+    """Self-heal a dropped terminal link by re-initializing against the SAME
+    terminal path. Returns True if the link is live afterwards.
+
+    Serialized through ``mt5_lock`` and throttled to one real attempt per
+    ``_reconnect_min_interval`` so the per-pair tick threads cooperate instead
+    of hammering ``initialize()`` while a terminal is still coming back. The
+    liveness check happens BEFORE the throttle, so a call always returns True
+    immediately once the link is healthy again, regardless of the backoff.
+    """
+    global _initialized, _last_reconnect_ts
+    with mt5_lock:
+        if is_mt5_connected():
+            return True
+        now = time.monotonic()
+        if _last_reconnect_ts and (now - _last_reconnect_ts) < _reconnect_min_interval:
+            return False
+        _last_reconnect_ts = now
+        logger.warning("MT5 link down — reconnecting to %s", _terminal_path or "(default terminal)")
+        try:
+            if _mt5 is not None:
+                _mt5.shutdown()
+        except Exception:
+            pass
+        _initialized = False
+        try:
+            ok = mt5_initialize(terminal_path=_terminal_path)
+        except Exception as e:
+            # e.g. the wrong-terminal guard fired, or the terminal is mid-restart.
+            logger.warning("MT5 reconnect error: %s", e)
+            return False
+        if ok:
+            logger.info("MT5 reconnect succeeded.")
+        else:
+            logger.warning("MT5 reconnect failed; retrying in ~%.0fs.", _reconnect_min_interval)
+        return ok
 
 
 # ── Symbol Mapping ───────────────────────────────────────────────────────
