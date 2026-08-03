@@ -23,7 +23,8 @@ except ImportError:
 from axonai.dataflows.mt5_data import mt5_initialize, mt5_shutdown, _to_mt5_symbol, get_broker_tz_offset, mt5_lock
 from axonai.realtime.event_types import EventPriority, LiveCandle, MarketEvent, EventType
 from axonai.realtime.tick_engine import TickEngine
-from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence, get_dst_session_hours
+from axonai.realtime.live_state import LiveWorldState, LiveMarketEvidence
+from axonai.sessions import get_dst_session_hours, session_hud
 from axonai.realtime.event_detector import EventDetector
 from axonai.realtime.trade_executor import MT5TradeExecutor
 from axonai.realtime.api_server import get_dashboard
@@ -141,75 +142,10 @@ class AxonDaemon:
 
     @staticmethod
     def _get_session_details(now_utc: datetime) -> list:
-        """Compute active/inactive state + progress for each forex session with dynamic DST.
-        """
-        year = now_utc.year
-        utc_hour = now_utc.hour + now_utc.minute / 60.0
-
-        # US DST: 2nd Sunday in March to 1st Sunday in Nov
-        dst_start_us = datetime(year, 3, 8)
-        while dst_start_us.weekday() != 6:
-            dst_start_us += timedelta(days=1)
-        dst_end_us = datetime(year, 11, 1)
-        while dst_end_us.weekday() != 6:
-            dst_end_us += timedelta(days=1)
-        is_us_dst = dst_start_us.date() <= now_utc.date() < dst_end_us.date()
-
-        # EU DST: last Sunday in March to last Sunday in Oct
-        dst_start_eu = datetime(year, 3, 31)
-        while dst_start_eu.weekday() != 6:
-            dst_start_eu -= timedelta(days=1)
-        dst_end_eu = datetime(year, 10, 31)
-        while dst_end_eu.weekday() != 6:
-            dst_end_eu -= timedelta(days=1)
-        is_eu_dst = dst_start_eu.date() <= now_utc.date() < dst_end_eu.date()
-
-        # AEDT active: first Sunday in October to first Sunday in April
-        dst_end_au = datetime(year, 4, 1)
-        while dst_end_au.weekday() != 6:
-            dst_end_au += timedelta(days=1)
-        dst_start_au = datetime(year, 10, 1)
-        while dst_start_au.weekday() != 6:
-            dst_start_au += timedelta(days=1)
-        is_au_dst = now_utc.date() < dst_end_au.date() or now_utc.date() >= dst_start_au.date()
-
-        syd_open = 21.0 if is_au_dst else 22.0
-        syd_close = 6.0 if is_au_dst else 7.0
-        
-        ldn_open = 7.0 if is_eu_dst else 8.0
-        ldn_close = 15.0 if is_eu_dst else 16.0
-        
-        ny_open = 12.0 if is_us_dst else 13.0
-        ny_close = 20.0 if is_us_dst else 21.0
-
-        sessions_def = [
-            {"name": "Sydney",   "open": syd_open, "close": syd_close, "duration": 9.0,  "color": "#00bfff"},
-            {"name": "Tokyo",    "open": 0.0,      "close": 9.0,       "duration": 9.0,  "color": "#ff6b9d"},
-            {"name": "London",   "open": ldn_open, "close": ldn_close, "duration": 8.0,  "color": "#9d00ff"},
-            {"name": "New York", "open": ny_open,  "close": ny_close,  "duration": 9.0,  "color": "#00ff66"},
-        ]
-        result = []
-        for s in sessions_def:
-            o, c, dur = s["open"], s["close"], s["duration"]
-            # Handle wrap-around
-            if o > c:  # wraps midnight
-                active = utc_hour >= o or utc_hour < c
-                elapsed = (utc_hour - o) if utc_hour >= o else (utc_hour + 24.0 - o)
-            else:
-                active = o <= utc_hour < c
-                elapsed = utc_hour - o if active else 0.0
-            progress = min(max(elapsed / dur, 0.0), 1.0) if active else 0.0
-            remaining_h = max(dur - elapsed, 0.0) if active else 0.0
-            result.append({
-                "name": s["name"],
-                "active": active,
-                "open_utc": o,
-                "close_utc": c,
-                "progress": round(progress, 3),
-                "remaining_min": round(remaining_h * 60),
-                "color": s["color"],
-            })
-        return result
+        """Human dashboard session bars (Sydney/Tokyo/London/New York) with
+        active-state + progress. Delegates to the single session source
+        (axonai/sessions.session_hud) so there is one DST computation."""
+        return session_hud(now_utc)
 
     def _current_active_sessions(self) -> list:
         """Effective tradable sessions: tuner (if warmed up) else config list."""
@@ -238,37 +174,19 @@ class AxonDaemon:
         # Compute detailed session data from real UTC clock with active DST
         from datetime import timezone
         now_utc = datetime.now(timezone.utc)
-        year = now_utc.year
         session_details = self._get_session_details(now_utc)
-        
-        # NY DST checks for range calculation
-        dst_start_us = datetime(year, 3, 8)
-        while dst_start_us.weekday() != 6:
-            dst_start_us += timedelta(days=1)
-        dst_end_us = datetime(year, 11, 1)
-        while dst_end_us.weekday() != 6:
-            dst_end_us += timedelta(days=1)
-        is_us_dst = dst_start_us.date() <= now_utc.date() < dst_end_us.date()
 
-        # London DST checks for range calculation
-        dst_start_eu = datetime(year, 3, 31)
-        while dst_start_eu.weekday() != 6:
-            dst_start_eu -= timedelta(days=1)
-        dst_end_eu = datetime(year, 10, 31)
-        while dst_end_eu.weekday() != 6:
-            dst_end_eu -= timedelta(days=1)
-        is_eu_dst = dst_start_eu.date() <= now_utc.date() < dst_end_eu.date()
+        # Session-range windows from the single source (axonai/sessions.py). NY
+        # uses the analytic close (~12–18 UTC summer), which aligns the dashboard
+        # NY range with the NY levels/classifier — this copy previously ran to
+        # 16:00 ET (12–20), the only place that disagreed.
+        ldn_open, ldn_close, ny_open, ny_close = get_dst_session_hours(now_utc)
 
-        ldn_open = 7.0 if is_eu_dst else 8.0
-        ldn_close = 15.0 if is_eu_dst else 16.0
-        ny_open = 12.0 if is_us_dst else 13.0
-        ny_close = 20.0 if is_us_dst else 21.0
-            
         # Real-time session ranges update using latest tick price
         current_bid = self.tick_engine.latest_bid
         if current_bid > 0.0:
             utc_hour = now_utc.hour + now_utc.minute / 60.0
-            if 0 <= utc_hour < 8.0:
+            if 0 <= utc_hour < ldn_open:
                 if self.live_evidence._evidence.asian_range_high == 0.0 or current_bid > self.live_evidence._evidence.asian_range_high:
                     self.live_evidence._evidence.asian_range_high = current_bid
                 if self.live_evidence._evidence.asian_range_low == 0.0 or current_bid < self.live_evidence._evidence.asian_range_low:

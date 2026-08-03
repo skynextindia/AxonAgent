@@ -16,6 +16,7 @@ from axonai.dataflows.mt5_data import (
     get_mt5_live_price,
     get_broker_tz_offset
 )
+from axonai.sessions import get_dst_session_hours
 
 logger = logging.getLogger(__name__)
 
@@ -243,29 +244,11 @@ def extract_market_evidence(symbol: str = "EURUSD=X") -> MarketEvidence:
         # Shift index to actual UTC by subtracting the broker timezone offset
         df_utc.index = df_utc.index - pd.Timedelta(hours=offset_hours)
         df_utc.index = df_utc.index.tz_localize('UTC') if df_utc.index.tz is None else df_utc.index.tz_convert('UTC')
-        year = now_utc.year
-        # New York DST (EDT: 2nd Sunday in March to 1st Sunday in November)
-        dst_start_us = datetime(year, 3, 8)
-        while dst_start_us.weekday() != 6:
-            dst_start_us += timedelta(days=1)
-        dst_end_us = datetime(year, 11, 1)
-        while dst_end_us.weekday() != 6:
-            dst_end_us += timedelta(days=1)
-        is_us_dst = dst_start_us.date() <= now_utc.date() < dst_end_us.date()
-
-        # London DST (BST: Last Sunday in March to Last Sunday in October)
-        dst_start_eu = datetime(year, 3, 31)
-        while dst_start_eu.weekday() != 6:
-            dst_start_eu -= timedelta(days=1)
-        dst_end_eu = datetime(year, 10, 31)
-        while dst_end_eu.weekday() != 6:
-            dst_end_eu -= timedelta(days=1)
-        is_eu_dst = dst_start_eu.date() <= now_utc.date() < dst_end_eu.date()
-
-        ldn_open = 7 if is_eu_dst else 8
-        ldn_close = 15 if is_eu_dst else 16
-        ny_open = 12 if is_us_dst else 13
-        ny_close = 18 if is_us_dst else 19
+        # Session windows from the single source (axonai/sessions.py). Whole-hour
+        # boundaries for these markets; int() keeps the pandas hour comparisons
+        # and the `== ldn_open` London-open-bar match exact.
+        _lo, _lc, _no, _nc = get_dst_session_hours(now_utc)
+        ldn_open, ldn_close, ny_open, ny_close = int(_lo), int(_lc), int(_no), int(_nc)
 
         asian_bars = df_utc[(df_utc.index >= start_search) & (df_utc.index.hour < ldn_open)]
         

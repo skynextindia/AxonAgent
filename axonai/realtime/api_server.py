@@ -317,23 +317,18 @@ class DashboardServer:
                     return "--"
 
             def get_session_from_time(dt):
-                # Classify session based on UTC hour
-                import time
-                is_dst = time.daylight and time.localtime().tm_isdst > 0
-                utc_offset = - (time.altzone if is_dst else time.timezone) / 3600.0
-                utc_dt = dt - timedelta(hours=utc_offset)
-                hour = utc_dt.hour + utc_dt.minute / 60.0
-                
-                if 12.0 <= hour < 16.0:
-                    return "Overlap"
-                elif 7.0 <= hour < 12.0:
-                    return "London"
-                elif 16.0 <= hour < 21.0:
-                    return "New York"
-                elif 21.0 <= hour or hour < 7.0:
-                    return "Sydney/Tokyo"
-                else:
-                    return "Rollover"
+                # Trade timestamps are written in machine-local time; convert to
+                # UTC via the host offset, then classify through the single
+                # session source (axonai/sessions.py) so the journal uses the
+                # same DST-aware session model as the daemon rather than a
+                # private, non-DST-aware copy read off the local clock.
+                import time as _time
+                from axonai.sessions import session_label
+                if dt.tzinfo is None:
+                    is_dst = _time.daylight and _time.localtime().tm_isdst > 0
+                    utc_offset = - (_time.altzone if is_dst else _time.timezone) / 3600.0
+                    dt = dt - timedelta(hours=utc_offset)  # naive UTC wall clock
+                return session_label(dt)
 
             def compute_drawdown_peak(symbol, direction, entry_price, exit_price, entry_dt, exit_dt, outcome, reason, entry_signal=None):
                 is_jpy = "JPY" in symbol.upper()

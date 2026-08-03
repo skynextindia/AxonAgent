@@ -21,38 +21,12 @@ from axonai.dataflows.evidence_extractor import MarketEvidence, extract_market_e
 from axonai.realtime.event_types import LiveCandle
 from axonai.dataflows.mt5_data import get_broker_tz_offset, _to_mt5_symbol
 from axonai.realtime.level_tracker import LevelBehaviorTracker
+# Session math lives in one place now (axonai/sessions.py). Re-exported here so
+# existing `from axonai.realtime.live_state import get_dst_session_hours` imports
+# keep working.
+from axonai.sessions import get_dst_session_hours, classify_session
 
 logger = logging.getLogger(__name__)
-
-
-def get_dst_session_hours(dt: datetime) -> tuple[float, float, float, float]:
-    """Return (ldn_open, ldn_close, ny_open, ny_close) in UTC for a given datetime."""
-    from zoneinfo import ZoneInfo
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    else:
-        dt = dt.astimezone(timezone.utc)
-        
-    ldn_tz = ZoneInfo("Europe/London")
-    ny_tz = ZoneInfo("America/New_York")
-    
-    dt_ldn = dt.astimezone(ldn_tz)
-    ldn_open_local = datetime(dt_ldn.year, dt_ldn.month, dt_ldn.day, 8, 0, tzinfo=ldn_tz)
-    ldn_close_local = datetime(dt_ldn.year, dt_ldn.month, dt_ldn.day, 16, 0, tzinfo=ldn_tz)
-    ldn_open_utc = ldn_open_local.astimezone(timezone.utc)
-    ldn_close_utc = ldn_close_local.astimezone(timezone.utc)
-    
-    dt_ny = dt.astimezone(ny_tz)
-    ny_open_local = datetime(dt_ny.year, dt_ny.month, dt_ny.day, 8, 0, tzinfo=ny_tz)
-    ny_close_local = datetime(dt_ny.year, dt_ny.month, dt_ny.day, 14, 0, tzinfo=ny_tz)
-    ny_open_utc = ny_open_local.astimezone(timezone.utc)
-    ny_close_utc = ny_close_local.astimezone(timezone.utc)
-    
-    ldn_open = ldn_open_utc.hour + ldn_open_utc.minute / 60.0
-    ldn_close = ldn_close_utc.hour + ldn_close_utc.minute / 60.0
-    ny_open = ny_open_utc.hour + ny_open_utc.minute / 60.0
-    ny_close = ny_close_utc.hour + ny_close_utc.minute / 60.0
-    return ldn_open, ldn_close, ny_open, ny_close
 
 
 @dataclass
@@ -230,54 +204,19 @@ class LiveWorldState:
         else:
             utc_dt = timestamp - timedelta(hours=offset_hours)
             utc_dt = utc_dt.replace(tzinfo=timezone.utc)
-        utc_hour = utc_dt.hour + utc_dt.minute / 60.0
-
-        year = utc_dt.year
-        
-        # New York DST (EDT: 2nd Sunday in March to 1st Sunday in November)
-        dst_start_us = datetime(year, 3, 8)
-        while dst_start_us.weekday() != 6:
-            dst_start_us += timedelta(days=1)
-        dst_end_us = datetime(year, 11, 1)
-        while dst_end_us.weekday() != 6:
-            dst_end_us += timedelta(days=1)
-        is_us_dst = dst_start_us.date() <= utc_dt.date() < dst_end_us.date()
-
-        # London DST (BST: Last Sunday in March to Last Sunday in October)
-        dst_start_eu = datetime(year, 3, 31)
-        while dst_start_eu.weekday() != 6:
-            dst_start_eu -= timedelta(days=1)
-        dst_end_eu = datetime(year, 10, 31)
-        while dst_end_eu.weekday() != 6:
-            dst_end_eu -= timedelta(days=1)
-        is_eu_dst = dst_start_eu.date() <= utc_dt.date() < dst_end_eu.date()
-
-        ldn_open = 7.0 if is_eu_dst else 8.0
-        ldn_close = 15.0 if is_eu_dst else 16.0
-        ny_open = 12.0 if is_us_dst else 13.0
-        ny_close = 18.0 if is_us_dst else 19.0
-
+        # Session + hours-since-London from the single source (axonai/sessions.py).
+        session, hours_since_london_open = classify_session(utc_dt)
         prev_session = self._state.session
-        if ny_open <= utc_hour < ldn_close:
-            self._state.session = "overlap"
-            self._state.session_penalty = 1.0
-            self._state.hours_since_london_open = utc_hour - ldn_open
-        elif ldn_open <= utc_hour < ny_open:
-            self._state.session = "london"
-            self._state.session_penalty = 1.0
-            self._state.hours_since_london_open = utc_hour - ldn_open
-        elif ldn_close <= utc_hour < ny_close:
-            self._state.session = "newyork"
-            self._state.session_penalty = 1.0
-            self._state.hours_since_london_open = utc_hour - ldn_open
-        elif ny_close <= utc_hour < (ny_close + 1.0):
-            self._state.session = "rollover"
+        self._state.session = session
+        self._state.hours_since_london_open = hours_since_london_open
+        # session_penalty policy is owned here: normal 1.0, rollover 0.5, and
+        # Asian config-gated (suppress -> 0.25).
+        if session == "rollover":
             self._state.session_penalty = 0.5
-            self._state.hours_since_london_open = (utc_hour - ldn_open) if utc_hour >= ldn_open else (utc_hour + 24.0 - ldn_open)
-        else:
-            self._state.session = "asian"
+        elif session == "asian":
             self._state.session_penalty = 0.25 if self.config.get("realtime_suppress_asian", True) else 1.0
-            self._state.hours_since_london_open = (utc_hour - ldn_open) if utc_hour >= ldn_open else (utc_hour + 24.0 - ldn_open)
+        else:
+            self._state.session_penalty = 1.0
 
         # Recompute belief and gate
         self._recompute_belief()

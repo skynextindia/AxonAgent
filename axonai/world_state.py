@@ -17,6 +17,7 @@ from axonai.dataflows.mt5_data import (
     get_mt5_live_price,
     get_mt5_atr
 )
+from axonai.sessions import classify_session
 
 logger = logging.getLogger(__name__)
 
@@ -159,51 +160,12 @@ def build_world_state(symbol: str = "EURUSD=X") -> WorldState:
         else:
             volatility_regime = "medium"
 
-        # 3. Session and Timings (UTC-based)
+        # 3. Session and Timings (UTC-based) — single source (axonai/sessions.py).
         now_utc = datetime.now(timezone.utc)
-        utc_hour = now_utc.hour + now_utc.minute / 60.0
-        from zoneinfo import ZoneInfo
-        ldn_tz = ZoneInfo("Europe/London")
-        ny_tz = ZoneInfo("America/New_York")
-        
-        dt_ldn = now_utc.astimezone(ldn_tz)
-        ldn_open_local = datetime(dt_ldn.year, dt_ldn.month, dt_ldn.day, 8, 0, tzinfo=ldn_tz)
-        ldn_close_local = datetime(dt_ldn.year, dt_ldn.month, dt_ldn.day, 16, 0, tzinfo=ldn_tz)
-        ldn_open_utc = ldn_open_local.astimezone(timezone.utc)
-        ldn_close_utc = ldn_close_local.astimezone(timezone.utc)
-        
-        dt_ny = now_utc.astimezone(ny_tz)
-        ny_open_local = datetime(dt_ny.year, dt_ny.month, dt_ny.day, 8, 0, tzinfo=ny_tz)
-        ny_close_local = datetime(dt_ny.year, dt_ny.month, dt_ny.day, 14, 0, tzinfo=ny_tz)
-        ny_open_utc = ny_open_local.astimezone(timezone.utc)
-        ny_close_utc = ny_close_local.astimezone(timezone.utc)
-        
-        ldn_open = ldn_open_utc.hour + ldn_open_utc.minute / 60.0
-        ldn_close = ldn_close_utc.hour + ldn_close_utc.minute / 60.0
-        ny_open = ny_open_utc.hour + ny_open_utc.minute / 60.0
-        ny_close = ny_close_utc.hour + ny_close_utc.minute / 60.0
-        
-        # Session classification based on dynamic hours
-        if ny_open <= utc_hour < ldn_close:
-            session = "overlap"
-            session_penalty = 1.0
-            hours_since_london_open = utc_hour - ldn_open
-        elif ldn_open <= utc_hour < ny_open:
-            session = "london"
-            session_penalty = 1.0
-            hours_since_london_open = utc_hour - ldn_open
-        elif ldn_close <= utc_hour < ny_close:
-            session = "newyork"
-            session_penalty = 1.0
-            hours_since_london_open = utc_hour - ldn_open
-        elif ny_close <= utc_hour < (ny_close + 1.0):
-            session = "rollover"
-            session_penalty = 0.5
-            hours_since_london_open = (utc_hour - ldn_open) if utc_hour >= ldn_open else (utc_hour + 24.0 - ldn_open)
-        else:
-            session = "asian"
-            session_penalty = 0.25
-            hours_since_london_open = (utc_hour - ldn_open) if utc_hour >= ldn_open else (utc_hour + 24.0 - ldn_open)
+        session, hours_since_london_open = classify_session(now_utc)
+        # Batch scorer applies a fixed Asian weight (the live daemon config-gates
+        # this in LiveWorldState._update_session).
+        session_penalty = 0.5 if session == "rollover" else (0.25 if session == "asian" else 1.0)
 
         # Session Quality (volume vs 20-day H1 volume)
         latest_volume = float(df_h1["Volume"].iloc[-1])
