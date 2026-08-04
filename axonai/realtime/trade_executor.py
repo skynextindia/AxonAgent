@@ -6,6 +6,7 @@ Performs live order routing, position size calculation, and execution via mt5.or
 from __future__ import annotations
 
 import logging
+import math
 from typing import Dict, Any, Optional
 
 from axonai.realtime.risk_guard import RiskGuard
@@ -128,22 +129,32 @@ class MT5TradeExecutor:
             0.01 if ("JPY" in symbol.upper() or "XAU" in symbol.upper()) else 0.0001
         )
 
-        sl_mult = self.config.get("sl_atr_mult", 2.0)
-        tp_mult = self.config.get("tp_atr_mult", 2.0)
-        min_stop_pips = self.config.get("min_stop_pips", 16.0)
-        sl_distance = max(atr * sl_mult, min_stop_pips * pip)
-        tp_distance = max(atr * tp_mult, min_stop_pips * pip)
+        hard_pips = self.config.get("realtime_hard_stop_pips")
+        if self.config.get("hard_distance_mode") and hard_pips:
+            # Hard-distance mode: FIXED, session-independent SL and TP. SL = TP =
+            # hard_stop_pips (EURUSD 20, USDJPY 30). No ATR term, no min-stop floor,
+            # no vol-ratio floor, no enforce_max_stop cap — the distance is exactly
+            # the configured pips regardless of session or ATR. TP is symmetric 1:1.
+            hard_dist = float(hard_pips) * pip
+            sl_distance = hard_dist
+            tp_distance = hard_dist
+        else:
+            sl_mult = self.config.get("sl_atr_mult", 2.0)
+            tp_mult = self.config.get("tp_atr_mult", 2.0)
+            min_stop_pips = self.config.get("min_stop_pips", 16.0)
+            sl_distance = max(atr * sl_mult, min_stop_pips * pip)
+            tp_distance = max(atr * tp_mult, min_stop_pips * pip)
 
-        # Hard SL/TP pip ceiling (config-gated). When enforce_max_stop_pips is set,
-        # neither the stop nor the target may exceed the per-pair cap (USDJPY 10,
-        # EURUSD 16) — this OVERRIDES the 2×ATR term and the min_stop floor, so a
-        # high-ATR session can never widen the stop past the cap.
-        if self.config.get("enforce_max_stop_pips"):
-            cap_pips = self.config.get("max_stop_pips")
-            if cap_pips:
-                cap_dist = float(cap_pips) * pip
-                sl_distance = min(sl_distance, cap_dist)
-                tp_distance = min(tp_distance, cap_dist)
+            # Hard SL/TP pip ceiling (config-gated). When enforce_max_stop_pips is set,
+            # neither the stop nor the target may exceed the per-pair cap (USDJPY 10,
+            # EURUSD 16) — this OVERRIDES the 2×ATR term and the min_stop floor, so a
+            # high-ATR session can never widen the stop past the cap.
+            if self.config.get("enforce_max_stop_pips"):
+                cap_pips = self.config.get("max_stop_pips")
+                if cap_pips:
+                    cap_dist = float(cap_pips) * pip
+                    sl_distance = min(sl_distance, cap_dist)
+                    tp_distance = min(tp_distance, cap_dist)
 
         sl = entry - sl_distance if direction == "BUY" else entry + sl_distance
         tp = entry + tp_distance if direction == "BUY" else entry - tp_distance
@@ -168,20 +179,46 @@ class MT5TradeExecutor:
         min_lot = self.config.get("realtime_min_lot", 1.0)
         max_lot = self.config.get("realtime_max_lot", 0.10)
 
+        # Stop distance in pips + $/pip/lot are needed by every sizing path AND by
+        # the risk-cap block below, so compute them once up front. $/pip/lot is
+        # pinned by config for USD-quote pairs (~$10) or derived from the live price
+        # for USD-base pairs (e.g. USDJPY ≈ $6–7).
+        sl_pips = max(sl_distance / pip, 1.0)
+        pip_value_per_lot = self._pip_value_per_lot(symbol_info, price, pip)
+
         acc = mt5.account_info()
-        if acc:
-            account_equity = acc.equity if acc else 10000.0
+        account_equity = acc.equity if acc else 10000.0
+        fixed_lot = self.config.get("fixed_lot")
+        max_loss_usd = self.config.get("max_loss_per_trade_usd")
+        # Fixed-lot and max-loss-budget sizing are explicit, deterministic modes:
+        # they OVERRIDE risk-% sizing AND skip the correlation size_scale and the
+        # exec-node lot mirror (which exist only to shape the risk-based lot).
+        explicit_sizing = bool(fixed_lot or max_loss_usd)
+
+        if fixed_lot:
+            # Lead: exactly this lot on every entry, regardless of session/ATR.
+            lot = round(float(fixed_lot), 2)
+            logger.info(
+                "TradeExecutor: fixed-lot sizing %s → %.2f lot (SL %.1f pips, "
+                "est. stop-out risk $%.0f)",
+                symbol, lot, sl_pips, lot * sl_pips * pip_value_per_lot,
+            )
+        elif max_loss_usd:
+            # Node: derive the lot so a full stop-out loses at most max_loss_usd.
+            budget_lot = round(float(max_loss_usd) / (sl_pips * pip_value_per_lot), 2)
+            lot = max(min_lot, min(budget_lot, max_lot))
+            logger.info(
+                "TradeExecutor: max-loss sizing %s → $%.0f / (%.1f pips × $%.2f/pip) "
+                "= %.2f lot (clamped [%.2f, %.2f] → %.2f)",
+                symbol, float(max_loss_usd), sl_pips, pip_value_per_lot,
+                budget_lot, min_lot, max_lot, lot,
+            )
+        elif acc:
             risk_pct = self.config.get("realtime_risk_pct", 0.01)  # risk_pct from config default 0.01
             risk_amount = account_equity * risk_pct
-            # Actual stop distance in pips (SL was computed above as sl_distance).
-            sl_pips = max(sl_distance / pip, 1.0)
-            # $/pip/lot: pinned by config for USD-quote pairs (~$10), or derived
-            # from the live price for USD-base pairs (e.g. USDJPY ≈ $6–7).
-            pip_value_per_lot = self._pip_value_per_lot(symbol_info, price, pip)
             risk_lot = round(risk_amount / (sl_pips * pip_value_per_lot), 2)
             # Floor at min_lot (>= 1.0 lot for every pair), cap at max_lot.
-            lot_size = max(min_lot, min(risk_lot, max_lot))
-            lot = lot_size
+            lot = max(min_lot, min(risk_lot, max_lot))
 
             logger.info(
                 "TradeExecutor: Account equity: %.2f | Risk amount: %.2f | SL pips: %.2f | "
@@ -193,16 +230,18 @@ class MT5TradeExecutor:
             logger.info("TradeExecutor: No account info; using min-lot floor: %.2f", lot)
 
         # Correlation-driven position-size scaling (Phase 4); 1.0 = unchanged.
-        # Never let the scaled lot fall below the min_lot execution floor.
-        if size_scale != 1.0:
+        # Never let the scaled lot fall below the min_lot execution floor. Skipped
+        # under explicit (fixed/budget) sizing — that lot is intentionally exact.
+        if size_scale != 1.0 and not explicit_sizing:
             lot = max(min_lot, round(lot * size_scale, 2))
 
         # Exec-node lot mirroring (config-gated, node-only). Size to a fixed
         # multiple of the LEAD's executed lot, OVERRIDING the risk-based lot and
         # the correlation size_scale (the lead already applied both). Still clamped
-        # to [min_lot, max_lot]; the risk caps below can trim it further.
+        # to [min_lot, max_lot]; the risk caps below can trim it further. Skipped
+        # under explicit (fixed/budget) sizing.
         lot_mult = self.config.get("exec_node_lot_multiple")
-        if lot_mult and lead_lot:
+        if lot_mult and lead_lot and not explicit_sizing:
             mirrored = round(float(lead_lot) * float(lot_mult), 2)
             lot = max(min_lot, min(mirrored, max_lot))
             logger.info(
@@ -233,6 +272,39 @@ class MT5TradeExecutor:
                 except Exception:
                     pass
                 return None
+
+        # Broker volume-limit clamp (ALWAYS on — this is correctness, not a
+        # feature, so it runs in every mode). The final lot MUST obey the symbol's
+        # own min / max / step or the broker rejects the WHOLE order with retcode
+        # 10014 (invalid volume) and the trade is silently missed. This bit the
+        # exec node: FundingPips caps USDJPY at 10 lots, so a 12-lot mirror was
+        # rejected (ticket 0) while the lead held the position — a one-sided book.
+        # Clamping only ever SHRINKS an oversized lot to a legal, lower-risk size;
+        # it never raises risk and never blocks an already-legal order.
+        def _vol_attr(name):
+            # MT5 returns plain floats; accept only a real number and coerce.
+            # Anything else (missing, or a non-numeric such as a test MagicMock,
+            # whose __float__ would otherwise yield a misleading 1.0) → 0.0, which
+            # simply disables that particular bound.
+            v = getattr(symbol_info, name, None)
+            return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else 0.0
+        vmax = _vol_attr("volume_max")
+        vmin = _vol_attr("volume_min")
+        vstep = _vol_attr("volume_step")
+        pre_clamp = lot
+        if vmax and lot > vmax:
+            lot = vmax
+        if vstep:
+            # snap DOWN to a whole step multiple so rounding can't push back over vmax
+            lot = round(math.floor(lot / vstep + 1e-9) * vstep, 2)
+        if vmin and 0.0 < lot < vmin and vmin <= (vmax or vmin):
+            lot = vmin
+        if lot != pre_clamp:
+            logger.warning(
+                "TradeExecutor: %s lot %.2f adjusted to %.2f for broker limits "
+                "(min=%.2f max=%.2f step=%.2f)",
+                symbol, pre_clamp, lot, vmin, vmax, vstep,
+            )
 
         # Prepare request
         request = {

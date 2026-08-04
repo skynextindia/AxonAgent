@@ -242,6 +242,38 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # a much higher stop-out rate; and with a capped target the ATR-scaled trail
     # (breakeven at 0.60×ATR ≈ 49 USDJPY pips) can't arm before TP is hit.
     "enforce_max_stop_pips": False,
+    # ── Hard-distance risk mode (config-gated; default OFF) ────────────────────
+    # When True, the executor and the trailing manager ignore ATR entirely and use
+    # FIXED, session-independent pip distances per pair: SL = TP = trailing distance
+    # = ``realtime_hard_stop_pips`` (mapped from SYMBOL_CALIBRATION hard_stop_pips —
+    # EURUSD 20, USDJPY 30). This SUPERSEDES the 2×ATR term, the min_stop floor,
+    # the correlation vol-ratio floor, AND enforce_max_stop_pips. TP is symmetric
+    # 1:1 with SL, so a trade exits at ±hard_stop_pips (or at breakeven once the
+    # ATR breakeven trigger arms). Applies to BOTH the lead and the exec node.
+    "hard_distance_mode": False,
+    # Per-pair hard SL/TP distance in pips (filled by resolve_symbol_config from
+    # SYMBOL_CALIBRATION.hard_stop_pips). None → no pair-specific distance, so
+    # hard_distance_mode falls back to the ATR path even when the flag is on.
+    "realtime_hard_stop_pips": None,
+    # Per-pair hard TRAIL distance in pips (from SYMBOL_CALIBRATION.hard_trail_pips).
+    # When set TIGHTER than hard_stop_pips, the trailing stop locks profit BEFORE
+    # the equal-distance TP is reached (with a 1:1 TP=SL, an equal trail is dormant
+    # because TP always fires first). None → the trail falls back to the stop
+    # distance (the old 1:1-dormant behaviour). Only the trail uses this; SL and TP
+    # stay at hard_stop_pips, so per-trade risk is unchanged.
+    "realtime_hard_trail_pips": None,
+    # Fixed-lot sizing (config-gated; default None → OFF). When set (e.g. the lead
+    # runs 1.0), EVERY entry uses EXACTLY this lot, bypassing risk-% sizing, the
+    # correlation size_scale, and exec-node lot mirroring. Used on the Eightcap lead
+    # so its size is deterministic regardless of session/ATR.
+    "fixed_lot": None,
+    # Max-loss budget sizing (config-gated; default None → OFF). When set (e.g. the
+    # node runs 1800), each entry's lot is derived so a full stop-out loses at most
+    # this many USD: lot = max_loss_usd / (sl_pips × $/pip/lot), clamped to
+    # [realtime_min_lot, realtime_max_lot]. Bypasses risk-% sizing / size_scale /
+    # lot-mirroring; the combined risk cap can still trim it further. Used on the
+    # FundingPips node so per-trade loss is a hard dollar ceiling, not an equity %.
+    "max_loss_per_trade_usd": None,
     # Exec-node lot mirroring (config-gated, node-only; default OFF). When set, the
     # node sizes each routed entry to this multiple of the LEAD's executed lot
     # (e.g. 10.0 → node trades 10× the Eightcap lot), overriding the node's own
@@ -372,13 +404,15 @@ SYMBOL_CALIBRATION = {
         "pip_value_per_lot": 10.0,   # USD-quote pair: ~$10 / pip / 1.0 lot
         "risk_pct": 0.01,
         "max_lot": 2.0,              # hard safety ceiling; 1% risk sizes to ~0.6 lot
+        "hard_stop_pips": 20.0,      # hard SL = TP distance when hard_distance_mode=True
+        # No hard_trail_pips → the trail uses the adaptive trail_dist_atr_mult × ATR.
         "sl_atr_mult": 2.0,
         "tp_atr_mult": 2.0,
         "min_stop_pips": 16.0,
         "max_stop_pips": 16.0,       # hard SL/TP ceiling when enforce_max_stop_pips=True
-        "be_atr_mult": 0.60,
-        "trail_trigger_atr_mult": 0.80,
-        "trail_dist_atr_mult": 0.35,
+        "be_atr_mult": 0.40,            # breakeven arms at ~0.40xATR
+        "trail_trigger_atr_mult": 0.50, # trail arms at ~0.50xATR (below the typical peak)
+        "trail_dist_atr_mult": 0.50,    # tight leash ~0.50xATR: lock NEAR the peak (was 1.0xATR = gave it all back)
     },
     "USDJPY": {
         "magic_number": 123458,      # distinct from EURUSD
@@ -388,13 +422,15 @@ SYMBOL_CALIBRATION = {
         "pip_value_per_lot": None,
         "risk_pct": 0.01,
         "max_lot": 2.0,              # hard safety ceiling; 1% risk sizes to ~1.0 lot
+        "hard_stop_pips": 30.0,      # hard SL = TP distance when hard_distance_mode=True
+        # No hard_trail_pips → the trail uses the adaptive trail_dist_atr_mult × ATR.
         "sl_atr_mult": 2.0,
         "tp_atr_mult": 2.0,
         "min_stop_pips": 16.0,
         "max_stop_pips": 10.0,       # hard SL/TP ceiling when enforce_max_stop_pips=True
-        "be_atr_mult": 0.60,
-        "trail_trigger_atr_mult": 0.80,
-        "trail_dist_atr_mult": 0.35,
+        "be_atr_mult": 0.40,            # breakeven arms at ~0.40xATR
+        "trail_trigger_atr_mult": 0.50, # trail arms at ~0.50xATR (below the typical peak)
+        "trail_dist_atr_mult": 0.50,    # tight leash ~0.50xATR: lock NEAR the peak (was 1.0xATR = gave it all back)
     },
 }
 
@@ -441,6 +477,15 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
         "magic_number", base.get("realtime_magic_number", 123456)
     )
     cfg["realtime_max_lot"] = spec.get("max_lot", base.get("realtime_max_lot", 0.10))
+    # Hard SL/TP distance in pips (used only when hard_distance_mode=True).
+    cfg["realtime_hard_stop_pips"] = spec.get(
+        "hard_stop_pips", base.get("realtime_hard_stop_pips")
+    )
+    # Hard TRAIL distance in pips (tighter than the stop so the trail locks profit
+    # before the TP). None → trail falls back to the stop distance.
+    cfg["realtime_hard_trail_pips"] = spec.get(
+        "hard_trail_pips", base.get("realtime_hard_trail_pips")
+    )
     cfg["realtime_risk_pct"] = spec.get("risk_pct", base.get("trade_risk_pct", 0.01))
     _rpo = base.get("realtime_risk_pct_override")
     if _rpo is not None:

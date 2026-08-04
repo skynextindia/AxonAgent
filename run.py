@@ -143,6 +143,17 @@ def main():
     parser.add_argument("--enforce-max-stop", action="store_true",
                         help="Hard-cap SL/TP at the per-pair max_stop_pips (USDJPY 10, EURUSD 16) so "
                              "the stop never widens past the cap regardless of ATR.")
+    parser.add_argument("--hard-distance", action="store_true",
+                        help="Hard-distance mode: SL = TP = trailing distance = the per-pair "
+                             "hard_stop_pips (EURUSD 20, USDJPY 30), session-independent, ignoring "
+                             "ATR / min-stop / vol floors / enforce-max-stop. Applies to lead AND node.")
+    parser.add_argument("--fixed-lot", type=float, default=None,
+                        help="Size EVERY entry to exactly this lot, bypassing risk-% sizing, the "
+                             "correlation size-scale, and lot mirroring (e.g. lead runs 1.0).")
+    parser.add_argument("--max-loss-usd", type=float, default=None,
+                        help="Derive each entry's lot so a full stop-out loses at most this many USD "
+                             "(e.g. node runs 1800). Overrides risk-% sizing; the combined risk cap "
+                             "can still trim it further.")
     parser.add_argument("--node-lot-multiple", type=float, default=None,
                         help="Exec-node only: size each routed entry to this multiple of the LEAD's "
                              "executed lot (e.g. 10 → node trades 10× the Eightcap lot).")
@@ -325,6 +336,12 @@ def main():
             config["risk_cap_combined_pct"] = args.risk_cap_combined
         if args.enforce_max_stop:
             config["enforce_max_stop_pips"] = True
+        if args.hard_distance:
+            config["hard_distance_mode"] = True
+        if args.fixed_lot is not None:
+            config["fixed_lot"] = args.fixed_lot
+        if args.max_loss_usd is not None:
+            config["max_loss_per_trade_usd"] = args.max_loss_usd
         if args.node_lot_multiple is not None:
             config["exec_node_lot_multiple"] = args.node_lot_multiple
         if args.risk_pct is not None:

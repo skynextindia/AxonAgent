@@ -1751,6 +1751,15 @@ class AxonDaemon:
         arm_mult = float(self.config.get("trail_trigger_atr_mult", 0.80))
         trail_mult = self._effective_trail_mult(self.config)
 
+        # Trail distance. A FIXED pip leash is used ONLY when hard_distance_mode is on
+        # AND a dedicated realtime_hard_trail_pips is configured. Otherwise — including
+        # hard 20/30 SL/TP with no explicit fixed trail — the trail is the ADAPTIVE
+        # trail_mult × ATR leash: it breathes with volatility (the validated exit),
+        # laddering the stop one ATR behind the best price up toward the fixed TP.
+        hard_trail_pips = self.config.get("realtime_hard_trail_pips")
+        use_fixed_trail = bool(self.config.get("hard_distance_mode") and hard_trail_pips)
+        hard_trail_dist = (float(hard_trail_pips) * pip) if use_fixed_trail else None
+
         for pos in positions:
             ticket = pos.ticket
             # If we don't have the initial SL recorded, initialize it from pos.sl
@@ -1807,7 +1816,7 @@ class AxonDaemon:
                         target_sl = breakeven_sl
                         
                 if peak_profit >= trail_trigger:
-                    trail_distance = trail_mult * atr
+                    trail_distance = hard_trail_dist if use_fixed_trail else trail_mult * atr
                     trail_sl = round(peak_price - trail_distance, digits)
                     if target_sl < trail_sl:
                         target_sl = trail_sl
@@ -1837,7 +1846,7 @@ class AxonDaemon:
                         target_sl = breakeven_sl
                         
                 if peak_profit >= trail_trigger:
-                    trail_distance = trail_mult * atr
+                    trail_distance = hard_trail_dist if use_fixed_trail else trail_mult * atr
                     trail_sl = round(peak_price + trail_distance, digits)
                     if target_sl > trail_sl or target_sl == 0.0:
                         target_sl = trail_sl
