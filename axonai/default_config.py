@@ -279,7 +279,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Confirming a small rollover selects the immediate-turn setups. pips scale
     # with pair_move_scale. False = legacy (fire on approach without rollover).
     "entry_require_reversal_confirm": True,
-    "entry_confirm_reversal_pips": 0.8,
+    "entry_confirm_reversal_pips": 0.4,  # 2026-08-04: 0.8 too strict -- EUR/AUD never reached TRIGGERED (died in RETEST_WAIT); loosened so the gate's real value can be measured live
     # Optimistic velocity-decay trigger, disabled 2026-07-23. It transitioned
     # ARMING -> TRIGGERED without reading `dist` at all (no breakaway, no
     # location, no retest), and was responsible for the bulk of the 98-99% of
@@ -337,7 +337,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # RANGE_CHOP fades were the best (+0.16p/53%), so only the trend regime is
     # vetoed, not chop. Regime taxonomy is the live daemon's, not the old-engine
     # TREND_EXPANSION study above.
-    "entry_avoid_regimes": ["TREND_CONTINUATION"],
+    # 2026-08-04: TREND_CONTINUATION veto turned back OFF. Live funnel showed it
+    # killed 100% of GBP triggers (all 43 over 6h) -- GBP trends, so every setup
+    # was in that regime -- contributing to 0 trades. The room>=1p veto and the
+    # reversal-confirmation gate are the surgical filters; this broad regime veto
+    # over-restricted. Re-enable only if a with-flow trade rate is confirmed live.
+    "entry_avoid_regimes": [],
 
     # ── HTF Coherence Dampening ────────────────────────────────────────────
     "htf_opposing_sensitivity_multiplier": 1.5,       # more aggressive exits when HTF opposes
