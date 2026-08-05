@@ -279,7 +279,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Confirming a small rollover selects the immediate-turn setups. pips scale
     # with pair_move_scale. False = legacy (fire on approach without rollover).
     "entry_require_reversal_confirm": True,
-    "entry_confirm_reversal_pips": 0.4,  # 2026-08-04: 0.8 too strict -- EUR/AUD never reached TRIGGERED (died in RETEST_WAIT); loosened so the gate's real value can be measured live
+    "entry_confirm_reversal_pips": 0.2,  # 2026-08-05: 0.4 still too strict -- EUR/AUD still 0 TRIGGERED post-restart (stuck in RETEST_WAIT); loosened further to unlock trigger flow
     # Optimistic velocity-decay trigger, disabled 2026-07-23. It transitioned
     # ARMING -> TRIGGERED without reading `dist` at all (no breakaway, no
     # location, no retest), and was responsible for the bulk of the 98-99% of
@@ -321,7 +321,7 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # Enabled 2026-07-30: FX realized-trade cohorts (n=121, gold excluded) show
     # room>=1p netted +0.29p/46% win vs room<1p -0.72p/32% win -- the cleanest
     # single W/L split in the book. 1.0 vetoes the losing bucket, keeps the winner.
-    "entry_min_room_pips": 1.0,
+    "entry_min_room_pips": 0.5,  # 2026-08-05: 1.0 killed 207/207 GBP triggers (targets sit 0.1-0.9p away); lowered to 0.5 to admit mid-room setups while still vetoing the near-zero-room worst
 
     # Regime-avoidance veto for reversal entries. Signal-level feature importance
     # over 809k old-engine snapshot ticks: fading in TREND_EXPANSION netted -0.62p
