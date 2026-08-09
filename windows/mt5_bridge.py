@@ -586,6 +586,12 @@ async def data_loop():
     last_account = 0.0
     last_levels = 0.0
     last_candles = 0.0
+    # Auto-heal state: the old bridge ran mt5_init() once and, on a dropped link,
+    # silently kept serving stale latest_state until a manual restart. Track a
+    # stale-tick streak and re-initialize MT5 with backoff when the link is down.
+    consecutive_stale = 0
+    last_reconnect = 0.0
+    RECONNECT_BACKOFF = 15.0
 
     # Initial data
     if ensure_symbol(symbol):
@@ -598,12 +604,36 @@ async def data_loop():
     while True:
         now = time.time()
 
+        # Auto-heal a dropped terminal link (re-init with backoff) instead of
+        # silently broadcasting nothing / re-serving stale state forever.
+        link_down = False
+        try:
+            if mt5.terminal_info() is None:
+                link_down = True
+        except Exception:
+            link_down = True
+        if (link_down or consecutive_stale >= 10) and now - last_reconnect >= RECONNECT_BACKOFF:
+            print(f"Feed link down (stale_streak={consecutive_stale}); re-initializing MT5...")
+            try:
+                mt5.shutdown()
+            except Exception:
+                pass
+            if mt5_init():
+                print("Feed re-initialized successfully.")
+                consecutive_stale = 0
+            last_reconnect = now
+
         # Tick (high frequency)
         if ensure_symbol(symbol):
             tick = get_tick_data(symbol)
             if tick:
                 latest_state["tick"] = tick
+                consecutive_stale = 0
                 await broadcast(tick)
+            else:
+                consecutive_stale += 1
+        else:
+            consecutive_stale += 1
 
         # Slow data: regime + multi-TF trends
         if now - last_slow >= SLOW_INTERVAL:
