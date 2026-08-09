@@ -574,39 +574,66 @@ class DashboardServer:
             out = {"status": "success", "patterns": []}
             if not symbol:
                 return out
-            paths = _glob.glob(os.path.join("reports", f"engine_snapshots_{symbol}*.csv"))
-            if not paths:
+            # Only the LIVE file (exclude *_old / *_pre_location backups the old
+            # glob pulled in). Read just the tail covering `days` days by scanning
+            # backwards from EOF -- the per-request full-file read (up to 400k rows
+            # over 100MB+ files) was timing the endpoint out, so the dashboard
+            # fetch hung and the pattern overlay silently rendered nothing.
+            fp = os.path.join("reports", f"engine_snapshots_{symbol}.csv")
+            if not os.path.exists(fp):
                 return out
-            paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
             pip = 0.01 if ("JPY" in symbol.upper() or "XAU" in symbol.upper()) else 0.0001
-            bars = {}
-            seen = 0
-            for fp in paths:
-                with open(fp, "r", encoding="utf-8", errors="ignore", newline="") as f:
-                    for r in _csv.DictReader(f):
-                        ts = (r.get("timestamp") or "")[:19]
-                        if len(ts) < 19:
+            with open(fp, "r", encoding="utf-8", errors="ignore", newline="") as f:
+                header = f.readline().rstrip("\r\n").split(",")
+            try:
+                ti = header.index("timestamp")
+                pxi = header.index("price")
+            except ValueError:
+                return out
+            rows = []          # (ep, price) newest-first, bounded to `days`
+            cutoff = None
+            with open(fp, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                pos = f.tell()
+                carry = b""
+                stop = False
+                while pos > 0 and not stop:
+                    rd = min(1 << 20, pos)
+                    pos -= rd
+                    f.seek(pos)
+                    parts = (f.read(rd) + carry).split(b"\n")
+                    carry = parts[0]            # partial line; re-joined next loop
+                    for ln in reversed(parts[1:]):
+                        if not ln.strip():
                             continue
                         try:
+                            row = next(_csv.reader([ln.decode("utf-8", "ignore")]))
+                            ts = row[ti][:19]
                             ep = _cal.timegm(_time.strptime(ts, "%Y-%m-%d %H:%M:%S"))
-                            p = float(r.get("price") or 0)
-                        except (ValueError, TypeError):
+                            p = float(row[pxi] or 0)
+                        except (ValueError, IndexError, StopIteration):
                             continue
                         if p <= 0:
                             continue
-                        bk = (ep // 900) * 900
-                        b = bars.get(bk)
-                        if b is None:
-                            bars[bk] = [p, p, p, p, bk]
-                        else:
-                            if p > b[1]:
-                                b[1] = p
-                            if p < b[2]:
-                                b[2] = p
-                            b[3] = p
-                        seen += 1
-                if seen > 400000:
-                    break
+                        if cutoff is None:
+                            cutoff = ep - int(days) * 86400
+                        if ep < cutoff:
+                            stop = True
+                            break
+                        rows.append((ep, p))
+            rows.reverse()     # chronological
+            bars = {}
+            for ep, p in rows:
+                bk = (ep // 900) * 900
+                b = bars.get(bk)
+                if b is None:
+                    bars[bk] = [p, p, p, p, bk]
+                else:
+                    if p > b[1]:
+                        b[1] = p
+                    if p < b[2]:
+                        b[2] = p
+                    b[3] = p
             ks = sorted(bars.keys())[-(int(days) * 96):]
             S = [bars[k] for k in ks]
             if len(S) < 20:
@@ -769,30 +796,54 @@ class DashboardServer:
             out = {"status": "success", "patterns": []}
             if not symbol:
                 return out
-            paths = _glob.glob(os.path.join("reports", f"engine_snapshots_{symbol}*.csv"))
-            if not paths:
+            # Live file only, tail-read bounded to `days` (see get_patterns note --
+            # the old full-file glob read timed the endpoint out on 100MB+ files).
+            fp = os.path.join("reports", f"engine_snapshots_{symbol}.csv")
+            if not os.path.exists(fp):
                 return out
-            paths.sort(key=lambda p: os.path.getmtime(p), reverse=True)
             pip = 0.01 if ("JPY" in symbol.upper() or "XAU" in symbol.upper()) else 0.0001
-            T = []; P = []; D = []; R = []; seen = 0
-            for fp in paths:
-                with open(fp, "r", encoding="utf-8", errors="ignore", newline="") as f:
-                    for r in _csv.DictReader(f):
-                        ts = (r.get("timestamp") or "")[:19]
-                        if len(ts) < 19:
+            with open(fp, "r", encoding="utf-8", errors="ignore", newline="") as f:
+                header = f.readline().rstrip("\r\n").split(",")
+            try:
+                ti = header.index("timestamp")
+                pxi = header.index("price")
+                di = header.index("disp_ratio")
+                ri = header.index("reversal_pressure")
+            except ValueError:
+                return out
+            T = []; P = []; D = []; R = []
+            cutoff = None
+            with open(fp, "rb") as f:
+                f.seek(0, os.SEEK_END)
+                pos = f.tell()
+                carry = b""
+                stop = False
+                while pos > 0 and not stop:
+                    rd = min(1 << 20, pos)
+                    pos -= rd
+                    f.seek(pos)
+                    parts = (f.read(rd) + carry).split(b"\n")
+                    carry = parts[0]
+                    for ln in reversed(parts[1:]):
+                        if not ln.strip():
                             continue
                         try:
-                            ep = _cal.timegm(_time.strptime(ts, "%Y-%m-%d %H:%M:%S"))
-                            p = float(r.get("price") or 0)
-                            d = float(r.get("disp_ratio") or 0)
-                            rv = float(r.get("reversal_pressure") or 0)
-                        except (ValueError, TypeError):
+                            row = next(_csv.reader([ln.decode("utf-8", "ignore")]))
+                            ep = _cal.timegm(_time.strptime(row[ti][:19], "%Y-%m-%d %H:%M:%S"))
+                            p = float(row[pxi] or 0)
+                            d = float(row[di] or 0)
+                            rv = float(row[ri] or 0)
+                        except (ValueError, IndexError, StopIteration):
                             continue
                         if p <= 0:
                             continue
-                        T.append(ep); P.append(p); D.append(d); R.append(rv); seen += 1
-                if seen > 250000:
-                    break
+                        if cutoff is None:
+                            cutoff = ep - int(days) * 86400
+                        if ep < cutoff:
+                            stop = True
+                            break
+                        T.append(ep); P.append(p); D.append(d); R.append(rv)
+            T.reverse(); P.reverse(); D.reverse(); R.reverse()
             if len(T) < 200:
                 return out
             z = sorted(range(len(T)), key=lambda k: T[k])
