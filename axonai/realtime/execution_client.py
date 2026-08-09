@@ -37,14 +37,21 @@ def run_coroutine(coro):
         return loop.run_until_complete(coro)
 
 
-async def _ws_send_cmd(url, request_dict):
+async def _ws_send_cmd(url, request_dict, timeout=5.0):
     import websockets
     async def _send_and_recv():
         async with websockets.connect(url, ping_interval=None) as ws:
             await ws.send(json.dumps(request_dict))
             response = await ws.recv()
             return json.loads(response)
-    return await asyncio.wait_for(_send_and_recv(), timeout=0.25)
+    return await asyncio.wait_for(_send_and_recv(), timeout=timeout)
+
+
+# Actions that place/modify a broker order. A real TRADE_ACTION_DEAL routinely
+# takes 300ms-1s (slippage/requote/IOC retry), so these MUST get a generous
+# timeout; the old hardcoded 0.25s wrapped the whole connect+send+recv and
+# reported filled orders as failures, leaving orphaned/duplicate live positions.
+_ORDER_ACTIONS = {"open", "close", "modify", "order_cancel"}
 
 
 def send_execution_command(config: dict, request_dict: dict) -> dict:
@@ -74,9 +81,15 @@ def send_execution_command(config: dict, request_dict: dict) -> dict:
                 
     port = config.get("realtime_execution_bridge_port", 8766)
     url = f"ws://{host}:{port}"
-    
+
+    action = str(request_dict.get("action", "")).lower()
+    if action in _ORDER_ACTIONS:
+        timeout = float(config.get("realtime_execution_order_timeout", 10.0))
+    else:
+        timeout = float(config.get("realtime_execution_query_timeout", 5.0))
+
     try:
-        return run_coroutine(_ws_send_cmd(url, request_dict))
+        return run_coroutine(_ws_send_cmd(url, request_dict, timeout))
     except Exception as e:
         # If connection refused, attempt to auto-start the bridge in the background
         err_msg = str(e).lower()

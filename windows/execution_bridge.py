@@ -84,23 +84,27 @@ def mt5_init():
 
 
 def safe_order_send(request):
-    """Send order with auto-reinitialize retry on IPC send failed errors."""
+    """Send order with auto-reinitialize retry ONLY on IPC *send* failure.
+
+    -10001 (RES_E_INTERNAL_FAIL_SEND): the request never left the client, so the
+    order did NOT reach the trade server -- resending cannot duplicate, retry is safe.
+    -10002 (RES_E_INTERNAL_FAIL_RECEIVE): the request may have executed on the
+    server but the reply was lost -- a blind resend here opens a DUPLICATE live
+    position. So we do NOT auto-retry -10002 (or any other error); return None and
+    let the caller reconcile against positions/deals before deciding.
+    """
     res = mt5.order_send(request)
     if res is None:
         err = mt5.last_error()
-        is_ipc_error = False
-        if isinstance(err, tuple) and len(err) > 0:
-            if err[0] == -10001 or "IPC" in str(err):
-                is_ipc_error = True
-        elif err == -10001:
-            is_ipc_error = True
-            
-        if is_ipc_error:
-            print("IPC send failed. Attempting to re-initialize MT5 connection...")
+        code = err[0] if isinstance(err, tuple) and len(err) > 0 else err
+        if code == -10001:
+            print("IPC send failed (-10001, not transmitted). Re-initializing MT5 and retrying...")
             mt5.shutdown()
             if mt5_init():
                 print("Re-initialization successful. Retrying order_send...")
                 res = mt5.order_send(request)
+        elif code == -10002:
+            print("IPC receive failed (-10002): order MAY have executed; NOT auto-retrying to avoid a duplicate position. Caller must reconcile.")
     return res
 
 
@@ -383,14 +387,21 @@ async def handle_client(websocket):
                         positions = await _mt5_call(mt5.positions_get, symbol=symbol)
                     else:
                         positions = await _mt5_call(mt5.positions_get)
-                        
-                    pos_list = []
-                    if positions:
+
+                    # MT5 positions_get returns None on a QUERY ERROR (distinct from
+                    # an empty tuple = genuinely flat). Conflating None with [] made a
+                    # disconnected terminal look like "no open positions", which then
+                    # fabricated closes / orphaned live positions / bypassed exposure
+                    # caps downstream. Signal failure like account_info does so callers
+                    # can tell a query error from a flat account.
+                    if positions is None:
+                        response = {"success": False, "reason": "positions_query_failed"}
+                    else:
+                        pos_list = []
                         for p in positions:
                             if magic is None or p.magic == int(magic):
                                 pos_list.append(serialize_position(p))
-                                
-                    response = {"success": True, "positions": pos_list}
+                        response = {"success": True, "positions": pos_list}
                     await websocket.send(json.dumps(response))
 
                 elif req_type == "history_deals_get":

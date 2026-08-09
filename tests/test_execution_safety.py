@@ -62,6 +62,12 @@ class TestExecutionSafety(unittest.TestCase):
             "realtime_deviation": 10,
         }
         self.executor = MT5TradeExecutor(self.config)
+        # Flat-account precondition: the portfolio gate now fails CLOSED when the
+        # position query can't be verified, so give unrelated tests a clean empty
+        # account. Per-test decorator patches of positions_get still override this.
+        _pg = patch("MetaTrader5.positions_get", return_value=[])
+        _pg.start()
+        self.addCleanup(_pg.stop)
 
     @patch("MetaTrader5.terminal_info")
     @patch("MetaTrader5.symbol_info")

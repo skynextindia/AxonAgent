@@ -21,6 +21,13 @@ class TestMT5TradeExecutor(unittest.TestCase):
             "allow_direct_feed_execution": True,
         }
         self.executor = MT5TradeExecutor(self.config)
+        # Flat-account precondition: the portfolio gate now fails CLOSED when the
+        # position query can't be verified. Give these order-composition tests a
+        # clean empty account so the gate passes; per-test decorator patches of
+        # positions_get still override this.
+        _pg = patch("MetaTrader5.positions_get", return_value=[])
+        _pg.start()
+        self.addCleanup(_pg.stop)
 
     @patch("MetaTrader5.terminal_info")
     @patch("MetaTrader5.symbol_info")

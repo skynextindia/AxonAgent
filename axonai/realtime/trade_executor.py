@@ -126,26 +126,32 @@ class MT5TradeExecutor:
             logger.info("TradeExecutor: Signal is %s. No order action taken (HOLD).", signal)
             return None
 
-    def _get_all_open_positions(self) -> list:
-        """All open positions on the account (across symbols and magics), used
-        for the portfolio-wide concurrent cap. Fails open (returns []) on a
-        transient query error so a bridge hiccup doesn't hard-block trading."""
+    def _get_all_open_positions(self):
+        """All open positions on the account (across symbols and magics), used for
+        the portfolio-wide exposure/concurrent cap. Returns a list on success, or
+        None if the query FAILED. None is distinct from [] (genuinely flat) so the
+        caller can fail CLOSED on an error instead of silently bypassing the caps."""
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
         try:
             if is_bridge:
                 from axonai.realtime.execution_client import send_execution_command
                 res = send_execution_command(self.config, {"action": "positions_get"})
-                return res.get("positions", []) if res.get("success", False) else []
+                return res.get("positions", []) if res.get("success", False) else None
             mt5_inst = self._get_mt5()
-            pos = mt5_inst.positions_get() if mt5_inst else None
-            return list(pos) if pos else []
+            if mt5_inst is None:
+                return None
+            pos = mt5_inst.positions_get()
+            return None if pos is None else list(pos)  # None=error, ()=flat
         except Exception as e:
-            logger.error("PortfolioGuard: position query failed (%s) — allowing trade", e)
-            return []
+            logger.error("PortfolioGuard: position query failed (%s) — blocking trade (fail-closed)", e)
+            return None
 
     def _portfolio_gate(self, signal: str, symbol: Optional[str] = None) -> tuple[bool, str]:
         """Run the account-wide PortfolioGuard for an order-placing signal."""
         positions = self._get_all_open_positions()
+        if positions is None:
+            # Can't verify account-wide exposure -> do not risk a cap bypass.
+            return False, "positions_unverified (portfolio query failed)"
         try:
             realized = float(self.risk_guard.daily_pnl.get("realized_pnl", 0.0))
         except Exception:
@@ -231,7 +237,13 @@ class MT5TradeExecutor:
         # Position conflict guard: enforce cap of maximum 1 open position per strategy (by magic number)
         if is_bridge:
             res = send_execution_command(self.config, {"action": "positions_get", "symbol": symbol, "magic": self.magic})
-            existing_count = len(res.get("positions", [])) if res.get("success", False) else 0
+            # Fail CLOSED: a failed/timed-out query must NOT be read as "0 open
+            # positions" (that would let a duplicate full-risk order through for a
+            # symbol that already has one open). Skip the order until we can verify.
+            if not res.get("success", False):
+                logger.warning("TradeExecutor: position query failed for %s magic %d — skipping order (fail-closed).", symbol, self.magic)
+                return None
+            existing_count = len(res.get("positions", []))
             if existing_count >= 1:
                 logger.info("TradeExecutor: Position already open for magic %d on execution bridge. Skipping new order.", self.magic)
                 return None
@@ -274,7 +286,9 @@ class MT5TradeExecutor:
         # 2. Calculate ATR-based Stop Loss & PLACEHOLDER Take Profit
         # SL remains fixed (hard backstop). TP is a wide placeholder — ExitEngine drives actual exits.
         entry = price
-        direction = "BUY" if order_type == ORDER_TYPE_BUY else "SELL"
+        # Classify by membership in the BUY set: ORDER_TYPE_BUY_LIMIT must count as
+        # BUY, else auto-computed SL/TP invert for a buy-limit (SL above / TP below).
+        direction = "BUY" if order_type in (ORDER_TYPE_BUY, ORDER_TYPE_BUY_LIMIT) else "SELL"
         
         # Determine pip size and digits dynamically
         # Symbol-based pip/digits defaults (always valid numbers)
@@ -478,14 +492,14 @@ class MT5TradeExecutor:
             if result.get("success"):
                 logger.info("TradeExecutor: Execution bridge order executed successfully! Ticket: %d", result.get("order"))
                 send_alert(
-                    f"Trade Executed (Bridge): {symbol} | Type: {'BUY' if order_type == ORDER_TYPE_BUY else 'SELL'} "
+                    f"Trade Executed (Bridge): {symbol} | Type: {'BUY' if order_type in (ORDER_TYPE_BUY, ORDER_TYPE_BUY_LIMIT) else 'SELL'} "
                     f"| Volume: {lot:.2f} | Price: {price:.5f} | SL: {sl:.5f} | TP: {tp:.5f} | Ticket: {result.get('order')}",
                     self.config
                 )
                 return result
             else:
                 logger.error("TradeExecutor: Execution bridge order failed. Reason: %s", result.get("reason"))
-                send_alert(f"Trade FAILED (Bridge): {symbol} | Type: {'BUY' if order_type == ORDER_TYPE_BUY else 'SELL'} | Reason: {result.get('reason')}", self.config)
+                send_alert(f"Trade FAILED (Bridge): {symbol} | Type: {'BUY' if order_type in (ORDER_TYPE_BUY, ORDER_TYPE_BUY_LIMIT) else 'SELL'} | Reason: {result.get('reason')}", self.config)
                 return None
         else:
             # Prepare request for direct MT5
@@ -521,7 +535,7 @@ class MT5TradeExecutor:
                              result.retcode, result.comment)
                 
                 send_alert(
-                    f"Trade FAILED: {symbol} | Type: {'BUY' if order_type == ORDER_TYPE_BUY else 'SELL'} "
+                    f"Trade FAILED: {symbol} | Type: {'BUY' if order_type in (ORDER_TYPE_BUY, ORDER_TYPE_BUY_LIMIT) else 'SELL'} "
                     f"| Retcode: {result.retcode} | Comment: {result.comment}",
                     self.config
                 )
@@ -534,7 +548,7 @@ class MT5TradeExecutor:
                     if result and result.retcode in (TRADE_RETCODE_DONE, TRADE_RETCODE_DONE_PARTIAL):
                         logger.info("TradeExecutor: Order successful on retry! Ticket: %d", result.order)
                         send_alert(
-                            f"Trade Executed on Retry: {symbol} | Type: {'BUY' if order_type == ORDER_TYPE_BUY else 'SELL'} "
+                            f"Trade Executed on Retry: {symbol} | Type: {'BUY' if order_type in (ORDER_TYPE_BUY, ORDER_TYPE_BUY_LIMIT) else 'SELL'} "
                             f"| Volume: {lot:.2f} | Price: {price:.5f} | SL: {sl:.5f} | TP: {tp:.5f} | Ticket: {result.order}",
                             self.config
                         )
@@ -543,7 +557,7 @@ class MT5TradeExecutor:
 
             logger.info("TradeExecutor: Order executed successfully! Ticket: %d", result.order)
             send_alert(
-                f"Trade Executed: {symbol} | Type: {'BUY' if order_type == ORDER_TYPE_BUY else 'SELL'} "
+                f"Trade Executed: {symbol} | Type: {'BUY' if order_type in (ORDER_TYPE_BUY, ORDER_TYPE_BUY_LIMIT) else 'SELL'} "
                 f"| Volume: {lot:.2f} | Price: {price:.5f} | SL: {sl:.5f} | TP: {tp:.5f} | Ticket: {result.order}",
                 self.config
             )
@@ -554,7 +568,7 @@ class MT5TradeExecutor:
         """Simulate an instant fill at the requested price (paper-trade mode)."""
         self._paper_ticket_seq += 1
         ticket = 900_000_000 + self._paper_ticket_seq
-        side = "BUY" if order_type == ORDER_TYPE_BUY else "SELL"
+        side = "BUY" if order_type in (ORDER_TYPE_BUY, ORDER_TYPE_BUY_LIMIT) else "SELL"
         logger.info(
             "TradeExecutor[PAPER]: Simulated %s fill | %s | vol=%.2f price=%.5f SL=%.5f TP=%.5f ticket=%d",
             side, symbol, lot, price, sl, tp, ticket,
