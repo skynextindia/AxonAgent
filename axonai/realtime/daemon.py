@@ -2168,8 +2168,18 @@ class AxonDaemon:
                             for p in positions:
                                 # Create market order to close
                                 tick = mt5.symbol_info_tick(self.mt5_symbol)
-                                price = tick.ask if p["type"] == "SELL" else tick.bid
-                                order_type = 1 if p["type"] == "SELL" else 0  # BUY=1, SELL=0
+                                if tick is None:
+                                    logger.warning("CLOSE_NOW: no tick for %s — skipping close of %s", self.mt5_symbol, p.get("ticket"))
+                                    continue
+                                # get_positions_via_bridge reports p["type"] as an INT
+                                # (0=BUY, 1=SELL), so the old `== "SELL"` string test was
+                                # always False -> every close was sent as BUY@bid, which
+                                # cannot close a BUY position (it never closed). Normalize
+                                # both int and str, then send the OPPOSITE side to close:
+                                # close a SELL with BUY(0)@ask, a BUY with SELL(1)@bid.
+                                is_sell = p["type"] in (1, "SELL", getattr(mt5, "POSITION_TYPE_SELL", 1))
+                                price = tick.ask if is_sell else tick.bid
+                                order_type = 0 if is_sell else 1
                                 request = {
                                     "action": mt5.TRADE_ACTION_DEAL,
                                     "symbol": p["symbol"],

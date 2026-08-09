@@ -574,6 +574,12 @@ class DashboardServer:
             out = {"status": "success", "patterns": []}
             if not symbol:
                 return out
+            # Clamp days so a large value can't defeat the tail bound and force a
+            # full scan of the 100MB+ CSV (which would tie up a threadpool worker).
+            try:
+                days = max(1, min(int(days), 30))
+            except (TypeError, ValueError):
+                days = 8
             # Only the LIVE file (exclude *_old / *_pre_location backups the old
             # glob pulled in). Read just the tail covering `days` days by scanning
             # backwards from EOF -- the per-request full-file read (up to 400k rows
@@ -796,6 +802,11 @@ class DashboardServer:
             out = {"status": "success", "patterns": []}
             if not symbol:
                 return out
+            # Clamp days so a large value can't force a full scan of the 100MB+ CSV.
+            try:
+                days = max(1, min(int(days), 30))
+            except (TypeError, ValueError):
+                days = 4
             # Live file only, tail-read bounded to `days` (see get_patterns note --
             # the old full-file glob read timed the endpoint out on 100MB+ files).
             fp = os.path.join("reports", f"engine_snapshots_{symbol}.csv")

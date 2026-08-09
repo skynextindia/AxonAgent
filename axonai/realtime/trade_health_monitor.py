@@ -145,10 +145,18 @@ class TradeHealthMonitor:
             return TradeHealth()
             
         dt = ts - self._last_tick_time
-        # Under squeezed ticks backtesting, there's a 15-minute gap between candles
-        if dt > 5.0 and self._last_tick_time > 0.0:
-            if not self._backtest_mode:
+        # Squeezed-replay backtests jump ~15min per candle, so clamp big gaps to
+        # one tick THERE. But in LIVE the old code also clamped any >5s gap to 1.0,
+        # which made time_in_drawdown_sec massively undercount wall-clock during
+        # quiet sessions (ticks ~20-60s apart) and neutralized the drawdown penalty.
+        # Live: use the real elapsed time, capped at a sane 300s bound.
+        if self._last_tick_time <= 0.0:
+            dt = 0.0  # first tick after (re)activation
+        elif self._backtest_mode:
+            if dt > 5.0:
                 dt = 1.0
+        else:
+            dt = min(max(dt, 0.0), 300.0)
         self._last_tick_time = ts
         
         # Calculate PnL in pips

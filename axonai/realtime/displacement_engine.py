@@ -191,13 +191,18 @@ class DisplacementEngine:
 
         # ── Extract z-score from normalizer if available ─────────
         disp_z_score = 0.0
+        disp_z_avail = False
         if displacement_normalizer is not None:
             disp_norm = displacement_normalizer.update(displacement_ratio, ts)
             disp_z_score = disp_norm.z_score
+            # Real availability flag: the normalizer only produces a meaningful
+            # z once it has >=50 samples. Do NOT infer availability from the z's
+            # SIGN (the old bug) -- a genuine trap has a negative z.
+            disp_z_avail = disp_norm.sample_count >= 50
 
         # ── Classification ──────────────────────────────────────
         classification = self._classify(
-            velocity, displacement_ratio, net_move, total_move, disp_z_score
+            velocity, displacement_ratio, net_move, total_move, disp_z_score, disp_z_avail
         )
 
         self._displacement_history.append(net_move)
@@ -258,6 +263,7 @@ class DisplacementEngine:
         net_move: float,
         total_move: float,
         disp_z_score: float = 0.0,
+        disp_z_avail: bool = False,
     ) -> str:
         """Multi-factor displacement classification.
 
@@ -280,10 +286,9 @@ class DisplacementEngine:
             return DISPLACEMENT_EXHAUSTION
 
         # Priority 2: Impulse (high velocity + unusual displacement)
-        # Use z-score if available (disp_z_score > 0); fall back to static ratio
+        # Use z-score when the normalizer is warmed; else fall back to static ratio.
         if is_high_vel:
-            if disp_z_score > 0.0:
-                # Z-score available (>=50 ticks in window)
+            if disp_z_avail:
                 if disp_z_score >= Z_SCORE_IMPULSE_THRESHOLD:  # 1.5
                     return DISPLACEMENT_IMPULSE
             elif disp_ratio >= self._impulse_threshold:
@@ -291,11 +296,12 @@ class DisplacementEngine:
                 return DISPLACEMENT_IMPULSE
 
         # Priority 3: Trap / Absorption (high velocity + LOW displacement)
-        # Use z-score if available; fall back to static ratio
+        # A genuine trap has a NEGATIVE z (below-mean displacement). The old
+        # `disp_z_score > 0.0` gate made this branch unreachable, silently reverting
+        # trap detection to the static ratio; gate on real availability instead.
         if is_high_vel or self._backtest_mode:
             should_be_trap = False
-            if disp_z_score > 0.0:
-                # Z-score available
+            if disp_z_avail:
                 if disp_z_score <= Z_SCORE_TRAP_THRESHOLD:  # -1.5
                     should_be_trap = True
             elif disp_ratio < self._trap_threshold:
