@@ -203,6 +203,20 @@ class AxonDaemon:
         from axonai.realtime.news_guard import NewsGuard
         self.news_guard = NewsGuard(config)
 
+        # Chart-pattern breakout entry (OOS-validated 1R bracket, 2026-08-12).
+        # Active only when config entry_source is "breakout" or "both".
+        from axonai.realtime.pattern_breakout_entry import PatternBreakoutDetector
+        self.pattern_breakout = PatternBreakoutDetector(self.mt5_symbol, config)
+        self._breakout_time_stop_sec = float(config.get("pattern_breakout_time_stop_sec", 15 * 3600))
+        # M15 bars that were built from SYNTHETIC ticks (weekend / dead-feed
+        # random walk). The detector must never see them: fake pivots would
+        # produce real orders at fabricated levels.
+        self._synthetic_m15_epochs: set = set()
+        if config.get("entry_source", "fade") in ("breakout", "both"):
+            logger.info("PatternBreakout %s for %s (allowed=%s)",
+                        "ENABLED" if self.pattern_breakout.enabled else "DISABLED — WILL NOT TRADE",
+                        self.mt5_symbol, sorted(self.pattern_breakout._allowed))
+
         # EOD close: track the live session so we can fire once on the
         # active → wind-down transition (matches backtester behaviour).
         self._last_session: Optional[str] = None
@@ -934,6 +948,20 @@ class AxonDaemon:
             price_current = pos.get("price_current", entry_price)
             self._tracked_positions.add(ticket)
             self._active_trade_initial_sl[ticket] = pos.get("sl", 0.0)
+            # Breakout journal: a ticket opened by the breakout path must be
+            # re-adopted AS a breakout, or trailing/EOD would seize a position
+            # whose contract is "broker bracket + 15h time-stop only".
+            _bj_rec = self._breakout_journal_update().get(str(ticket))
+            if _bj_rec:
+                self._active_trade_system[ticket] = "pattern_breakout"
+                self._active_trade_entry_details.setdefault(ticket, {
+                    "entry_price": _bj_rec.get("entry_price", entry_price),
+                    "direction": _bj_rec.get("direction", direction),
+                    "entry_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "entry_time_utc": _bj_rec.get("entry_time_utc"),
+                    "volume": volume,
+                    "entry_reason": f"pattern_breakout:{_bj_rec.get('pattern_type', '?')} (re-adopted)",
+                })
             self._active_trade_system.setdefault(ticket, "recovered")
             # Only seed entry details if we don't already have richer info
             self._active_trade_entry_details.setdefault(ticket, {
@@ -1182,6 +1210,11 @@ class AxonDaemon:
                 })
                 positions = res.get("positions", []) if res.get("success", False) else []
                 for p in positions:
+                    if self._active_trade_system.get(p["ticket"]) == "pattern_breakout":
+                        # Broker-bracket trades ride through EOD (SL/TP attached;
+                        # 15h time-stop bounds the hold). Closing them here would
+                        # deviate from the validated 1R model.
+                        continue
                     order_type = 1 if p["type"] == "SELL" else 0
                     tick_bid = getattr(self.live_state, "current_bid", 0.0) or p["price_current"]
                     tick_ask = getattr(self.live_state, "current_ask", 0.0) or p["price_current"]
@@ -1213,6 +1246,8 @@ class AxonDaemon:
                     pos_result = get_positions_via_bridge(self._trade_terminal_path, self.mt5_symbol)
                     positions = pos_result.get("positions", []) if pos_result and pos_result.get("success") else []
                 for p in positions:
+                    if self._active_trade_system.get(p.get("ticket")) == "pattern_breakout":
+                        continue  # broker-bracket trade rides through EOD (see bridge branch)
                     tick = mt5.symbol_info_tick(self.mt5_symbol)
                     if tick is None:
                         logger.error("EOD close: no tick for %s — position %s NOT closed", self.mt5_symbol, p.get("ticket"))
@@ -1372,7 +1407,14 @@ class AxonDaemon:
         # Check for RETEST_WAIT/TRIGGERED to place limit order, and check for INVALIDATED/IDLE to cancel it
         state = snapshot.entry_decision.state
         entry_style = self.config.get("realtime_entry_style", "instant")
-        should_enter = (state == "TRIGGERED" and getattr(snapshot.entry_decision, "is_valid_entry", True))
+        # entry_source gate (2026-08-12): the tick-fade entry was falsified OOS
+        # (sweeps re-run + external study); default routes entries through the
+        # validated chart-pattern breakout path instead. Fade code stays intact
+        # and re-arms by setting entry_source back to "fade" or "both".
+        _entry_source = self.config.get("entry_source", "fade")
+        should_enter = (_entry_source in ("fade", "both")
+                        and state == "TRIGGERED"
+                        and getattr(snapshot.entry_decision, "is_valid_entry", True))
 
         if should_enter:
             has_position = False
@@ -1671,6 +1713,45 @@ class AxonDaemon:
         self.reversal_model.on_candle_close(candle)
         logger.debug("Candle closed: %s @ %.5f (H=%.5f L=%.5f)",
                      candle.timeframe, candle.close, candle.high, candle.low)
+
+        # Chart-pattern breakout entry: evaluate on live M15 closes only. The
+        # just-closed bar is already in _m15_candles (live_evidence appended it
+        # above), and the detector fires only when THAT bar is the neckline
+        # break, so backfilled history can never trigger an entry.
+        if candle.timeframe.upper() == "M15":
+            if getattr(self.tick_engine, "is_synthetic", False):
+                # Weekend / dead-feed synthetic bars: remember and never trade
+                # them. The startup backfill rebuilds the deque from real broker
+                # history, so a restart naturally clears this set.
+                try:
+                    _ep = int(candle.open_time.replace(tzinfo=timezone.utc).timestamp())
+                    self._synthetic_m15_epochs.add(_ep)
+                    if len(self._synthetic_m15_epochs) > 1200:
+                        _cut = _ep - 500 * 900  # deque span
+                        self._synthetic_m15_epochs = {e for e in self._synthetic_m15_epochs if e >= _cut}
+                except Exception:
+                    pass
+            elif (not self._warming_up
+                    and self.config.get("entry_source", "fade") in ("breakout", "both")):
+                try:
+                    bars = [
+                        c for c in self.live_evidence._m15_candles
+                        if int(c.open_time.replace(tzinfo=timezone.utc).timestamp())
+                        not in self._synthetic_m15_epochs
+                    ]
+                    sig = self.pattern_breakout.on_m15_close(bars)
+                    if sig is not None:
+                        blocked, news_reason = self.news_guard.should_block_entry(self.mt5_symbol)
+                        if blocked:
+                            logger.info("BREAKOUT ENTRY BLOCKED by News Guard: %s", news_reason)
+                        else:
+                            logger.info(
+                                "BREAKOUT DETECTED %s %s %s neck=%.5f sl=%.5f tp=%.5f risk=%.1fp er=%.3f",
+                                self.mt5_symbol, sig.pattern_type, sig.direction,
+                                sig.entry, sig.sl, sig.tp, sig.risk_pips, sig.er)
+                            self.event_queue.put({"type": "place_breakout", "signal": sig})
+                except Exception as e:
+                    logger.error("Pattern breakout detection failed: %s", e, exc_info=True)
                      
         # Broadcast closed candle
         dashboard = get_dashboard()
@@ -2084,6 +2165,102 @@ class AxonDaemon:
                     if success:
                         logger.info("AxonDaemon: Pending limit order cancelled: %d", self._pending_limit_ticket)
                         self._pending_limit_ticket = None
+
+            elif event_type == "place_breakout":
+                # Chart-pattern breakout: pure broker-side 1R bracket (validated
+                # 2026-08-12). NOT registered with trade_state_engine or
+                # reversal_model, so the fade's thesis exits and trailing never
+                # touch it -- broker SL/TP plus the 15h time-stop manage it.
+                sig = event["signal"]
+                self._events_detected += 1
+                with self._position_lock:
+                    if len(self._tracked_positions) > 0:
+                        self._events_skipped += 1
+                        continue
+                remaining = self._seconds_until_ready(
+                    price=sig.entry, direction=sig.direction, vol_pips=3.0)
+                if remaining > 0:
+                    self._events_skipped += 1
+                    logger.info("BREAKOUT SKIPPED (cooldown=%.0fs remaining)", remaining)
+                    continue
+                # Adverse-drift gate: the validated model entered AT the neckline
+                # and its slippage stress covered +1.5p. A momentum bar closing
+                # far through the neckline skews the bracket (risk R+d vs reward
+                # R-d) beyond anything the validation measured -- skip those.
+                _pipb = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+                _cur = bid if sig.direction == "SELL" else ask
+                if not _cur or _cur <= 0:
+                    self._events_skipped += 1
+                    logger.info("BREAKOUT SKIPPED (no current quote)")
+                    continue
+                _drift = ((sig.entry - _cur) if sig.direction == "SELL" else (_cur - sig.entry)) / _pipb
+                _max_drift = float(self.config.get("pattern_breakout_max_drift_pips", 1.5))
+                if _drift > _max_drift:
+                    self._events_skipped += 1
+                    logger.info("BREAKOUT SKIPPED (adverse drift %.1fp > %.1fp cap, neck=%.5f cur=%.5f)",
+                                _drift, _max_drift, sig.entry, _cur)
+                    continue
+                signal_str = "Buy" if sig.direction == "BUY" else "Sell"
+                logger.info(
+                    "EXECUTING BREAKOUT MARKET ENTRY %s %s (%s) sl=%.5f tp=%.5f risk=%.1fp",
+                    self.mt5_symbol, signal_str, sig.pattern_type, sig.sl, sig.tp, sig.risk_pips)
+                trade_result = None
+                try:
+                    trade_result = self.trade_executor_opt.execute_signal(
+                        self.mt5_symbol, signal_str, self.live_state, sl=sig.sl, tp=sig.tp
+                    )
+                except Exception as ex_err:
+                    logger.error("AxonDaemon: Breakout execution error: %s", ex_err, exc_info=True)
+                if trade_result and trade_result.get("success", False) and trade_result.get("order"):
+                    ticket = trade_result.get("order")
+                    with self._position_lock:
+                        self._tracked_positions.add(ticket)
+                    self._active_trade_initial_sl[ticket] = trade_result.get("sl")
+                    self._active_trade_system[ticket] = "pattern_breakout"
+                    _entry_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+                    self._active_trade_entry_details[ticket] = {
+                        "entry_price": trade_result.get("price") or sig.entry,
+                        "direction": sig.direction,
+                        "entry_time": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "entry_time_utc": _entry_utc,
+                        "volume": trade_result.get("volume", 0.01),
+                        "entry_reason": f"pattern_breakout:{sig.pattern_type}",
+                    }
+                    # Persist so a daemon restart re-adopts this ticket AS a
+                    # breakout (tag + clean UTC entry time), keeping it exempt
+                    # from trailing/EOD and under the 15h time-stop.
+                    self._breakout_journal_update(add={str(ticket): {
+                        "entry_time_utc": _entry_utc,
+                        "entry_price": trade_result.get("price") or sig.entry,
+                        "direction": sig.direction,
+                        "pattern_type": sig.pattern_type,
+                    }})
+                    self._executed_trades_history.append({
+                        "entry_price": trade_result.get("price") or sig.entry,
+                        "direction": sig.direction,
+                        "entry_time": datetime.now(),
+                        "exit_time": None,
+                        "outcome": None,
+                        "vol_pips": 3.0,
+                    })
+                    if self._last_snapshot is not None:
+                        try:
+                            self.trade_analytics.record_entry(
+                                ticket, self.mt5_symbol, sig.direction,
+                                trade_result.get("price") or sig.entry,
+                                trade_result.get("sl"), trade_result.get("tp"),
+                                self._last_snapshot,
+                                fill_price=trade_result.get("price"),
+                                strategy_version=f"pattern_breakout_v1_1R:{sig.pattern_type}",
+                            )
+                        except Exception as an_err:
+                            logger.error("Breakout analytics record failed: %s", an_err)
+                    logger.info("[BREAKOUT_TRACKED] Ticket %s: %s %s neck=%.5f",
+                                ticket, sig.direction, sig.pattern_type, sig.entry)
+                    self._last_execution_time = datetime.now()
+                    self._events_fired += 1
+                else:
+                    self._events_skipped += 1
 
             elif event_type == "exit":
                 # CHANGE 9C: Position reconciliation
@@ -2736,6 +2913,131 @@ class AxonDaemon:
         with open(log_path, 'a', encoding='utf-8') as f:
             f.write(json.dumps(entry, cls=SafeJSONEncoder) + '\n')
 
+    def _breakout_journal_update(self, add: dict = None, remove: list = None) -> dict:
+        """On-disk journal of open breakout tickets so restarts re-adopt them AS
+        breakouts (tag + clean UTC entry time). Per-symbol file, tiny JSON."""
+        import os
+        import json as _json
+        path = os.path.join("reports", f"breakout_positions_{self.mt5_symbol}.json")
+        data = {}
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = _json.load(f) or {}
+        except (OSError, ValueError):
+            data = {}
+        if add or remove:
+            if add:
+                data.update(add)
+            for t in (remove or []):
+                data.pop(str(t), None)
+            try:
+                os.makedirs("reports", exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    _json.dump(data, f)
+            except OSError as e:
+                logger.error("Breakout journal write failed: %s", e)
+        return data
+
+    @staticmethod
+    def _weekend_overlap_seconds(start, end) -> float:
+        """Seconds of the FX weekend (Fri 21:00 -> Sun 21:00 UTC) inside [start, end].
+
+        The sim's scratch window was 60 TRADING bars; wall-clock 15h across a
+        weekend would time-stop Friday trades into the Monday-open gap. Naive
+        UTC datetimes expected.
+        """
+        from datetime import timedelta
+        if end <= start:
+            return 0.0
+        total = 0.0
+        days_back = (start.weekday() - 4) % 7
+        fri = (start - timedelta(days=days_back)).replace(hour=21, minute=0, second=0, microsecond=0)
+        if fri > start:
+            fri -= timedelta(days=7)
+        while fri < end:
+            sun = fri + timedelta(days=2)
+            lo = max(fri, start)
+            hi = min(sun, end)
+            if hi > lo:
+                total += (hi - lo).total_seconds()
+            fri += timedelta(days=7)
+        return total
+
+    def _maybe_time_stop_breakout(self, ticket, pos_type, pos_symbol, pos_volume,
+                                  bid: float, ask: float, is_bridge: bool):
+        """Close a pattern_breakout position that exceeded the 15h time-stop.
+
+        Mirrors the sim's OUTW=60-bar scratch: past that window the validated
+        expectancy no longer applies, so flatten at market. Weekend hours do
+        not count as elapsed (the sim counted trading bars). Close-side
+        convention matches the audited CLOSE_NOW path (BUY 0 closes SELL).
+        """
+        det = self._active_trade_entry_details.get(ticket)
+        if not det:
+            return
+        ts_str = str(det.get("entry_time_utc") or det.get("entry_time") or "")[:19]
+        try:
+            entry_dt = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+        except (ValueError, TypeError):
+            return
+        if det.get("entry_time_utc"):
+            now_ref = datetime.now(timezone.utc).replace(tzinfo=None)
+            elapsed = (now_ref - entry_dt).total_seconds()
+            elapsed -= self._weekend_overlap_seconds(entry_dt, now_ref)
+        else:
+            # Legacy local-time entry (pre-journal); plain wall clock.
+            elapsed = (datetime.now() - entry_dt).total_seconds()
+        if elapsed < self._breakout_time_stop_sec:
+            return
+        pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+        is_sell = str(pos_type).upper() == "SELL"
+        price = ask if is_sell else bid
+        logger.info("BREAKOUT TIME-STOP (%.0fh): closing ticket %s",
+                    self._breakout_time_stop_sec / 3600.0, ticket)
+        try:
+            if is_bridge:
+                from axonai.realtime.execution_client import send_execution_command
+                res = send_execution_command(self.config, {
+                    "action": "close", "position": ticket, "symbol": pos_symbol,
+                    "volume": pos_volume, "type": 0 if is_sell else 1, "price": price,
+                    "magic": self.trade_executor_opt.magic, "deviation": 20,
+                })
+                ok = bool(res and res.get("success"))
+            else:
+                request = {
+                    "action": mt5.TRADE_ACTION_DEAL, "symbol": pos_symbol,
+                    "volume": pos_volume, "type": 0 if is_sell else 1,
+                    "position": ticket, "price": price, "deviation": 20,
+                    "magic": self.trade_executor_opt.magic,
+                    "comment": "Breakout time-stop"[:31],
+                    "type_time": mt5.ORDER_TIME_GTC, "type_filling": mt5.ORDER_FILLING_IOC,
+                }
+                res = self._send_order(request)
+                ok = bool(res and res.get("retcode") == mt5.TRADE_RETCODE_DONE)
+            if ok:
+                entry_price = det.get("entry_price") or 0.0
+                profit_pips = ((price - entry_price) / pip) if entry_price else 0.0
+                if is_sell:
+                    profit_pips = -profit_pips
+                self._active_trade_exit_reasons[ticket] = {
+                    "reason": "Breakout time-stop (15h)",
+                    "strategy": "pattern_breakout", "urgency": 0.0,
+                }
+                self._breakout_journal_update(remove=[ticket])
+                try:
+                    self.trade_analytics.record_exit(
+                        ticket, price, profit_pips, "Breakout time-stop (15h)",
+                        self._last_snapshot)
+                except Exception as an_err:
+                    logger.error("Breakout time-stop analytics failed: %s", an_err)
+                with self._position_lock:
+                    self._tracked_positions.discard(ticket)
+                logger.info("BREAKOUT TIME-STOP: closed %s (%+.1fp)", ticket, profit_pips)
+            else:
+                logger.error("BREAKOUT TIME-STOP close FAILED for %s: %s", ticket, res)
+        except Exception as e:
+            logger.error("Breakout time-stop error for %s: %s", ticket, e, exc_info=True)
+
     def _manage_trailing_stops(self, bid: float, ask: float):
         """Manage velocity-based trailing stops on active MT5 positions."""
         is_bridge = self.config.get("realtime_execution_mode", "direct") == "bridge"
@@ -2800,6 +3102,14 @@ class AxonDaemon:
                 pos_tp = pos.tp
                 pos_symbol = pos.symbol
                 pos_volume = pos.volume
+
+            # Breakout trades are pure broker brackets: never trailed (trailing
+            # would break the validated 1R geometry). Enforce only the 15h
+            # time-stop that mirrors the sim's 60-bar scratch window, then skip.
+            if self._active_trade_system.get(ticket) == "pattern_breakout":
+                self._maybe_time_stop_breakout(
+                    ticket, pos_type, pos_symbol, pos_volume, bid, ask, is_bridge)
+                continue
 
             # Initialize tracking
             if ticket not in self._active_trade_initial_sl:
@@ -3189,7 +3499,10 @@ class AxonDaemon:
                 })
             
             system_name = self._active_trade_system.pop(ticket, "optimized")
-            
+            if system_name == "pattern_breakout":
+                # Broker-side TP/SL close: drop the ticket from the restart journal.
+                self._breakout_journal_update(remove=[ticket])
+
             # Log outcome to file
             log_msg = f"TRADE CLOSED: Ticket {ticket} | System: {system_name} | {direction} | Entry: {entry_price:.5f} | Exit: {exit_price:.5f} | Profit: {profit:+.2f} | Pips: {pips:+.1f} | Reason: {reason} | Outcome: {outcome}"
             logger.info("=" * 60)

@@ -94,6 +94,18 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # stacking the same currency direction; 0 = disabled. (count-based; assumes
     # equal-size trades.)
     "max_currency_exposure": 1,
+    # ── Entry source routing (2026-08-12) ────────────────────────────────────
+    # "fade" = legacy tick-fade EntryStateMachine; "breakout" = chart-pattern
+    # neckline break with a pure broker-side 1R bracket; "both" = run both.
+    # The fade was falsified OOS (sweeps re-run + arxiv 2605.04004); the
+    # breakout validated at +2.70p/trade OOS all-pairs, +6.06p ex-GBP (t=3.10,
+    # n=89, W29-W32, both regimes, slippage-robust). See shadow_patterns.csv.
+    "entry_source": "breakout",
+    "pattern_breakout_symbols": ["EURUSD", "USDJPY", "AUDUSD"],  # GBP -2.94p OOS: excluded
+    "pattern_breakout_min_risk_pips": 1.0,   # stop tighter than spread never trades
+    "pattern_breakout_max_risk_pips": 60.0,  # sanity cap on structural stops
+    "pattern_breakout_time_stop_sec": 54000, # 15h trading-time = sim's 60-bar M15 scratch window
+    "pattern_breakout_max_drift_pips": 1.5,  # skip entry when price already ran past the neckline by more than the validated slippage stress
     # ── Reversal-edge entry filter (data-derived; additive veto, only blocks) ──
     # From winners-vs-losers analysis: RANGE_CHOP loses; reversals fire at a
     # per-pair velocity climax. Gold has NO clean velocity edge, so it uses a
