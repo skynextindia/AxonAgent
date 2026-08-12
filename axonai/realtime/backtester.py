@@ -613,6 +613,19 @@ class BacktestEngine:
             if direction is not None:
                 # 1. Proximity Check to ANY S/R Zone (5.0 pips)
                 active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
+
+                # 1a. Direction-aware S/R selection (config-gated backtest experiment,
+                #     mirrors daemon.py 1a). A fade leans on a level in its PROFIT
+                #     direction: SELL fades OFF resistance at/above price, BUY OFF support
+                #     at/below. With the backtester's 2 seeded boundaries (support below /
+                #     resistance above) this removes exactly the SELL-into-support /
+                #     BUY-into-resistance wrong-end fades. Default OFF == baseline.
+                if self.config.get("direction_aware_sr_bt", False):
+                    if direction == "SELL":
+                        active_levels = [l for l in active_levels if l.price >= event.price]
+                    else:  # BUY
+                        active_levels = [l for l in active_levels if l.price <= event.price]
+
                 closest_dist = float("inf")
                 closest_lvl = None
                 for lvl in active_levels:
@@ -627,14 +640,33 @@ class BacktestEngine:
                     return
                 
                 # 2. Daily Trend Alignment Check (using H4 trend direction as daily trend proxy)
-                daily_trend = getattr(self.live_evidence, "trend_direction_h4", "sideways")
+                if self.config.get("h4_gate_fix", False):
+                    # FIX (backtest toggle): read the real rolling H4 trend from the inner
+                    # evidence dataclass. The wrapper object never carries trend_direction_h4
+                    # (the live gate's latent bug), so the default path below always sees
+                    # "sideways" and never vetoes. Default OFF -> baseline == current live.
+                    _ev_h4 = getattr(self.live_evidence, "_evidence", None)
+                    daily_trend = getattr(_ev_h4, "trend_direction_h4", "sideways") if _ev_h4 is not None else "sideways"
+                else:
+                    daily_trend = getattr(self.live_evidence, "trend_direction_h4", "sideways")
                 if daily_trend == "up" and direction != "BUY":
                     logger.debug("PEAK GATE: skipped (daily trend is UP, but trade is %s)", direction)
                     return
                 elif daily_trend == "down" and direction != "SELL":
                     logger.debug("PEAK GATE: skipped (daily trend is DOWN, but trade is %s)", direction)
                     return
-                
+
+                # 2b. Range-extreme gate (config-gated backtest experiment): reject
+                #     wrong-end entries — SELL into support / BUY into resistance —
+                #     against the prior N closed M15 candles. Ported verbatim from
+                #     daemon._range_extreme_gate (LIVE at edge=0.25; absent here).
+                #     range_gate_bt=False (default) leaves baseline == prior behavior.
+                if self.config.get("range_gate_bt", False):
+                    _rok, _rrsn = self._range_extreme_gate_bt(direction, event.price)
+                    if not _rok:
+                        logger.debug("PEAK GATE: skipped (%s)", _rrsn)
+                        return
+
                 logger.info("PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f (%.2f pips from %s level %.5f), Trend=%s, Trade=%s",
                             event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
             
@@ -730,9 +762,18 @@ class BacktestEngine:
         state = self.live_state._state
         atr = state.atr_14_h1 if state else 0.0012
         
-        # SL = 1.0 × ATR, TP = 2.0 × ATR (optimized risk-reward ratio for WR/PF)
-        sl_distance = max(atr * 1.0, 8 * self.pip_mult)   # floor of 8 pips
-        tp_distance = max(atr * 2.0, 16 * self.pip_mult)   # floor of 16 pips
+        if self.config.get("hard_exit_bt", False):
+            # LIVE hard-distance exit (backtest toggle): symmetric fixed SL=TP at
+            # hard_stop_pips (20 EURUSD / 30 USDJPY) -> 1:1 R:R vs the ATR 2:1
+            # default. The ATR breakeven+trail in _update_simulated_positions still
+            # applies (mirrors the live adaptive ~0.5xATR trail). Default OFF.
+            _hs = float(self.config.get("hard_stop_pips_bt", 20.0)) * self.pip_mult
+            sl_distance = _hs
+            tp_distance = _hs
+        else:
+            # SL = 1.0 × ATR, TP = 2.0 × ATR (optimized risk-reward ratio for WR/PF)
+            sl_distance = max(atr * 1.0, 8 * self.pip_mult)   # floor of 8 pips
+            tp_distance = max(atr * 2.0, 16 * self.pip_mult)   # floor of 16 pips
 
         if direction == "BUY":
             sl = entry_price - sl_distance
@@ -741,6 +782,12 @@ class BacktestEngine:
             sl = entry_price + sl_distance
             tp = entry_price - tp_distance
                 
+        # Diagnostic: capture the REAL rolling H4 trend at entry (from the inner
+        # evidence dataclass) regardless of the gate flag, so a baseline run can be
+        # classified into with-/counter-/sideways-trend cohorts post hoc.
+        _ev_diag = getattr(self.live_evidence, "_evidence", None)
+        h4_at_entry = getattr(_ev_diag, "trend_direction_h4", "sideways") if _ev_diag is not None else "sideways"
+        _rel_diag, _ = self._range_rel_bt(entry_price)
         trade = {
             "id": len(self.simulated_trades) + 1,
             "direction": direction,
@@ -756,7 +803,10 @@ class BacktestEngine:
             "pips": 0.0,
             "close_reason": "",
             "atr": atr,
-            "peak_price": entry_price
+            "peak_price": entry_price,
+            "h4_trend_at_entry": h4_at_entry,
+            "range_rel_at_entry": (round(_rel_diag, 3) if _rel_diag is not None else None),
+            "event_type": str(getattr(event.event_type, "name", event.event_type)),
         }
         
         self.active_trades.append(trade)
@@ -774,6 +824,37 @@ class BacktestEngine:
                    f"mtf={event.details.get('mtf_alignment','')}")
         logger.info("BacktestEngine: [OPEN %s] Q=%.2f | Entry: %.5f | SL: %.5f | TP: %.5f | Trigger: %s%s",
                     direction, signal_quality, entry_price, sl, tp, trigger_reason, ctx)
+
+    def _range_rel_bt(self, price: float):
+        """Return (rel, n) where rel=(price-lo)/(hi-lo) over the last
+        range_gate_lookback closed M15 candles. rel=None if degenerate/thin."""
+        lookback = int(self.config.get("range_gate_lookback", 20))
+        m15 = list(getattr(self.live_evidence, "_m15_candles", []))[-lookback:]
+        if len(m15) < max(5, lookback // 2):
+            return None, len(m15)
+        rng_hi = max(c.high for c in m15)
+        rng_lo = min(c.low for c in m15)
+        rng = rng_hi - rng_lo
+        if rng <= 0:
+            return None, len(m15)
+        return (price - rng_lo) / rng, len(m15)
+
+    def _range_extreme_gate_bt(self, direction: str, price: float):
+        """Ported verbatim from daemon._range_extreme_gate (fail-safe on thin
+        history). Blocks SELL if rel < edge (into support), BUY if rel > 1-edge
+        (into resistance)."""
+        lookback = int(self.config.get("range_gate_lookback", 20))
+        edge = float(self.config.get("range_gate_edge", 0.25))
+        rel, n = self._range_rel_bt(price)
+        if rel is None:
+            if n < max(5, lookback // 2):
+                return False, f"range gate: insufficient M15 history ({n} candles)"
+            return True, ""  # degenerate range: nothing to test
+        if direction == "SELL" and rel < edge:
+            return False, f"SELL at/near support: pos {rel:.2f} (need >= {edge:.2f})"
+        if direction == "BUY" and rel > (1.0 - edge):
+            return False, f"BUY at/near resistance: pos {rel:.2f} (need <= {1.0 - edge:.2f})"
+        return True, ""
 
     def _check_pending_level_breaches(self, candle: LiveCandle):
         """Check pending level breaches against the just-closed M15 candle.

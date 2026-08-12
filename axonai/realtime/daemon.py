@@ -99,6 +99,12 @@ class AxonDaemon:
         self._active_trade_system: dict[int, str] = {}
         self._active_trade_atr: dict[int, float] = {}
         self._active_trade_peak_price: dict[int, float] = {}
+        self._active_trade_worst_price: dict[int, float] = {}  # ticket -> worst ADVERSE price seen (for MAE)
+        self._retest_arm: dict[int, dict] = {}  # ticket -> retest-confirmation verdict state (shadow/veto)
+        self._mfe_exit_shadow: dict[int, dict] = {}  # ticket -> MFE early-exit shadow state (first-fire snapshot)
+        self._exit_shadow: dict[int, dict] = {}  # ticket -> alt-trail exit-capture shadow (first shadow-stop hit)
+        self._brk_setups: list = []  # active break-and-retest continuation-shadow state machines
+        self._revconf_watches: list = []  # active reversal-confirmation PRE-ENTRY shadow watches
         self._active_trade_entry_time: dict[int, float] = {}  # ticket -> wall-clock entry epoch (for no-progress abort)
         self._sl_fail_alert_ts: dict[int, float] = {}   # per-ticket throttle for SL-modify-failure alerts
 
@@ -598,6 +604,30 @@ class AxonDaemon:
         self.event_detector.is_in_trade = len(self._tracked_positions) > 0
         self.event_detector.on_tick(bid, ask, timestamp)
 
+        # REVP-confluence study: accumulate the intra-M15-bar exhaustion extremes
+        # (velocity_divergence ~ reversal pressure; price_per_tick_efficiency ~
+        # displacement). LEAD only -- the detector telemetry is inert on the exec
+        # node. Two float compares per tick; fully fail-safe.
+        if not self._exec_node and self.config.get("revp_telemetry_log", True):
+            try:
+                _pd = self.event_detector.peak_detector
+                _d = float(getattr(_pd, "_last_divergence", 0.0) or 0.0)
+                _e = float(getattr(_pd, "_last_efficiency", 1.0) or 1.0)
+                if _d > getattr(self, "_revp_div_max", 0.0):
+                    self._revp_div_max = _d
+                if _e < getattr(self, "_revp_eff_min", 1.0):
+                    self._revp_eff_min = _e
+            except Exception:
+                pass
+
+        # Reversal-confirmation PRE-ENTRY shadow: advance pending would-wait watches
+        # on this tick (LEAD only; pure observation, never trades). Fail-safe.
+        if not self._exec_node and self.config.get("revconf_shadow", True) and self._revconf_watches:
+            try:
+                self._update_revconf_shadow(bid, ask)
+            except Exception:
+                pass
+
         # Feed the self-configuring session selector (learns per-session movement)
         if self.session_tuner is not None:
             try:
@@ -717,6 +747,17 @@ class AxonDaemon:
                     logger.warning("Failed to refresh NewsGuard on candle close: %s", ne)
             return
 
+        # REVP-confluence study: one exhaustion-telemetry row per closed M15 bar
+        # (LEAD only; the exec-node path already returned above). Fail-safe.
+        if candle.timeframe == "M15" and self.config.get("revp_telemetry_log", True):
+            self._log_revp_telemetry(candle)
+
+        # Break-and-retest continuation shadow (Stage-1 + lifecycle; LEAD only; never
+        # trades). Runs on M15 closes to detect breakouts, track the retest/confirm
+        # state machine, and log forward outcomes for offline edge validation.
+        if candle.timeframe == "M15" and self.config.get("breakout_retest_shadow", True):
+            self._update_breakout_retest_shadow(candle)
+
         # Broadcast closed candle
         dashboard = get_dashboard()
         if dashboard:
@@ -788,6 +829,22 @@ class AxonDaemon:
                 if direction is not None:
                     # 1. Proximity Check to ANY S/R Zone (5.0 pips)
                     active_levels = [l for l in self.live_evidence.price_levels if l.is_active]
+
+                    # 1a. Direction-aware S/R selection (config-gated, per-pair via
+                    #     SYMBOL_CALIBRATION["direction_aware_sr"]). A fade should lean on a
+                    #     level in its PROFIT direction: a SELL fades OFF resistance at/above
+                    #     price, a BUY fades OFF support at/below. Selling INTO support-below
+                    #     (or buying INTO resistance-above) is the "wrong-side" fade the
+                    #     249-trade log study flagged: net loser on EURUSD (PF 0.80) but a
+                    #     WINNER on USDJPY (PF 2.54, levels break) — hence per-pair, default
+                    #     OFF. If no correct-side level survives, active_levels empties and the
+                    #     proximity gate below fails, so the wrong-side fade is refused.
+                    if self.config.get("direction_aware_sr", False):
+                        if direction == "SELL":
+                            active_levels = [l for l in active_levels if l.price >= event.price]
+                        else:  # BUY
+                            active_levels = [l for l in active_levels if l.price <= event.price]
+
                     closest_dist = float("inf")
                     closest_lvl = None
                     pip_mult = self.live_evidence._pip_mult
@@ -836,6 +893,10 @@ class AxonDaemon:
             dashboard = get_dashboard()
             if not self.config.get("test_mode", False) and not (is_peak and is_exhaustion and is_gate_passed):
                 self._events_skipped += 1
+                # Persist gated fade candidates (not the non-peak noise) so filter
+                # effectiveness — esp. direction-aware wrong-side skips — is measurable.
+                if is_peak and is_exhaustion:
+                    self._log_skip(event, gate_reason or "gate rejected")
                 if dashboard:
                     self._broadcast({
                         "type": "event",
@@ -864,6 +925,7 @@ class AxonDaemon:
             if blocked:
                 self._events_skipped += 1
                 logger.info("ENTRY BLOCKED by News Guard: %s", news_reason)
+                self._log_skip(event, f"news guard: {news_reason}")
                 if dashboard:
                     self._broadcast({
                         "type": "event",
@@ -1034,6 +1096,83 @@ class AxonDaemon:
                     })
                 continue
 
+            # ── Impulse + breakout + structure shadows (log always; breakout can VETO) ──
+            impulse_shadow = self._compute_impulse_shadow(signal)
+            breakout_shadow = self._compute_breakout_shadow(signal, event.price)
+            structure_shadow = self._compute_structure_shadow(signal, event.price)
+            selectivity_shadow = self._compute_selectivity_shadow(signal, event.price, impulse_shadow, event)
+            regime_shadow = self._compute_regime_shadow(signal, event.price)
+
+            # Breakout veto (per-pair via SYMBOL_CALIBRATION; USDJPY-armed 2026-08-11).
+            # Blocks a fade of a level that is BREAKING (price beyond prior M15
+            # structure WITH a sustained push) — the pattern behind both −$190
+            # USDJPY losers on 2026-08-10. In-structure reversals (verdict=allow)
+            # pass untouched. Lead-side only; a vetoed entry is never mirrored.
+            if self.config.get("breakout_veto_enabled", False) and \
+                    breakout_shadow.get("verdict") == "would_skip":
+                self._events_skipped += 1
+                br = (f"breakout veto: {signal} into fresh extreme "
+                      f"(ext={breakout_shadow.get('ext_pips')}p push={breakout_shadow.get('push_pips')}p)")
+                logger.info("SKIPPED (%s)", br)
+                self._log_skip(event, br)
+                if dashboard:
+                    self._broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": br,
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
+
+            # Structure veto (per-pair via SYMBOL_CALIBRATION; both pairs armed 2026-08-12).
+            # Skips a fade that FIGHTS the higher-TF trend (against_structure): selling a
+            # higher-high in an up-structure / buying a lower-low in a down-structure — the
+            # wrong-direction pattern. Like the breakout veto it can only SKIP, never add a
+            # loss. with_structure / range pass untouched. Lead-side only; never mirrored.
+            _sv_block = False
+            if self.config.get("structure_veto_enabled", False) and \
+                    structure_shadow.get("verdict") == "against_structure":
+                if self.config.get("structure_veto_require_h1_trend", True):
+                    # Only veto when a REAL H1 trend opposes the fade. When H1 is
+                    # sideways the verdict came from the noisier M15-zigzag fallback,
+                    # which thrashes in chop and cuts winning mean-reversion fades —
+                    # so leave those alone (see structure_veto_require_h1_trend doc).
+                    _h1 = structure_shadow.get("h1_trend")
+                    _sv_block = (_h1 in ("up", "down") and _h1 != structure_shadow.get("fade_dir"))
+                else:
+                    _sv_block = True
+            if _sv_block:
+                self._events_skipped += 1
+                sv = (f"structure veto: {signal} against {structure_shadow.get('m15_structure')} "
+                      f"structure (swing={structure_shadow.get('faded_swing')}, "
+                      f"h1={structure_shadow.get('h1_trend')})")
+                logger.info("SKIPPED (%s)", sv)
+                self._log_skip(event, sv)
+                if dashboard:
+                    self._broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": sv,
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
+
             system_name = event.details.get("system", "optimized")
             logger.info("EXECUTION (%s): Direct signal: %s", system_name, signal)
             
@@ -1089,6 +1228,7 @@ class AxonDaemon:
                         atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
                         self._active_trade_atr[ticket] = atr
                         self._active_trade_peak_price[ticket] = trade_result.get("price", 0.0)
+                        self._active_trade_worst_price[ticket] = trade_result.get("price", 0.0)
                         self._active_trade_entry_time[ticket] = time.time()
                         if self.correlation_engine is not None:
                             self.correlation_engine.register_position(
@@ -1103,8 +1243,20 @@ class AxonDaemon:
                 logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
             
             # Persistently log signal to file
-            self._log_signal(event, ws, signal, trade_result)
-            
+            self._log_signal(event, ws, signal, trade_result,
+                             impulse_shadow=impulse_shadow, breakout_shadow=breakout_shadow,
+                             structure_shadow=structure_shadow, selectivity_shadow=selectivity_shadow,
+                             regime_shadow=regime_shadow)
+
+            # Reversal-confirmation PRE-ENTRY shadow: arm the "wait for confirmation"
+            # counterfactual for this fired signal (LEAD only; never acts, never
+            # mirrored). Fully fail-safe so a shadow error can't disturb trading.
+            if not self._exec_node and self.config.get("revconf_shadow", True) and trade_result:
+                try:
+                    self._arm_revconf_shadow(event, signal)
+                except Exception as _rce:
+                    logger.debug("revconf arm failed: %s", _rce)
+
             # Set cooldown on event detector
             cooldown = self.config.get("realtime_cooldown_seconds", 300)
             self.event_detector.set_cooldown(cooldown)
@@ -1112,18 +1264,660 @@ class AxonDaemon:
             # Print stats
             self._log_stats()
 
-    def _log_signal(self, event, ws, signal, trade_result):
+    def _compute_impulse_shadow(self, signal: str, lookback_sec: float = 300.0) -> dict:
+        """Compute displacement_ratio over the last *lookback_sec* of ticks.
+
+        displacement_ratio = |net move| / total_path.  High ratio (~0.6+) means
+        price moved decisively in one direction (breakout / impulse) — fading it
+        is dangerous.  Low ratio (~<0.3) means price chopped back and forth
+        (exhaustion / trap) — a fade is reasonable.
+
+        Returns a dict suitable for embedding as ``impulse_shadow`` in the signal
+        log.  Shadow-only: the trade STILL fires regardless of the verdict.
+        """
+        try:
+            ticks = self.tick_engine.tick_buffer_list
+            if len(ticks) < 10:
+                return {"verdict": "insufficient_data", "n_ticks": len(ticks)}
+
+            now = ticks[-1]["time"]
+            window = [t for t in ticks if (now - t["time"]).total_seconds() <= lookback_sec]
+            if len(window) < 10:
+                return {"verdict": "insufficient_data", "n_ticks": len(window)}
+
+            mids = [t["mid"] for t in window]
+            net_move = abs(mids[-1] - mids[0])
+            total_path = sum(abs(mids[i] - mids[i - 1]) for i in range(1, len(mids)))
+            disp_ratio = round(net_move / total_path, 4) if total_path > 0 else 0.0
+
+            pip = 0.01 if "JPY" in self.mt5_symbol.upper() else 0.0001
+            net_pips = round((mids[-1] - mids[0]) / pip, 1)
+
+            threshold = self.config.get("impulse_disp_threshold", 0.55)
+            is_impulse = disp_ratio >= threshold
+
+            move_dir = "up" if mids[-1] > mids[0] else "down"
+            fade_dir = "Sell" if signal == "Sell" else "Buy"
+            fading_into = (fade_dir == "Sell" and move_dir == "up") or \
+                          (fade_dir == "Buy" and move_dir == "down")
+
+            would_skip = is_impulse and fading_into
+            return {
+                "verdict": "would_skip" if would_skip else "allow",
+                "displacement_ratio": disp_ratio,
+                "net_pips": net_pips,
+                "move_dir": move_dir,
+                "is_impulse": is_impulse,
+                "fading_into_impulse": fading_into,
+                "threshold": threshold,
+                "n_ticks": len(window),
+                "window_sec": lookback_sec,
+            }
+        except Exception as e:
+            return {"verdict": "error", "error": str(e)}
+
+    def _compute_breakout_shadow(self, signal: str, price: float) -> dict:
+        """Distinguish a level that will BREAK (fade loses) from one that will
+        HOLD (fade wins), using the prior M15 structure — NOT a trend/direction
+        flip (which our own data shows removes USDJPY's winning reversals).
+
+        Today's two −30p USDJPY SELLs both faded the day's HIGH while price was
+        making a FRESH multi-hour high — a breakout, not a reversal. USDJPY's
+        winning fades sit INSIDE prior structure. So the tell is: is price pushed
+        BEYOND the prior structure extreme (a fresh high/low), with a sustained
+        directional push in that same direction?
+
+        breakout = (fresh extreme: price beyond the prior-structure high/low by
+                    >= breakout_margin_atr × ATR)  AND
+                   (directional push: net move of the last breakout_window M15
+                    closes >= breakout_push_atr × ATR, in the breakout direction)
+
+        Only that combination logs "would_skip". Every in-structure reversal —
+        the real edge — returns "allow". Shadow-only: the trade STILL fires.
+        """
+        try:
+            lookback = int(self.config.get("breakout_lookback", 20))
+            win = int(self.config.get("breakout_window", 3))
+            m15 = list(getattr(self.live_evidence, "_m15_candles", []))[-lookback:]
+            if len(m15) < max(6, win + 3):
+                return {"verdict": "insufficient_data", "n_candles": len(m15)}
+
+            prior = m15[:-win]  # structure BEFORE the recent (possible breakout) bars
+            prior_high = max(c.high for c in prior)
+            prior_low = min(c.low for c in prior)
+
+            pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+            atr = self.live_state._state.atr_14_h1 if self.live_state._state else None
+            atr_pips = (atr / pip) if atr else 15.0  # fallback if ATR not yet warmed
+            margin = float(self.config.get("breakout_margin_atr", 0.25)) * atr_pips
+            push_thr = float(self.config.get("breakout_push_atr", 0.5)) * atr_pips
+
+            is_sell = signal.lower() == "sell"
+            # Extension of price BEYOND the prior structure, in the breakout
+            # (fade-opposing) direction: a SELL fades a HIGH, so its breakout is
+            # price pushing ABOVE prior_high; a BUY fades a LOW → below prior_low.
+            # PUSH = the trend of the whole structure window (close[0]→close[-1]),
+            # NOT just the last few bars: a strong fade-day loser can PAUSE at the
+            # extreme for a bar or two before continuing (today's 2nd −30p SELL did
+            # exactly that — a 3-bar window read it as flat and let it through).
+            if is_sell:
+                ext_pips = (price - prior_high) / pip
+                push_pips = (m15[-1].close - m15[0].close) / pip        # uptrend toward the high
+            else:
+                ext_pips = (prior_low - price) / pip
+                push_pips = (m15[0].close - m15[-1].close) / pip        # downtrend toward the low
+            ext_pips = round(ext_pips, 1)
+            push_pips = round(push_pips, 1)
+
+            fresh_extreme = ext_pips >= margin
+            strong_push = push_pips >= push_thr
+            would_skip = fresh_extreme and strong_push
+
+            return {
+                "verdict": "would_skip" if would_skip else "allow",
+                "ext_pips": ext_pips,             # how far beyond prior structure
+                "push_pips": push_pips,           # recent directional push
+                "fresh_extreme": fresh_extreme,
+                "strong_push": strong_push,
+                "prior_high": round(prior_high, 5),
+                "prior_low": round(prior_low, 5),
+                "margin_pips": round(margin, 1),
+                "push_thr_pips": round(push_thr, 1),
+                "atr_pips": round(atr_pips, 1),
+                "lookback": lookback, "window": win,
+            }
+        except Exception as e:
+            return {"verdict": "error", "error": str(e)}
+
+    def _compute_structure_shadow(self, signal: str, price: float) -> dict:
+        """Stage-1 MTF market-structure LABELER (shadow-only, never gates).
+
+        Builds an M15 zigzag from closed candles (fractal pivots, min-amplitude
+        filtered so micro-noise is dropped — the rejection-wick/ADR lesson), labels
+        the entry-TF structure up/down/range, and combines it with the existing H1/H4
+        EMA trend into a single verdict for THIS fade:
+          with_structure    = fade profit-dir agrees with the dominant higher-TF dir
+                              (a SELL when the trend is DOWN — selling a lower-high)
+          against_structure = fade profit-dir opposes it (SELL in an uptrend — the
+                              suspected wrong-direction loser)
+          range             = no clear structure
+        Also tags the faded swing LH/HH (sell) or HL/LL (buy). Pure label: embedded in
+        the signal row via _log_signal; the trade fires unchanged. UNITS: swing
+        amplitudes and min_swing are PIPS (diff/pip) — no price-vs-pip mixing.
+        """
+        try:
+            lookback = int(self.config.get("structure_lookback_m15", 40))
+            k = int(self.config.get("structure_swing_k", 2))
+            m15 = list(getattr(self.live_evidence, "_m15_candles", []))[-lookback:]
+            if len(m15) < (2 * k + 3):
+                return {"verdict": "insufficient_data", "n_candles": len(m15)}
+
+            pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+            atr = self.live_state._state.atr_14_h1 if self.live_state._state else None
+            atr_pips = (atr / pip) if atr else (15.0 if pip == 0.01 else 8.0)
+            min_swing = float(self.config.get("structure_min_swing_atr", 0.5)) * atr_pips  # pips
+
+            highs = [c.high for c in m15]
+            lows = [c.low for c in m15]
+            n = len(m15)
+            # 1. Fractal pivots: strict local extremum over a +/-k window.
+            pivots = []  # (idx, 'H'|'L', price)
+            for i in range(k, n - k):
+                lh = highs[i - k:i]; rh = highs[i + 1:i + k + 1]
+                ll = lows[i - k:i]; rl = lows[i + 1:i + k + 1]
+                if highs[i] > max(lh) and highs[i] >= max(rh):
+                    pivots.append((i, 'H', highs[i]))
+                elif lows[i] < min(ll) and lows[i] <= min(rl):
+                    pivots.append((i, 'L', lows[i]))
+            # 2. Alternating zigzag with a min-amplitude filter.
+            zz = []
+            for p in pivots:
+                if not zz:
+                    zz.append(p); continue
+                if p[1] == zz[-1][1]:            # same type — keep the more extreme
+                    if (p[1] == 'H' and p[2] > zz[-1][2]) or (p[1] == 'L' and p[2] < zz[-1][2]):
+                        zz[-1] = p
+                elif abs(p[2] - zz[-1][2]) / pip >= min_swing:   # opposite — accept if big enough
+                    zz.append(p)
+            sh = [p for p in zz if p[1] == 'H']
+            sl = [p for p in zz if p[1] == 'L']
+
+            # 3. Classify M15 structure from the last two swing highs + lows.
+            struct = "range"
+            if len(sh) >= 2 and len(sl) >= 2:
+                hh = sh[-1][2] > sh[-2][2]; hl = sl[-1][2] > sl[-2][2]
+                lh_ = sh[-1][2] < sh[-2][2]; ll_ = sl[-1][2] < sl[-2][2]
+                if hh and hl:
+                    struct = "up"
+                elif lh_ and ll_:
+                    struct = "down"
+
+            # 4. Higher-TF trend (existing EMA20/50 read) + faded-swing tag.
+            h1 = getattr(self.live_evidence, "trend_direction_h1", "sideways")
+            h4 = getattr(self.live_evidence, "trend_direction_h4", "sideways")
+            fade_dir = "down" if signal == "Sell" else "up"   # fade profit direction
+            faded = None
+            if signal == "Sell" and len(sh) >= 2:
+                faded = "LH" if sh[-1][2] < sh[-2][2] else "HH"
+            elif signal == "Buy" and len(sl) >= 2:
+                faded = "HL" if sl[-1][2] > sl[-2][2] else "LL"
+
+            # 5. Combined verdict: H1 trend is primary; fall back to M15 zigzag.
+            dominant = h1 if h1 in ("up", "down") else struct
+            if dominant in ("up", "down"):
+                verdict = "with_structure" if dominant == fade_dir else "against_structure"
+            else:
+                verdict = "range"
+
+            return {
+                "verdict": verdict,
+                "m15_structure": struct,
+                "h1_trend": h1,
+                "h4_trend": h4,
+                "faded_swing": faded,            # LH/HH (sell) or HL/LL (buy)
+                "fade_dir": fade_dir,
+                "dominant": dominant,
+                "n_swings": len(zz),
+                "min_swing_pips": round(min_swing, 1),
+                "last_sh": round(sh[-1][2], 5) if sh else None,
+                "last_sl": round(sl[-1][2], 5) if sl else None,
+            }
+        except Exception as e:
+            return {"verdict": "error", "error": str(e)}
+
+    # Named S/R level types by which SIDE they sit on. A support (a LOW / floor) is
+    # where price bounces UP → SELLING into it is wrong-side. A resistance (a HIGH /
+    # ceiling) is where price bounces DOWN → BUYING into it is wrong-side.
+    _SUPPORT_TYPES = {"PDL", "NYL", "ASL", "TODAY_L", "LNDL"}
+    _RESISTANCE_TYPES = {"PDH", "NYH", "ASH", "TODAY_H", "LNDH"}
+
+    def _compute_selectivity_shadow(self, signal: str, price: float, impulse_shadow: dict, event=None) -> dict:
+        """Entry-selectivity LABELER (shadow-only, never gates). Flags marginal / wrong fades
+        to cut over-trading + the wrong-direction losses. Two flags fold into would_skip:
+        (1) FADING INTO MOMENTUM — validated (n=32: fading_into_impulse=True −$24.9/trade vs
+            −$0.8); would_skip when the fade fights the recent 300s move at >= threshold.
+        (2) WRONG-SIDE S/R — a SELL fading a SUPPORT (PDL/NYL/… below) or a BUY fading a
+            RESISTANCE (above): "sell into support / buy into resistance". EURUSD's
+            direction-aware S/R already prevents this; USDJPY (gate OFF) does NOT — this is
+            the PDL sells seen 2026-08-12. Type-based, with a price-side fallback for the
+            ambiguous M15_SWING/ROUND. The room-veto is logged but NOT used (falsified).
+        """
+        try:
+            pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+            room_pips = None; range_pos = None
+            m15 = list(getattr(self.live_evidence, "_m15_candles", []))[-20:]
+            if len(m15) >= 8:
+                hi = max(c.high for c in m15); lo = min(c.low for c in m15)
+                span = (hi - lo) or pip
+                if signal == "Sell":
+                    room_pips = round((price - lo) / pip, 1); range_pos = round((price - lo) / span, 2)
+                else:
+                    room_pips = round((hi - price) / pip, 1); range_pos = round((hi - price) / span, 2)
+            fading = bool((impulse_shadow or {}).get("fading_into_impulse", False))
+            disp = float((impulse_shadow or {}).get("displacement_ratio", 0.0) or 0.0)
+            thr = float(self.config.get("selectivity_disp_threshold", 0.30))
+            momentum_skip = fading and disp >= thr
+
+            # Wrong-side S/R flag (sell into support / buy into resistance).
+            level_type = event.details.get("sr_level_type") if event is not None else None
+            sr_price = event.details.get("sr_level_price") if event is not None else None
+            lvl_is_support = None
+            if level_type in self._SUPPORT_TYPES:
+                lvl_is_support = True
+            elif level_type in self._RESISTANCE_TYPES:
+                lvl_is_support = False
+            elif sr_price is not None:                       # ambiguous type (M15_SWING/ROUND): use price side
+                lvl_is_support = sr_price < price
+            wrong_side = bool(
+                (signal == "Sell" and lvl_is_support is True) or
+                (signal == "Buy" and lvl_is_support is False))
+
+            would_skip = momentum_skip or wrong_side
+            reason = ("wrong_side_sr" if wrong_side else
+                      ("fading_into_momentum" if momentum_skip else ""))
+            return {
+                "verdict": "would_skip" if would_skip else "allow",
+                "reason": reason,
+                "wrong_side": wrong_side, "level_type": level_type,
+                "fading_into": fading, "displacement_ratio": round(disp, 3), "threshold": thr,
+                "room_pips": room_pips, "range_pos": range_pos,   # logged for regime-tracking (room-veto falsified)
+            }
+        except Exception as e:
+            return {"verdict": "error", "error": str(e)}
+
+    def _compute_regime_shadow(self, signal: str, price: float) -> dict:
+        """Regime LABELER (shadow-only, never gates). The dynamic-market lever: the SAME
+        fade is right in a RANGE (level holds) and wrong in a TREND (level breaks), and
+        regime is what separates the early-cut winners (B) from the wrong-direction losers
+        (A). Kaufman efficiency ratio over regime_lookback M15 closes: net move / total
+        path. >= regime_trend_er = trending, <= regime_range_er = ranging, else transitional.
+        would_skip flags a fade fighting a STRONG trend (the A-mode / "right spot, wrong
+        direction"). Logged to prove the split across regimes before any wiring.
+        """
+        try:
+            pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+            lookback = int(self.config.get("regime_lookback", 20))
+            m15 = list(getattr(self.live_evidence, "_m15_candles", []))[-lookback:]
+            if len(m15) < 8:
+                return {"regime": "insufficient_data", "n": len(m15)}
+            cl = [c.close for c in m15]
+            net = abs(cl[-1] - cl[0])
+            path = sum(abs(cl[i] - cl[i - 1]) for i in range(1, len(cl)))
+            er = round(net / path, 3) if path > 0 else 0.0
+            trend_dir = "up" if cl[-1] > cl[0] else "down"
+            trend_thr = float(self.config.get("regime_trend_er", 0.50))
+            range_thr = float(self.config.get("regime_range_er", 0.30))
+            regime = "trending" if er >= trend_thr else ("ranging" if er <= range_thr else "transitional")
+            fade_dir = "down" if signal == "Sell" else "up"   # fade profit direction
+            against_trend = bool(regime == "trending" and trend_dir != fade_dir)
+            return {
+                "regime": regime,
+                "efficiency_ratio": er,
+                "trend_dir": trend_dir,
+                "net_move_pips": round(net / pip, 1),
+                "against_trend": against_trend,
+                "verdict": "would_skip" if against_trend else "allow",   # A-mode: skip fade vs strong trend
+                "n": len(m15),
+            }
+        except Exception as e:
+            return {"regime": "error", "error": str(e)}
+
+    def _log_skip(self, event, reason):
+        """Persist a REJECTED fade candidate to signals.jsonl (type=signal_skipped).
+
+        Only genuine peak-fade candidates a gate turned away are logged (callers
+        guard on is_peak/is_exhaustion), so the file stays analysable: it answers
+        "which fades did direction-aware / the range gate / news guard refuse, and
+        were they right to?" without scraping daemon.log. event.details already
+        carries the peak metrics (velocity_divergence, price_per_tick_efficiency,
+        peak_confidence) and, when a level was found, the sr_level_* fields set by
+        the proximity check.
+        """
+        try:
+            import os, json
+            os.makedirs("reports", exist_ok=True)
+            payload = {
+                "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "type": "signal_skipped",
+                "mt5_symbol": self.mt5_symbol,
+                "event_type": event.event_type.value,
+                "event_price": event.price,
+                "event_details": event.details,
+                "skip_reason": reason,
+            }
+            with open(self._report_path("signals.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload) + "\n")
+        except Exception as e:
+            logger.error("Failed to append skip to signals.jsonl: %s", e)
+
+    def _log_revp_telemetry(self, candle):
+        """Append one M15 exhaustion-telemetry row for the offline REVP-confluence
+        study: velocity_divergence (~reversal pressure) and price_per_tick_efficiency
+        (~displacement collapse), as both the bar-close value and the intra-bar
+        extreme (div_max / eff_min accumulated per tick in _on_tick).
+
+        LEAD only (the exec-node path returns before this runs); per-instance file
+        via _report_path so it never collides with the node; fully fail-safe so a
+        logging error can never disturb trading. Consumed later to test whether a
+        chart pattern completing AT a level WITH high reversal pressure has an edge.
+        """
+        try:
+            import os, json
+            pd = self.event_detector.peak_detector
+            div_last = float(getattr(pd, "_last_divergence", 0.0) or 0.0)
+            eff_last = float(getattr(pd, "_last_efficiency", 1.0) or 1.0)
+            div_max = float(getattr(self, "_revp_div_max", div_last))
+            eff_min = float(getattr(self, "_revp_eff_min", eff_last))
+            ot = candle.open_time
+            os.makedirs("reports", exist_ok=True)
+            row = {
+                "type": "revp_m15",
+                "mt5_symbol": self.mt5_symbol,
+                "timestamp_utc": ot.replace(tzinfo=timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                "epoch": int(ot.replace(tzinfo=timezone.utc).timestamp()),
+                "open": round(candle.open, 5), "high": round(candle.high, 5),
+                "low": round(candle.low, 5), "close": round(candle.close, 5),
+                "div_last": round(div_last, 3), "div_max": round(div_max, 3),
+                "eff_last": round(eff_last, 4), "eff_min": round(eff_min, 4),
+                "peak_confirmed": bool(getattr(pd, "_last_peak_confirmed", False)),
+            }
+            with open(self._report_path("revp_telemetry.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(row) + "\n")
+        except Exception as e:
+            logger.debug("revp telemetry log failed: %s", e)
+        finally:
+            self._revp_div_max = 0.0
+            self._revp_eff_min = 1.0
+
+    def _arm_revconf_shadow(self, event, signal: str) -> None:
+        """Arm a reversal-confirmation PRE-ENTRY watch for a fired peak signal.
+
+        Anchored at the SIGNAL price (the decision moment). Over revconf_window_sec a
+        per-tick machine (_update_revconf_shadow) resolves confirm/invalidate/timeout;
+        on CONFIRM it then simulates a fresh hard-distance trade from the LATER
+        (confirmed) price to a win/loss/timeout. Pure shadow: the real trade has
+        ALREADY fired; this only records what WAITING would have done. LEAD only; see
+        the revconf_shadow docstring in default_config for why there is no arm flag.
+
+        UNITS: every threshold below is in PIPS (×atr_pips), compared against pip-valued
+        displacements (price-diff / pip). No price-vs-pip mixing — the recurring bug.
+        """
+        pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+        atr = self.live_state._state.atr_14_h1 if self.live_state._state else None
+        atr_pips = (atr / pip) if atr else (15.0 if pip == 0.01 else 8.0)
+        hs = self.config.get("realtime_hard_stop_pips")
+        sl_tp = float(hs) if hs else round(2.0 * atr_pips, 1)   # forward sim uses the live hard SL=TP
+        confirm_pips = float(self.config.get("revconf_confirm_atr", 0.25)) * atr_pips
+        invalidate_pips = float(self.config.get("revconf_invalidate_atr", 0.25)) * atr_pips
+        self._revconf_watches.append({
+            "phase": "confirm",
+            "buy": signal == "Buy",
+            "anchor": float(event.price),
+            "sig_price": float(event.price),
+            "sig_ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "t0": time.time(),
+            "pip": pip,
+            "atr_pips": round(atr_pips, 1),
+            "confirm_pips": round(confirm_pips, 1),
+            "invalidate_pips": round(invalidate_pips, 1),
+            "sl_tp_pips": round(sl_tp, 1),
+            "window_sec": float(self.config.get("revconf_window_sec", 900.0)),
+            "outcome_window_sec": float(self.config.get("revconf_outcome_window_sec", 14400.0)),
+            "level_type": event.details.get("sr_level_type"),
+            "would_enter": None, "fwd_t0": None, "fwd_mfe": 0.0, "fwd_mae": 0.0,
+            "confirm_delay": None,
+        })
+        if len(self._revconf_watches) > 20:                    # hard cap, prune oldest
+            self._revconf_watches = self._revconf_watches[-20:]
+
+    def _update_revconf_shadow(self, bid: float, ask: float) -> None:
+        """Advance pending reversal-confirmation watches one tick. LEAD only, never acts.
+
+        confirm phase: fav = profit-direction displacement from the signal anchor.
+          fav >= confirm_pips        → CONFIRM  (start the forward would-enter sim)
+          fav <= -invalidate_pips    → would_skip_invalidated (a false turn / continuation)
+          elapsed >= window_sec      → would_skip_timeout (never pulled away)
+        forward phase (from would_enter, hard SL=TP): adverse-first pessimism.
+          MAE <= -sl_tp → loss ; MFE >= sl_tp → win ; elapsed cap → mark-to-market timeout.
+        """
+        if self._exec_node or not self.config.get("revconf_shadow", True) or not self._revconf_watches:
+            return
+        try:
+            mid = (bid + ask) / 2.0
+            now = time.time()
+            keep = []
+            for w in self._revconf_watches:
+                pip = w["pip"]; buy = w["buy"]
+                if w["phase"] == "confirm":
+                    fav = ((mid - w["anchor"]) if buy else (w["anchor"] - mid)) / pip
+                    if fav >= w["confirm_pips"]:
+                        w["phase"] = "forward"; w["would_enter"] = mid; w["fwd_t0"] = now
+                        w["confirm_delay"] = round(now - w["t0"], 1)
+                        w["fwd_mfe"] = 0.0; w["fwd_mae"] = 0.0
+                        keep.append(w); continue
+                    if fav <= -w["invalidate_pips"]:
+                        w["verdict"] = "would_skip_invalidated"; w["adverse_pips"] = round(fav, 1)
+                        self._finalize_revconf(w, now); continue
+                    if now - w["t0"] >= w["window_sec"]:
+                        w["verdict"] = "would_skip_timeout"; w["adverse_pips"] = round(fav, 1)
+                        self._finalize_revconf(w, now); continue
+                    keep.append(w); continue
+                # forward phase
+                e = w["would_enter"]
+                fav2 = ((mid - e) if buy else (e - mid)) / pip
+                if fav2 > w["fwd_mfe"]: w["fwd_mfe"] = fav2
+                if fav2 < w["fwd_mae"]: w["fwd_mae"] = fav2
+                if -w["fwd_mae"] >= w["sl_tp_pips"]:
+                    w["verdict"] = "would_enter"; w["forward_outcome"] = "loss"; w["outcome_pips"] = -w["sl_tp_pips"]
+                    self._finalize_revconf(w, now); continue
+                if w["fwd_mfe"] >= w["sl_tp_pips"]:
+                    w["verdict"] = "would_enter"; w["forward_outcome"] = "win"; w["outcome_pips"] = w["sl_tp_pips"]
+                    self._finalize_revconf(w, now); continue
+                if now - w["fwd_t0"] >= w["outcome_window_sec"]:
+                    w["verdict"] = "would_enter"; w["forward_outcome"] = "timeout"; w["outcome_pips"] = round(fav2, 1)
+                    self._finalize_revconf(w, now); continue
+                keep.append(w)
+            self._revconf_watches = keep[-20:] if len(keep) > 20 else keep
+        except Exception as e:
+            logger.debug("revconf shadow update failed: %s", e)
+
+    def _finalize_revconf(self, w: dict, now: float) -> None:
+        """Write one resolved reversal-confirmation row to reversal_confirm_shadow.jsonl."""
+        try:
+            import json, os
+            row = {
+                "type": "reversal_confirm", "mt5_symbol": self.mt5_symbol,
+                "sig_ts_utc": w["sig_ts"], "sig_price": w["sig_price"],
+                "signal": "Buy" if w["buy"] else "Sell", "level_type": w.get("level_type"),
+                "verdict": w["verdict"],
+                "confirm_pips": w["confirm_pips"], "invalidate_pips": w["invalidate_pips"],
+                "window_sec": w["window_sec"], "atr_pips": w["atr_pips"], "sl_tp_pips": w["sl_tp_pips"],
+            }
+            if w["verdict"] == "would_enter":
+                reprice = ((w["would_enter"] - w["anchor"]) if w["buy"]
+                           else (w["anchor"] - w["would_enter"])) / w["pip"]
+                row.update({
+                    "would_enter_price": round(w["would_enter"], 5),
+                    "reprice_pips": round(reprice, 1),          # profit-dir move forfeited before entry
+                    "confirm_delay_sec": w["confirm_delay"],
+                    "forward_outcome": w["forward_outcome"],
+                    "outcome_pips": round(w["outcome_pips"], 1),
+                    "fwd_mfe_pips": round(w["fwd_mfe"], 1),
+                    "fwd_mae_pips": round(w["fwd_mae"], 1),
+                    "fwd_hold_sec": round(now - w["fwd_t0"], 1),
+                })
+            else:
+                row["adverse_pips"] = w.get("adverse_pips")
+                row["outcome_pips"] = 0.0                        # skipped → no trade taken
+            os.makedirs("reports", exist_ok=True)
+            with open(self._report_path("reversal_confirm_shadow.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(row) + "\n")
+        except Exception as e:
+            logger.debug("revconf finalize failed: %s", e)
+
+    def _update_breakout_retest_shadow(self, candle) -> None:
+        """Break-and-retest CONTINUATION shadow (Stage-1 + full lifecycle, no trading).
+
+        The MIRROR of the fade: instead of fading a level, trade WITH the level that
+        BREAKS, entering on the retest that confirms it held. Runs on each M15 close
+        (LEAD only), tracks a small state machine per setup, and writes completed
+        outcomes to reports/breakout_retest_shadow.jsonl. NEVER touches the executor.
+
+        Lifecycle per setup:
+          BREAK   current M15 closes beyond the prior structure (>= margin_atr×ATR)
+                  with a window trend push (>= push_atr×ATR)  →  arm a retest watch
+                  at the broken level (old resistance→support / support→resistance).
+          RETEST  price pulls back into level ± retest_tol_atr×ATR.
+          CONFIRM after the retest, a bar closes back in the break direction beyond
+                  confirm_atr×ATR  →  hypothetical entry at that close.
+          FAIL    a bar closes back THROUGH the level by invalidate_atr×ATR (fakeout).
+          EXPIRE  no retest within retest_timeout_bars (it ran away).
+          OUTCOME from the hypothetical entry, forward bars decide WIN (+tp_atr×ATR)
+                  / LOSS (−sl_atr×ATR, adverse checked first = pessimistic) / TIMEOUT.
+        Judged later vs the SHUFFLE null before any live entry is ever built.
+        """
+        if not self.config.get("breakout_retest_shadow", True):
+            return
+        try:
+            import os, json
+            cfg = self.config
+            lookback = int(cfg.get("br_lookback", 20)); win = int(cfg.get("br_window", 3))
+            all_m15 = list(getattr(self.live_evidence, "_m15_candles", []))
+            prior_bars = [c for c in all_m15 if c.open_time < candle.open_time]
+            if len(prior_bars) < max(6, win + 3):
+                return
+            m15 = (prior_bars[-(lookback - 1):] + [candle])  # exactly ~lookback, current last
+            prior = m15[:-win]
+            prior_high = max(c.high for c in prior); prior_low = min(c.low for c in prior)
+
+            pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+            atr = self.live_state._state.atr_14_h1 if self.live_state._state else None
+            atr_pips = (atr / pip) if atr else (15.0 if pip == 0.01 else 8.0)
+            atr_px = atr_pips * pip
+            # PRICE-unit thresholds (compared against price levels below)…
+            margin = float(cfg.get("br_margin_atr", 0.25)) * atr_px
+            tol = float(cfg.get("br_retest_tol_atr", 0.2)) * atr_px
+            confirm = float(cfg.get("br_confirm_atr", 0.15)) * atr_px
+            invalid = float(cfg.get("br_invalidate_atr", 0.35)) * atr_px
+            # …and PIP-unit thresholds (compared against pip excursions).
+            push_thr = float(cfg.get("br_push_atr", 0.5)) * atr_pips
+            sl_p = float(cfg.get("br_sl_atr", 1.0)) * atr_pips
+            tp_p = float(cfg.get("br_tp_atr", 2.0)) * atr_pips
+            timeout = int(cfg.get("br_retest_timeout_bars", 8))
+            out_bars = int(cfg.get("br_outcome_bars", 16))
+
+            hi, lo, cl = candle.high, candle.low, candle.close
+            ep = int(candle.open_time.replace(tzinfo=timezone.utc).timestamp())
+
+            def emit(s, status, exit_pips=None):
+                row = {"type": "breakout_retest", "mt5_symbol": self.mt5_symbol,
+                       "status": status, "dir": s["dir"], "level": round(s["level"], 5),
+                       "break_epoch": s["break_epoch"], "break_close": round(s["break_close"], 5),
+                       "atr_pips": round(s["atr_pips"], 1), "retest_touched": s["retest_touched"],
+                       "entry_epoch": s.get("entry_epoch"), "entry_price": s.get("entry_price"),
+                       "fwd_mfe": round(s.get("mfe", 0.0), 1), "fwd_mae": round(s.get("mae", 0.0), 1),
+                       "outcome_pips": (round(exit_pips, 1) if exit_pips is not None else None),
+                       "sl_pips": round(sl_p, 1), "tp_pips": round(tp_p, 1),
+                       "logged_epoch": ep}
+                try:
+                    os.makedirs("reports", exist_ok=True)
+                    with open(self._report_path("breakout_retest_shadow.jsonl"), "a", encoding="utf-8") as f:
+                        f.write(json.dumps(row) + "\n")
+                except Exception as we:
+                    logger.debug("breakout-retest log failed: %s", we)
+
+            setups = self._brk_setups
+            keep = []
+            for s in setups:
+                s["bars"] += 1
+                if s["state"] == "confirmed":
+                    e = s["entry_price"]
+                    if s["dir"] == "long":
+                        s["mfe"] = max(s["mfe"], (hi - e) / pip); s["mae"] = max(s["mae"], (e - lo) / pip)
+                    else:
+                        s["mfe"] = max(s["mfe"], (e - lo) / pip); s["mae"] = max(s["mae"], (hi - e) / pip)
+                    if s["mae"] >= sl_p:                       # adverse first = pessimistic
+                        emit(s, "loss", -sl_p); continue
+                    if s["mfe"] >= tp_p:
+                        emit(s, "win", tp_p); continue
+                    if s["ebars"] >= out_bars:
+                        px = ((cl - e) / pip) if s["dir"] == "long" else ((e - cl) / pip)
+                        emit(s, "timeout", px); continue
+                    s["ebars"] += 1; keep.append(s); continue
+                # state == watch
+                L = s["level"]
+                if s["dir"] == "long":
+                    if cl < L - invalid:
+                        emit(s, "fail"); continue
+                    if not s["retest_touched"] and lo <= L + tol:
+                        s["retest_touched"] = True
+                    if s["retest_touched"] and cl > L + confirm:
+                        s["state"] = "confirmed"; s["entry_price"] = cl
+                        s["entry_epoch"] = ep; s["ebars"] = 0; s["mfe"] = 0.0; s["mae"] = 0.0
+                        emit(s, "confirmed"); keep.append(s); continue
+                else:  # short
+                    if cl > L + invalid:
+                        emit(s, "fail"); continue
+                    if not s["retest_touched"] and hi >= L - tol:
+                        s["retest_touched"] = True
+                    if s["retest_touched"] and cl < L - confirm:
+                        s["state"] = "confirmed"; s["entry_price"] = cl
+                        s["entry_epoch"] = ep; s["ebars"] = 0; s["mfe"] = 0.0; s["mae"] = 0.0
+                        emit(s, "confirmed"); keep.append(s); continue
+                if s["bars"] > timeout:
+                    emit(s, "expire"); continue
+                keep.append(s)
+            self._brk_setups = keep
+
+            # Detect a NEW breakout on THIS bar (dedupe: no active setup on same side).
+            push_pips = (cl - m15[0].close) / pip           # window trend, in pips
+            up = cl > prior_high + margin and push_pips >= push_thr
+            dn = cl < prior_low - margin and (-push_pips) >= push_thr
+            have_long = any(x["dir"] == "long" and x["state"] == "watch" for x in self._brk_setups)
+            have_short = any(x["dir"] == "short" and x["state"] == "watch" for x in self._brk_setups)
+            if up and not have_long:
+                self._brk_setups.append({"state": "watch", "dir": "long", "level": prior_high,
+                    "break_epoch": ep, "break_close": cl, "atr_pips": atr_pips,
+                    "bars": 0, "retest_touched": False, "mfe": 0.0, "mae": 0.0})
+            if dn and not have_short:
+                self._brk_setups.append({"state": "watch", "dir": "short", "level": prior_low,
+                    "break_epoch": ep, "break_close": cl, "atr_pips": atr_pips,
+                    "bars": 0, "retest_touched": False, "mfe": 0.0, "mae": 0.0})
+            if len(self._brk_setups) > 12:                     # hard cap, prune oldest
+                self._brk_setups = self._brk_setups[-12:]
+        except Exception as e:
+            logger.debug("breakout-retest shadow failed: %s", e)
+
+    def _log_signal(self, event, ws, signal, trade_result, *, impulse_shadow=None, breakout_shadow=None,
+                    structure_shadow=None, selectivity_shadow=None, regime_shadow=None):
         """Persistently log every generated signal to reports/signals.jsonl and reports/signals.log."""
         import json
         import os
-        
+
         timestamp_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         log_payload = {
             "timestamp": timestamp_str,
-            # Unambiguous instant. 'timestamp' above is machine-local wall clock,
-            # which cannot be bucketed into trading sessions without knowing the
-            # box's timezone — that ambiguity produced a 3-hour error in session
-            # analysis. Always prefer timestamp_utc for any time-of-day work.
             "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
             "system": event.details.get("system", "optimized"),
             "ticker": self.yf_symbol,
@@ -1132,8 +1926,6 @@ class AxonDaemon:
             "event_priority": event.priority.name,
             "event_price": event.price,
             "event_details": event.details,
-            # The S/R level this entry faded (stamped by the peak gate), hoisted to
-            # the top level so analysis never has to reconstruct it.
             "sr_level_type": event.details.get("sr_level_type"),
             "sr_level_price": event.details.get("sr_level_price"),
             "sr_level_dist_pips": event.details.get("sr_level_dist_pips"),
@@ -1145,7 +1937,17 @@ class AxonDaemon:
             "decision": signal,
             "trade_result": trade_result
         }
-        
+        if impulse_shadow is not None:
+            log_payload["impulse_shadow"] = impulse_shadow
+        if breakout_shadow is not None:
+            log_payload["breakout_shadow"] = breakout_shadow
+        if structure_shadow is not None:
+            log_payload["structure_shadow"] = structure_shadow
+        if selectivity_shadow is not None:
+            log_payload["selectivity_shadow"] = selectivity_shadow
+        if regime_shadow is not None:
+            log_payload["regime_shadow"] = regime_shadow
+
         # Ensure reports dir exists
         os.makedirs("reports", exist_ok=True)
         
@@ -1582,6 +2384,7 @@ class AxonDaemon:
                     atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
                     self._active_trade_atr[ticket] = atr
                     self._active_trade_peak_price[ticket] = trade_result.get("price", 0.0)
+                    self._active_trade_worst_price[ticket] = trade_result.get("price", 0.0)
                     if self.correlation_engine is not None:
                         self.correlation_engine.register_position(
                             self.mt5_symbol, signal,
@@ -1731,6 +2534,167 @@ class AxonDaemon:
                     direction, rel, lookback, rng_lo, rng_hi)
         return True, ""
 
+    def _update_retest_verdict(self, pos, bid: float, ask: float, pip: float) -> None:
+        """Resolve the retest-confirmation verdict for an open fade (shadow / veto).
+
+        DIAGNOSIS (validated 2026-08-08): the engine fires at the first single-tick
+        deceleration, so it fades pauses in live trends — ~72% of realised loss comes
+        from fades that go straight against (early MFE ~0, run to the hard stop).
+
+        CONFIRM  = favorable displacement reached +retest_x_pips BEFORE adverse reached
+                   retest_adverse_cap_pips, within retest_window_min.
+        VETO     = adverse hit first (a straight-against fade).
+        TIMEOUT  = neither by the window (never pulled away) — treated as straight-against.
+
+        In SHADOW (default) this only records the verdict + delay, which the close log
+        writes next to the trade's realised outcome — so the veto can be proven to cut
+        losers, not winners, on live data before it is ever allowed to act. When
+        retest_confirm_enabled is set (per-pair, EURUSD-only), a VETO/TIMEOUT scratches
+        the position early. Fully guarded — the default config leaves execution unchanged.
+        """
+        if not (self.config.get("retest_confirm_shadow", True) or
+                self.config.get("retest_confirm_enabled", False)):
+            return
+        ticket = pos.ticket
+        arm = self._retest_arm.get(ticket)
+        if arm is None or arm.get("verdict") is not None:
+            return  # not armed, or already resolved this trade
+        try:
+            x = float(self.config.get("retest_x_pips", 2.0))
+            cap = float(self.config.get("retest_adverse_cap_pips", 2.0))
+            window_s = float(self.config.get("retest_window_min", 30)) * 60.0
+            t0 = self._active_trade_entry_time.get(ticket)
+            elapsed = (time.time() - t0) if t0 else 0.0
+            mid = (bid + ask) / 2.0
+            # signed favorable displacement in pips (SELL favorable = price DOWN)
+            disp = ((mid - arm["anchor"]) if arm["buy"] else (arm["anchor"] - mid)) / pip
+            if disp >= x:
+                verdict = "confirm"
+            elif disp <= -cap:
+                verdict = "veto"
+            elif elapsed >= window_s:
+                verdict = "timeout"
+            else:
+                return  # still resolving
+            arm["verdict"] = verdict
+            arm["delay"] = round(elapsed, 1)
+            logger.info("RETEST %s: %s ticket %d disp=%.1fp after %.0fs (x=%.1f cap=%.1f)",
+                        verdict.upper(), self.mt5_symbol, ticket, disp, elapsed, x, cap)
+            # ACT only when explicitly enabled (default OFF). Confirm is a no-op.
+            if verdict in ("veto", "timeout") and self.config.get("retest_confirm_enabled", False):
+                logger.info("RETEST VETO ENABLED — scratching %s ticket %d early (%s).",
+                            self.mt5_symbol, ticket, verdict)
+                self._close_position(pos, f"Retest veto ({verdict})")
+        except Exception as e:
+            logger.error("Retest verdict update failed for ticket %s: %s",
+                         getattr(pos, "ticket", "?"), e)
+
+    def _update_mfe_exit_shadow(self, pos, bid: float, ask: float, pip: float) -> None:
+        """MFE early-exit shadow: record where a 'dead-fade' cutoff WOULD have exited.
+
+        RATIONALE (today's live data, 2026-08-10): the two −30p USDJPY losers both
+        faded a level that broke — MAE ran to ~29.5p (near the full stop) while MFE
+        never cleared ~5p. The 7 EURUSD winners all kept MAE < 6p. So MFE alone
+        does not separate (a loser reached MFE 6.8), but "adverse has grown past X
+        while favorable never cleared Y after a grace window" does.
+
+        RULE (fires once, records a snapshot, NEVER closes here):
+          hold >= mfe_exit_grace_sec  AND  running MFE < mfe_exit_floor_pips
+          AND running MAE >= mfe_exit_mae_trigger_pips
+        The snapshot stores the pips P&L at that instant (would_exit_pips); the close
+        log later writes saved_pips = would_exit_pips − actual_close_pips (positive =
+        the cutoff would have helped, negative = it would have cut a winner). Pure
+        observation, so a threshold can be tuned on live data before it is ever armed.
+        """
+        if not self.config.get("mfe_exit_shadow", True):
+            return
+        ticket = pos.ticket
+        if self._mfe_exit_shadow.get(ticket, {}).get("fired"):
+            return  # already snapshotted the first fire this trade
+        try:
+            entry = pos.price_open
+            peak = self._active_trade_peak_price.get(ticket, entry)
+            worst = self._active_trade_worst_price.get(ticket, entry)
+            is_buy = pos.type == mt5.POSITION_TYPE_BUY
+            if is_buy:
+                mfe = (peak - entry) / pip
+                mae = (entry - worst) / pip
+                exit_pips = (bid - entry) / pip          # close a BUY at bid
+            else:
+                mfe = (entry - peak) / pip
+                mae = (worst - entry) / pip
+                exit_pips = (entry - ask) / pip           # close a SELL at ask
+            t0 = self._active_trade_entry_time.get(ticket)
+            hold = (time.time() - t0) if t0 else 0.0
+
+            grace = float(self.config.get("mfe_exit_grace_sec", 900.0))
+            floor = float(self.config.get("mfe_exit_floor_pips", 5.0))
+            mae_trig = float(self.config.get("mfe_exit_mae_trigger_pips", 10.0))
+
+            if hold >= grace and mfe < floor and mae >= mae_trig:
+                self._mfe_exit_shadow[ticket] = {
+                    "fired": True,
+                    "would_exit_pips": round(exit_pips, 1),
+                    "mfe_at_fire": round(mfe, 1),
+                    "mae_at_fire": round(mae, 1),
+                    "hold_at_fire_sec": int(hold),
+                    "grace": grace, "floor": floor, "mae_trigger": mae_trig,
+                }
+                logger.info("MFE-EXIT SHADOW: %s ticket %d WOULD-EXIT @ %.1fp "
+                            "(mfe=%.1f mae=%.1f hold=%.0fs)",
+                            self.mt5_symbol, ticket, exit_pips, mfe, mae, hold)
+        except Exception as e:
+            logger.error("MFE-exit shadow update failed for ticket %s: %s",
+                         getattr(pos, "ticket", "?"), e)
+
+    def _update_exit_capture_shadow(self, pos, bid: float, ask: float, pip: float) -> None:
+        """Alt-trail exit-capture shadow: where a TIGHTER trail WOULD have exited.
+
+        The live trail leashes 0.50×ATR behind the peak; on EURUSD (ATR≈6p) that
+        gives back ≈3p from every peak — the trade is captured at ~42% of its MFE.
+        This simulates a tighter leash (`exit_shadow_trail_atr_mult`, default 0.35)
+        against the SAME tracked peak, recording the pips at the first bar the tight
+        stop would trip. Pure observation — never modifies the real SL. The close
+        log pairs it with the actual result so "tighter trail vs let-it-run" can be
+        judged on live data before the live trail is touched. (The fixed-TP variants
+        are cheaper — computed at close from mfe_pips — see the close logger.)
+        """
+        if not self.config.get("exit_capture_shadow", True):
+            return
+        ticket = pos.ticket
+        if self._exit_shadow.get(ticket, {}).get("hit"):
+            return  # already recorded the first shadow-stop trip
+        try:
+            atr = self._active_trade_atr.get(ticket)
+            peak = self._active_trade_peak_price.get(ticket)
+            if not atr or peak is None:
+                return
+            entry = pos.price_open
+            arm_mult = float(self.config.get("trail_trigger_atr_mult", 0.80))
+            shadow_mult = float(self.config.get("exit_shadow_trail_atr_mult", 0.35))
+            is_buy = pos.type == mt5.POSITION_TYPE_BUY
+            if is_buy:
+                peak_profit = peak - entry
+                if peak_profit < arm_mult * atr:
+                    return  # tight trail not armed yet (same trigger as the real one)
+                shadow_stop = peak - shadow_mult * atr
+                if bid <= shadow_stop:                       # tight trail would trip
+                    self._exit_shadow[ticket] = {"hit": True,
+                        "pips": round((shadow_stop - entry) / pip, 1),
+                        "mult": shadow_mult}
+            else:
+                peak_profit = entry - peak
+                if peak_profit < arm_mult * atr:
+                    return
+                shadow_stop = peak + shadow_mult * atr
+                if ask >= shadow_stop:
+                    self._exit_shadow[ticket] = {"hit": True,
+                        "pips": round((entry - shadow_stop) / pip, 1),
+                        "mult": shadow_mult}
+        except Exception as e:
+            logger.error("Exit-capture shadow update failed for ticket %s: %s",
+                         getattr(pos, "ticket", "?"), e)
+
     def _manage_trailing_stops(self, bid: float, ask: float):
         """Manage trailing stop modifications on active MT5 positions."""
         if not mt5 or not mt5.terminal_info():
@@ -1769,6 +2733,10 @@ class AxonDaemon:
                 atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
                 self._active_trade_atr[ticket] = atr
                 self._active_trade_peak_price[ticket] = pos.price_open
+                self._active_trade_worst_price[ticket] = pos.price_open
+                self._retest_arm[ticket] = {"anchor": pos.price_open,
+                                            "buy": pos.type == mt5.POSITION_TYPE_BUY,
+                                            "verdict": None, "delay": None}
 
             # Ensure ATR and peak price are recorded
             if ticket not in self._active_trade_atr:
@@ -1776,12 +2744,25 @@ class AxonDaemon:
                 self._active_trade_atr[ticket] = atr
             if ticket not in self._active_trade_peak_price:
                 self._active_trade_peak_price[ticket] = pos.price_open
+            if ticket not in self._active_trade_worst_price:
+                self._active_trade_worst_price[ticket] = pos.price_open
+            if ticket not in self._retest_arm:
+                self._retest_arm[ticket] = {"anchor": pos.price_open,
+                                            "buy": pos.type == mt5.POSITION_TYPE_BUY,
+                                            "verdict": None, "delay": None}
             # No-progress-abort clock. For an adopted position (first sight after a
             # restart) we reset to "now" rather than the true fill time: purely
             # wall-clock, no server-tz mixing, and it never aborts a position the
             # instant we re-adopt it — it just grants a fresh window.
             if ticket not in self._active_trade_entry_time:
                 self._active_trade_entry_time[ticket] = time.time()
+
+            # Retest-confirmation verdict (shadow logs it; veto acts only when armed).
+            self._update_retest_verdict(pos, bid, ask, pip)
+            # MFE early-exit shadow (records where a dead-fade cutoff WOULD exit).
+            self._update_mfe_exit_shadow(pos, bid, ask, pip)
+            # Exit-capture shadow (records where a TIGHTER trail WOULD exit).
+            self._update_exit_capture_shadow(pos, bid, ask, pip)
 
             atr = self._active_trade_atr[ticket]
             initial_sl = self._active_trade_initial_sl[ticket]
@@ -1800,6 +2781,9 @@ class AxonDaemon:
                 # Update peak price using the bid price
                 self._active_trade_peak_price[ticket] = max(self._active_trade_peak_price[ticket], bid)
                 peak_price = self._active_trade_peak_price[ticket]
+                # Update worst (adverse) price for MAE — a BUY's adverse move is DOWN
+                self._active_trade_worst_price[ticket] = min(
+                    self._active_trade_worst_price.get(ticket, pos.price_open), bid)
                 
                 # Check Breakeven Trigger (0.60 * ATR)
                 profit = bid - pos.price_open
@@ -1830,6 +2814,9 @@ class AxonDaemon:
                 # Update peak price using the ask price
                 self._active_trade_peak_price[ticket] = min(self._active_trade_peak_price[ticket], ask)
                 peak_price = self._active_trade_peak_price[ticket]
+                # Update worst (adverse) price for MAE — a SELL's adverse move is UP
+                self._active_trade_worst_price[ticket] = max(
+                    self._active_trade_worst_price.get(ticket, pos.price_open), ask)
                 
                 # Check Breakeven Trigger (0.60 * ATR)
                 profit = pos.price_open - ask
@@ -2167,6 +3154,44 @@ class AxonDaemon:
             try:
                 import os, json
                 os.makedirs("reports", exist_ok=True)
+                # MAE/MFE (max adverse/favorable excursion, pips) + hold time. Peak/worst
+                # were tracked per-tick during the trade's life; fall back to entry_price
+                # (0 excursion) if the trade closed before any trail-loop pass recorded them.
+                _peak = self._active_trade_peak_price.get(ticket, entry_price)
+                _worst = self._active_trade_worst_price.get(ticket, entry_price)
+                _entry_t = self._active_trade_entry_time.get(ticket)
+                _rt = self._retest_arm.get(ticket, {})
+                if direction == "BUY":
+                    _mfe = (_peak - entry_price) / pip
+                    _mae = (entry_price - _worst) / pip
+                else:
+                    _mfe = (entry_price - _peak) / pip
+                    _mae = (_worst - entry_price) / pip
+                _hold_seconds = int(time.time() - _entry_t) if _entry_t else None
+                # MFE early-exit shadow: whether the dead-fade cutoff would have
+                # fired, and by how many pips it would have improved the realised result.
+                _mx = self._mfe_exit_shadow.get(ticket, {})
+                if _mx.get("fired"):
+                    _mx = dict(_mx)
+                    _mx["saved_pips"] = round(_mx["would_exit_pips"] - pips, 1)
+                else:
+                    _mx = {"fired": False}
+                # Exit-capture shadow: what alternative exits WOULD have realised.
+                #  • fixed_tp: cap at N pips → N if MFE reached N (price passed through
+                #    it before any reversal), else the actual result. Improvement vs
+                #    actual is (value − pips).  • alt_trail: the tighter-leash sim
+                #    (per-tick, first shadow-stop hit); null-hit → the trade closed
+                #    before the tight trail tripped, so it equals the actual result.
+                _mfe_r = round(_mfe, 1)
+                _tps = self.config.get("exit_shadow_tp_pips", [3.0, 4.0, 5.0, 6.0])
+                _fixed_tp = {f"tp{int(t)}": (round(t, 1) if _mfe_r >= t else round(pips, 1))
+                             for t in _tps}
+                _es = self._exit_shadow.get(ticket, {})
+                _alt_trail = {"mult": _es.get("mult", self.config.get("exit_shadow_trail_atr_mult", 0.35)),
+                              "pips": _es.get("pips") if _es.get("hit") else round(pips, 1),
+                              "hit": bool(_es.get("hit"))}
+                _exit_cap = {"actual_pips": round(pips, 1), "mfe_pips": _mfe_r,
+                             "fixed_tp": _fixed_tp, "alt_trail": _alt_trail}
                 payload = {
                     "timestamp": exit_time_str,
                     "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -2180,6 +3205,13 @@ class AxonDaemon:
                     "exit_price": exit_price,
                     "profit": profit,
                     "pips": round(pips, 1),
+                    "mae_pips": round(_mae, 1),
+                    "mfe_pips": round(_mfe, 1),
+                    "hold_seconds": _hold_seconds,
+                    "retest_verdict": _rt.get("verdict"),
+                    "retest_delay_sec": _rt.get("delay"),
+                    "mfe_exit_shadow": _mx,
+                    "exit_capture_shadow": _exit_cap,
                     "reason": reason,
                     "outcome": outcome
                 }
@@ -2217,6 +3249,10 @@ class AxonDaemon:
             self._active_trade_initial_sl.pop(ticket, None)
             self._active_trade_atr.pop(ticket, None)
             self._active_trade_peak_price.pop(ticket, None)
+            self._active_trade_worst_price.pop(ticket, None)
+            self._retest_arm.pop(ticket, None)
+            self._mfe_exit_shadow.pop(ticket, None)
+            self._exit_shadow.pop(ticket, None)
             self._active_trade_entry_time.pop(ticket, None)
             
             # Apply post-trade global cooldown to prevent immediate reversal trades

@@ -178,7 +178,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # here and is never allowed below it (nor below it after correlation scaling).
     # NOTE: a 1.0-lot floor overrides the risk-% target on small accounts — e.g.
     # EURUSD 1.0 lot with a 16-pip stop risks ~$160 (~1.6% of a $10k account).
-    "realtime_min_lot": 1.0,
+    # LOWERED 1.0->0.1 2026-08-13 (user): the 1.0 floor is what forced yesterday's
+    # SL-distance shrink (kept a 1-lot lead at 1.1% by tightening the stop). With the
+    # real 20/30-pip stops restored, 1.1% of the ~10k lead = 0.55/0.58 lot, so the
+    # floor must sit below that. Node lots (5.5+) never touch this floor.
+    "realtime_min_lot": 0.1,
     "realtime_deviation": 20,
     "realtime_min_confluence_conditions": 1,
     "realtime_dry_run": True,
@@ -314,6 +318,151 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "range_gate_lookback": 20,          # closed M15 candles that define the range (~5h)
     "range_gate_edge": 0.25,            # block SELL if pos < edge (lower quarter = support);
                                         # block BUY if pos > 1-edge (upper quarter = resistance)
+    # ── Direction-aware S/R selection (reject wrong-side fades) ────────────────
+    # When True, the peak gate only considers S/R levels in the trade's PROFIT
+    # direction (resistance at/above for SELL, support at/below for BUY) — it
+    # never fades INTO a level. Set per-pair via SYMBOL_CALIBRATION. Default OFF.
+    "direction_aware_sr": False,
+    # ── Retest-confirmation veto (skip a fade that goes straight-against) ──────
+    # DIAGNOSIS-VALIDATED (2026-08-08): the engine fires at the first single-tick
+    # deceleration, so it fades pauses in live trends; ~72% of realised loss comes
+    # from fades that go straight against (early MFE ~0, run to the hard stop). This
+    # veto watches the first `retest_window_min` of a fade: if favorable displacement
+    # reaches +retest_x_pips BEFORE adverse reaches retest_adverse_cap_pips it CONFIRMS;
+    # if adverse hits first (or neither by the window) it is a straight-against VETO.
+    # SHADOW logs the verdict without acting; ENABLED (per-pair, EURUSD-only) scratches
+    # the vetoed position early. Defaults keep live behaviour UNCHANGED until armed.
+    "retest_confirm_enabled": False,     # act on the veto (scratch straight-against fades)
+    "retest_confirm_shadow": True,       # log the verdict without acting
+    "retest_x_pips": 2.0,                # favorable pull-away that CONFIRMS the fade
+    "retest_adverse_cap_pips": 2.0,      # adverse move that marks a straight-against VETO
+    "retest_window_min": 30,             # minutes to resolve confirm vs veto
+    # ── Reversal-confirmation PRE-ENTRY gate (SHADOW-ONLY, never acts) ─────────
+    # The retest veto ENTERS EARLY then scratches; this asks the opposite question:
+    # what if we WAIT and only enter once the reversal CONFIRMS? On each fired peak
+    # signal the LEAD arms a watch anchored at the signal price and, over
+    # revconf_window_sec, resolves: CONFIRM (price pulled +revconf_confirm_atr×ATR in
+    # the fade/profit direction → would-enter at that LATER price) / INVALIDATE
+    # (price ran revconf_invalidate_atr×ATR the WRONG way → would-skip, a false turn)
+    # / TIMEOUT (neither by the window → would-skip). On CONFIRM it then simulates a
+    # fresh hard-distance trade from the would-enter price to a WIN/LOSS/TIMEOUT
+    # outcome, logging reprice cost + forward P&L to reports/reversal_confirm_shadow.jsonl.
+    # WHY SHADOW-ONLY, NO ARM FLAG: the offline test of exactly this "delay-and-reprice"
+    # LOST −90p and rescued ZERO losers (delaying forfeits the fast fades). This shadow
+    # re-tests that on live fills before the idea is ever allowed to act. Never mirrored.
+    "revconf_shadow": True,              # LEAD logs the would-wait counterfactual (no action)
+    "revconf_confirm_atr": 0.25,         # favorable pull-away (×ATR) that CONFIRMS → would-enter
+    "revconf_invalidate_atr": 0.25,      # adverse continuation (×ATR) that INVALIDATES → would-skip
+    "revconf_window_sec": 900.0,         # seconds to resolve confirm/invalidate/timeout (15 min)
+    "revconf_outcome_window_sec": 14400.0, # cap on the forward would-enter sim (4h) then mark-to-market
+    # ── MTF market-structure shadow (Stage-1, LABEL-ONLY, never gates) ─────────
+    # Stamps every fired fade with a structure verdict so we can prove whether
+    # AGAINST-structure fades are the wrong-direction losers, before anything gates.
+    # Builds an M15 zigzag (fractal pivots, min-amplitude filtered) → up/down/range,
+    # reads the existing H1/H4 EMA trend, and labels the fade with_structure /
+    # against_structure / range (a SELL is with-structure when the higher TF is DOWN).
+    # Also tags the faded swing LH/HH (sell) or HL/LL (buy). No arm flag — Stage-1 is
+    # a labeler; a per-pair veto is a later stage only if against_structure loses.
+    "structure_shadow": True,            # LEAD stamps structure_shadow{} onto each signal
+    "structure_swing_k": 2,              # fractal pivot half-window (bars each side)
+    "structure_min_swing_atr": 0.5,      # min swing amplitude (×ATR) to count — kills micro-noise
+    "structure_lookback_m15": 40,        # closed M15 bars the zigzag is built from (~10h)
+    # When True (per-pair via SYMBOL_CALIBRATION), an "against_structure" verdict
+    # VETOES the fade (skips it) instead of only logging — like the breakout veto, a
+    # veto can only SKIP a trade, never add a loss. ARMED both pairs 2026-08-12 at
+    # user direction to get real fills instead of shadow data. Watch trade count — it
+    # removes fades that fight the higher-TF trend, which can be a large fraction.
+    "structure_veto_enabled": False,
+    # LOOSEN (2026-08-12): only ACT on the veto when a REAL H1 trend opposes the fade.
+    # Live data showed the veto blocking ~85% of fades, ALL with h1=sideways — i.e. it
+    # was firing on the noisier M15-zigzag fallback, which THRASHES in a ranging H1 (it
+    # blocked BUYs then SELLs as the M15 flipped) and removed winning mean-reversion
+    # fades (the passed trades won +0.9/+1.0p). With this True, an H1-sideways market
+    # (the daemon's fade-edge zone) is left alone; the veto bites only when fighting a
+    # committed H1 up/down trend. The shadow LABEL still uses the M15 fallback.
+    "structure_veto_require_h1_trend": True,
+    # ── Entry-selectivity shadow (SHADOW-ONLY, cut over-trading / commission drag) ─
+    # The 1-month audit ([[commission-drag-analysis]]) showed the book is GROSS-profitable
+    # but commission (−$7/trade × ~8/day) makes it net-negative — so FEWER, better fades
+    # is the fix. Data (n=32) FALSIFIED the room-veto (high room = WORSE) but confirmed
+    # "fading INTO recent momentum loses" (fading_into_impulse=True −$24.9/trade vs False
+    # −$0.8; high displacement −$33 vs −$1.7). This shadow flags would_skip when a fade
+    # fights the recent 300s move at >= selectivity_disp_threshold (LOWER than the
+    # never-firing 0.55 impulse veto), and logs room/range for regime-tracking. NO arm
+    # flag — validate that skipping these lifts net-after-commission first, then arm.
+    "selectivity_shadow": True,
+    "selectivity_disp_threshold": 0.30,  # displacement (net/path) that, when fading INTO it, would_skip
+    # ── Regime-detection shadow (SHADOW-ONLY; the dynamic-market lever) ──────────
+    # The wrong-direction trades are fundamentally a REGIME problem: the SAME fade is
+    # right in a RANGE (level holds → hold it, give room) and wrong in a TREND (level
+    # breaks → skip it). No static filter fixes both; regime is what tells them apart.
+    # Can't pre-validate yet (recent sample is regime-homogeneous: ~all ranging, only
+    # 2 trending trades), so this shadow LOGS regime per entry to collect the data.
+    # Kaufman efficiency ratio (net move / total path over regime_lookback M15 closes):
+    # >= regime_trend_er = trending, <= regime_range_er = ranging, else transitional.
+    # would_skip = a fade fighting a STRONG trend (the "right spot, wrong direction" /
+    # A-mode). NO arm flag — prove "skip in trend / hold in range" separates the early-
+    # cut winners (B) from the wrong-direction losers (A) before wiring it.
+    "regime_shadow": True,
+    "regime_lookback": 20,               # M15 closes (~5h) for the efficiency ratio
+    "regime_trend_er": 0.50,             # ER >= this = trending
+    "regime_range_er": 0.30,             # ER <= this = ranging (else transitional)
+    # REVP-confluence study: LEAD writes one exhaustion-telemetry row per closed
+    # M15 bar (velocity_divergence ~ reversal pressure; efficiency ~ displacement)
+    # to reports/revp_telemetry.jsonl, so the last untested pattern idea -- "pattern
+    # AT a level WITH high reversal pressure" -- can be shadow-tested offline later.
+    # Pure observation; never touches trading. Set False to stop the log.
+    "revp_telemetry_log": True,
+
+    # Impulse shadow: displacement_ratio threshold. Ratio >= this on a fade-
+    # into-momentum entry logs "would_skip". Shadow-only (never blocks).
+    "impulse_disp_threshold": 0.55,
+
+    # MFE early-exit shadow: record where a dead-fade cutoff WOULD have exited.
+    # Fires once when hold >= grace AND running MFE < floor AND running MAE >=
+    # trigger. Shadow-only (never closes); close log stores saved_pips.
+    "mfe_exit_shadow": True,
+    "mfe_exit_grace_sec": 900.0,
+    "mfe_exit_floor_pips": 5.0,
+    "mfe_exit_mae_trigger_pips": 10.0,
+
+    # Breakout discriminator shadow: flags a fade of a level that is BREAKING
+    # (price beyond prior M15 structure by >= margin_atr×ATR AND a directional
+    # push of >= push_atr×ATR over the last `window` bars) vs a real in-structure
+    # reversal (passes). Logs "would_skip"/"allow" per entry.
+    "breakout_shadow": True,
+    "breakout_lookback": 20,
+    "breakout_window": 3,
+    "breakout_margin_atr": 0.25,
+    "breakout_push_atr": 0.5,
+    # When True (per-pair via SYMBOL_CALIBRATION), a "would_skip" breakout verdict
+    # VETOES the entry instead of only logging it. Default OFF; armed USDJPY-only.
+    "breakout_veto_enabled": False,
+
+    # Exit-capture shadow: on every close, log what alternative exits WOULD have
+    # realised — fixed TP caps (from MFE) and a tighter trailing leash (per-tick
+    # sim). Pure observation; never touches the real SL. Motivated by EURUSD only
+    # capturing ~42% of MFE (≈3p/trade given back to the 0.50×ATR trail).
+    "exit_capture_shadow": True,
+    "exit_shadow_trail_atr_mult": 0.35,          # tighter leash to test vs the live 0.50
+    "exit_shadow_tp_pips": [3.0, 4.0, 5.0, 6.0], # fixed-TP caps to evaluate
+
+    # Break-and-retest CONTINUATION shadow (mirror of the fade; never trades).
+    # On M15 close: detect a breakout beyond prior structure, wait for a retest of
+    # the broken level, confirm it holds, then track the forward outcome. Written to
+    # reports/breakout_retest_shadow.jsonl for offline vs-shuffle-null validation.
+    "breakout_retest_shadow": True,
+    "br_lookback": 20,            # prior-structure M15 bars
+    "br_window": 3,              # recent bars excluded from structure (the break zone)
+    "br_margin_atr": 0.25,       # break must clear structure by this ×ATR
+    "br_push_atr": 0.5,          # window trend push required to call it a break
+    "br_retest_tol_atr": 0.2,    # retest zone half-width around the broken level
+    "br_confirm_atr": 0.15,      # bar must close back past the level by this to confirm
+    "br_invalidate_atr": 0.35,   # close back THROUGH the level by this = fakeout
+    "br_retest_timeout_bars": 8, # M15 bars to wait for a retest before expiring
+    "br_outcome_bars": 16,       # M15 bars to resolve the hypothetical entry
+    "br_sl_atr": 1.0,            # hypothetical stop distance (×ATR)
+    "br_tp_atr": 2.0,            # hypothetical target distance (×ATR)
     "peak_detector_rule_c_enabled": False,
     "trade_risk_pct": 0.01,
     "realtime_use_pinpoint_price": False,
@@ -404,15 +553,43 @@ SYMBOL_CALIBRATION = {
         "pip_value_per_lot": 10.0,   # USD-quote pair: ~$10 / pip / 1.0 lot
         "risk_pct": 0.01,
         "max_lot": 2.0,              # hard safety ceiling; 1% risk sizes to ~0.6 lot
-        "hard_stop_pips": 20.0,      # hard SL = TP distance when hard_distance_mode=True
+        "hard_stop_pips": 20.0,      # hard SL = TP distance (hard_distance_mode). RESTORED 11->20
+                                     # 2026-08-13 (user): keep the real/structural stop distance and
+                                     # FLOAT the lot to 1.1% risk, instead of shrinking the stop to fit
+                                     # a fixed 1.0 lot. Lead sizes via --risk-pct 1.1 (0.55 lot x 20p x
+                                     # $10 = $110 = 1.1% of 10k); node via --max-loss-usd 1100 (5.5 lot).
         # No hard_trail_pips → the trail uses the adaptive trail_dist_atr_mult × ATR.
         "sl_atr_mult": 2.0,
         "tp_atr_mult": 2.0,
         "min_stop_pips": 16.0,
         "max_stop_pips": 16.0,       # hard SL/TP ceiling when enforce_max_stop_pips=True
         "be_atr_mult": 0.40,            # breakeven arms at ~0.40xATR
-        "trail_trigger_atr_mult": 0.50, # trail arms at ~0.50xATR (below the typical peak)
-        "trail_dist_atr_mult": 0.50,    # tight leash ~0.50xATR: lock NEAR the peak (was 1.0xATR = gave it all back)
+        "trail_trigger_atr_mult": 0.50, # trail arms at ~0.50xATR
+        "trail_dist_atr_mult": 0.50,    # TIGHT leash ~0.50xATR. Briefly widened to 1.0 on 2026-08-12
+                                        # (per wider-trail +47%) but a TICK-LEVEL replay of that day's
+                                        # trades showed the wide trail captured LESS on EVERY winning
+                                        # fade (net -$166) — it gives back in a REVERTING/choppy market.
+                                        # wider-trail's +47% was on TRENDING data. Regime-dependent:
+                                        # keep tight in chop; a regime-aware trail is the real fix.
+        "direction_aware_sr": True,     # EURUSD reverts off structure — fade only OFF a
+                                        # correct-side level, never INTO one. 249-trade study:
+                                        # +$741 / PF 1.25->2.03 / drawdown halved.
+        "structure_veto_enabled": True, # ARMED 2026-08-12 at user direction (both pairs). Skips
+                                        # an against-structure fade (fights the higher-TF trend).
+                                        # Bounded (only skips); thin evidence — watch trade count.
+        "retest_confirm_enabled": True, # ARMED 2026-08-11 at user direction. Scratches a fade
+                                        # that goes straight-against (>=retest_adverse_cap_pips
+                                        # adverse BEFORE +retest_x_pips favorable) or stalls the
+                                        # full window (timeout) — the "fades into continuation"
+                                        # loser (72% of realised loss). EURUSD-validated: a
+                                        # drawdown-halver at ~flat net (cuts losers, clips some
+                                        # winners). CONFIRM = no-op (let the real reversal run).
+        "retest_adverse_cap_pips": 3.0, # WIDENED 2026-08-12 from base 2.0 (EURUSD-modest). Live
+                                        # data 2026-08-12 (a TRENDING day, not choppy) showed the
+                                        # 2p cap scratching with-trend fades on normal pullbacks
+                                        # right before they ran (+17 to +53p missed). Confirm stays
+                                        # +2p (bias to hold). Bounded by the hard SL; EXPERIMENT on
+                                        # n=1 day — revert if premature/protective mix doesn't improve.
     },
     "USDJPY": {
         "magic_number": 123458,      # distinct from EURUSD
@@ -422,15 +599,57 @@ SYMBOL_CALIBRATION = {
         "pip_value_per_lot": None,
         "risk_pct": 0.01,
         "max_lot": 2.0,              # hard safety ceiling; 1% risk sizes to ~1.0 lot
-        "hard_stop_pips": 30.0,      # hard SL = TP distance when hard_distance_mode=True
+        "hard_stop_pips": 30.0,      # hard SL = TP distance (hard_distance_mode). RESTORED 17.5->30
+                                     # 2026-08-13 (user): keep the real stop distance, FLOAT the lot to
+                                     # 1.1% risk. Lead via --risk-pct 1.1 (0.58 lot x 30p x ~$6.29 =
+                                     # $110 = 1.1% of 10k); node via --max-loss-usd 1100 (5.83 lot).
         # No hard_trail_pips → the trail uses the adaptive trail_dist_atr_mult × ATR.
         "sl_atr_mult": 2.0,
         "tp_atr_mult": 2.0,
         "min_stop_pips": 16.0,
         "max_stop_pips": 10.0,       # hard SL/TP ceiling when enforce_max_stop_pips=True
         "be_atr_mult": 0.40,            # breakeven arms at ~0.40xATR
-        "trail_trigger_atr_mult": 0.50, # trail arms at ~0.50xATR (below the typical peak)
-        "trail_dist_atr_mult": 0.50,    # tight leash ~0.50xATR: lock NEAR the peak (was 1.0xATR = gave it all back)
+        "trail_trigger_atr_mult": 0.50, # trail arms at ~0.50xATR
+        "trail_dist_atr_mult": 0.50,    # TIGHT leash ~0.50xATR. Briefly widened to 1.0 on 2026-08-12
+                                        # (per wider-trail +47%) but a TICK-LEVEL replay of that day's
+                                        # trades showed the wide trail captured LESS on EVERY winning
+                                        # fade (net -$166) — it gives back in a REVERTING/choppy market.
+                                        # wider-trail's +47% was on TRENDING data. Regime-dependent:
+                                        # keep tight in chop; a regime-aware trail is the real fix.
+        "direction_aware_sr": False,    # USDJPY BREAKS its levels — wrong-side fades are
+                                        # continuation WINNERS (PF 2.54). Leave OFF.
+        "breakout_veto_enabled": True,  # RE-ARMED 2026-08-11 at user direction, accepting the
+                                        # thin-evidence risk (in-sample n=2). Bounded downside:
+                                        # this ONLY skips a fade into a breaking level — it can
+                                        # never add a loss, worst case is a missed win. Skips are
+                                        # logged (signal_skipped, "breakout veto: …") so the block
+                                        # rate + what it turned away stay auditable at checkpoint.
+        # TIGHTENED 2026-08-11 (user: "tighten the veto's push threshold"). The veto
+        # fires only on fresh_extreme AND strong_push. Both logged USDJPY sells had
+        # fresh_extreme=False, so PUSH ALONE WAS INERT — the +16.5p WINNER even had the
+        # biggest push (+19.5p). The binding knob is the margin (fresh_extreme) gate, so
+        # tighten it too: margin 0.25->0.10xATR (~1.9p) lets a fade entering just BEYOND a
+        # broken level trip fresh_extreme, while the winners (ext -11.6/-16.3p, deep INSIDE
+        # structure) stay allowed with a wide buffer. Push 0.5->0.35xATR (~6.6p) is the
+        # confirmation, now meaningful once margin can fire. Still per-pair USDJPY-only;
+        # n=2 so this is a watch-item, not a proven number.
+        "breakout_margin_atr": 0.10,
+        "breakout_push_atr": 0.35,
+        "retest_confirm_enabled": True, # ARMED 2026-08-11 at user direction. Same straight-against
+                                        # scratch as EURUSD, and it is the RIGHT lever for today's
+                                        # USDJPY loser (sold 16p INSIDE the range → the breakout
+                                        # veto structurally can't catch that; the retest veto CAN,
+                                        # and it flagged it "veto" live). THINNER EVIDENCE than
+                                        # EURUSD (validated EURUSD-only) — watch confirm-vs-veto
+                                        # accuracy at the checkpoint; it can clip winning runners.
+        "structure_veto_enabled": True, # ARMED 2026-08-12 (both pairs). Skips an against-structure
+                                        # fade (fights the higher-TF trend). Bounded (only skips);
+                                        # thin evidence — watch trade count, disarm if over-restricts.
+        "retest_adverse_cap_pips": 5.0, # WIDENED 2026-08-12 from base 2.0 (USDJPY-wider — 2p is a
+                                        # tiny fraction of its ~19p ATR). 3 of 4 premature scratches
+                                        # on 2026-08-12 were USDJPY sells cut on a pullback then ran
+                                        # +40/+53/+41p. Gives room for the pullback; hard SL (17.5p)
+                                        # still backstops. Confirm stays +2p. EXPERIMENT (n=1 day).
     },
 }
 
@@ -502,4 +721,30 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
     cfg["be_atr_mult"] = spec.get("be_atr_mult", 0.60)
     cfg["trail_trigger_atr_mult"] = spec.get("trail_trigger_atr_mult", 0.80)
     cfg["trail_dist_atr_mult"] = spec.get("trail_dist_atr_mult", 0.35)
+    # Per-pair direction-aware S/R flag (whitelist mapping — without this line the
+    # SYMBOL_CALIBRATION key never reaches the daemon's self.config). Default OFF.
+    cfg["direction_aware_sr"] = spec.get(
+        "direction_aware_sr", base.get("direction_aware_sr", False)
+    )
+    # Per-pair retest-confirmation veto (whitelist mapping — without these lines the
+    # SYMBOL_CALIBRATION keys never reach self.config). Defaults keep it shadow/OFF;
+    # arm EURUSD-only once the shadow log confirms it cuts losers, not winners.
+    for _k, _d in (("retest_confirm_enabled", False), ("retest_confirm_shadow", True),
+                   ("retest_x_pips", 2.0), ("retest_adverse_cap_pips", 2.0),
+                   ("retest_window_min", 30)):
+        cfg[_k] = spec.get(_k, base.get(_k, _d))
+    # Per-pair breakout discriminator (whitelist mapping — without these lines the
+    # SYMBOL_CALIBRATION keys never reach self.config). Shadow logs for all pairs;
+    # the veto acts only where breakout_veto_enabled is set (USDJPY-only).
+    for _k, _d in (("breakout_veto_enabled", False), ("breakout_shadow", True),
+                   ("breakout_lookback", 20), ("breakout_window", 3),
+                   ("breakout_margin_atr", 0.25), ("breakout_push_atr", 0.5)):
+        cfg[_k] = spec.get(_k, base.get(_k, _d))
+    # Per-pair market-structure shadow/veto (whitelist mapping — without these the
+    # SYMBOL_CALIBRATION keys never reach self.config). Label logs for all pairs; the
+    # veto acts only where structure_veto_enabled is set.
+    for _k, _d in (("structure_veto_enabled", False), ("structure_shadow", True),
+                   ("structure_swing_k", 2), ("structure_min_swing_atr", 0.5),
+                   ("structure_lookback_m15", 40), ("structure_veto_require_h1_trend", True)):
+        cfg[_k] = spec.get(_k, base.get(_k, _d))
     return cfg
