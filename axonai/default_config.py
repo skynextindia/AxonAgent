@@ -565,7 +565,11 @@ SYMBOL_CALIBRATION = {
         "max_stop_pips": 16.0,       # hard SL/TP ceiling when enforce_max_stop_pips=True
         "be_atr_mult": 0.40,            # breakeven arms at ~0.40xATR
         "trail_trigger_atr_mult": 0.50, # trail arms at ~0.50xATR
-        "trail_dist_atr_mult": 0.50,    # TIGHT leash ~0.50xATR. Briefly widened to 1.0 on 2026-08-12
+        "trail_dist_atr_mult": 0.35,    # TIGHTENED 0.50->0.35 2026-08-13 (LIVE, user "trail cuts small wins":
+                                        # capture more of the ~4p peak in the current CHOP; scan found 0.35 beats
+                                        # 0.50 net in ranging tape, fixed-TP even better). Judge on daily results;
+                                        # WIDEN back toward 0.50+ when a trending week appears. Was ~0.50 TIGHT leash;
+                                        # briefly 1.0 on 2026-08-12
                                         # (per wider-trail +47%) but a TICK-LEVEL replay of that day's
                                         # trades showed the wide trail captured LESS on EVERY winning
                                         # fade (net -$166) — it gives back in a REVERTING/choppy market.
@@ -613,7 +617,11 @@ SYMBOL_CALIBRATION = {
         "max_stop_pips": 10.0,       # hard SL/TP ceiling when enforce_max_stop_pips=True
         "be_atr_mult": 0.40,            # breakeven arms at ~0.40xATR
         "trail_trigger_atr_mult": 0.50, # trail arms at ~0.50xATR
-        "trail_dist_atr_mult": 0.50,    # TIGHT leash ~0.50xATR. Briefly widened to 1.0 on 2026-08-12
+        "trail_dist_atr_mult": 0.35,    # TIGHTENED 0.50->0.35 2026-08-13 (LIVE, user "trail cuts small wins":
+                                        # capture more of the ~4p peak in the current CHOP; scan found 0.35 beats
+                                        # 0.50 net in ranging tape, fixed-TP even better). Judge on daily results;
+                                        # WIDEN back toward 0.50+ when a trending week appears. Was ~0.50 TIGHT leash;
+                                        # briefly 1.0 on 2026-08-12
                                         # (per wider-trail +47%) but a TICK-LEVEL replay of that day's
                                         # trades showed the wide trail captured LESS on EVERY winning
                                         # fade (net -$166) — it gives back in a REVERTING/choppy market.
