@@ -101,6 +101,7 @@ class AxonDaemon:
         self._active_trade_peak_price: dict[int, float] = {}
         self._active_trade_worst_price: dict[int, float] = {}  # ticket -> worst ADVERSE price seen (for MAE)
         self._retest_arm: dict[int, dict] = {}  # ticket -> retest-confirmation verdict state (shadow/veto)
+        self._stage_arm: dict[int, dict] = {}  # probe ticket -> staged-entry add state (confirmation-by-degree)
         self._mfe_exit_shadow: dict[int, dict] = {}  # ticket -> MFE early-exit shadow state (first-fire snapshot)
         self._exit_shadow: dict[int, dict] = {}  # ticket -> alt-trail exit-capture shadow (first shadow-stop hit)
         self._brk_setups: list = []  # active break-and-retest continuation-shadow state machines
@@ -1223,8 +1224,14 @@ class AxonDaemon:
             # (whenever the engine is active). It must be cleared exactly once: by
             # register_position on a real fill, else by release_pending below.
             _reserved = self.correlation_engine is not None
+            # Staged (confirmation-by-degree) entry: open only a PROBE now, then add
+            # the rest on confirmation (see _maybe_fire_stage_add). OFF by default →
+            # _stage=False → probe_frac 1.0 → identical to a single full entry.
+            _stage = bool(self.config.get("stage_entry_enabled", False))
+            _probe_frac = float(self.config.get("stage_probe_frac", 0.40)) if _stage else 1.0
             try:
-                trade_result = self.trade_executor.execute_signal(self.mt5_symbol, signal, self.live_state, size_scale)
+                trade_result = self.trade_executor.execute_signal(
+                    self.mt5_symbol, signal, self.live_state, size_scale, stage_frac=_probe_frac)
                 if trade_result:
                     logger.info("AxonDaemon: Order execution complete for %s system: %s", system_name, trade_result)
                     ticket = trade_result.get("order")
@@ -1243,10 +1250,19 @@ class AxonDaemon:
                                 trade_result.get("volume", 0.0) or 0.0,
                                 trade_result.get("price", 0.0) or 0.0, ticket)
                             _reserved = False   # reservation consumed by the registered position
+                        # Arm the staged add: watch this probe for +stage_confirm_pips
+                        # favorable within the window; the add fires from the mgmt loop.
+                        if _stage:
+                            self._arm_stage_add(ticket, signal, size_scale,
+                                                trade_result.get("price", 0.0) or 0.0)
                     # Mirror this entry decision to the execution node (best-effort;
-                    # lead side only — a no-op when mirror_client is None).
-                    self._mirror_send({"cmd": "enter", "signal": signal, "size_scale": size_scale,
-                                       "lead_lot": trade_result.get("volume")})
+                    # lead side only — a no-op when mirror_client is None). The staged
+                    # PROBE carries its fraction so the node opens the same probe size.
+                    _mp = {"cmd": "enter", "signal": signal, "size_scale": size_scale,
+                           "lead_lot": trade_result.get("volume")}
+                    if _stage:
+                        _mp.update({"stage": "probe", "stage_frac": _probe_frac})
+                    self._mirror_send(_mp)
             except Exception as ex_err:
                 logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
             finally:
@@ -2368,7 +2384,8 @@ class AxonDaemon:
             logger.warning("AxonDaemon: mirror forward failed (non-fatal): %s", e)
 
     def inject_signal(self, signal: str, size_scale: float = 1.0, source: str = "mirror",
-                      lead_lot: Optional[float] = None):
+                      lead_lot: Optional[float] = None, stage_frac: float = 1.0,
+                      allow_stack: bool = False):
         """Execute an entry routed from the lead brain (execution-node mode).
 
         Bypasses detection + the entry gauntlet — the lead already applied every
@@ -2376,6 +2393,12 @@ class AxonDaemon:
         which sizes from THIS terminal's equity and resolves THIS broker's
         ticker/pip. Tracks the resulting position so the daemon's native trailing
         / EOD / exit management picks it up. Returns the executor result or None.
+
+        For a staged (confirmation-by-degree) entry the lead sends TWO enters — a
+        PROBE (stage_frac ~0.40) then, on confirmation, an ADD (stage_frac ~0.60,
+        stage=="add" → allow_stack). The node stays dumb: it just mirrors each
+        tranche at the fraction the lead decided; the confirmation timing lives on
+        the lead. Defaults (1.0 / False) = a single full entry, unchanged.
         """
         if signal not in ("Buy", "Sell", "Overweight", "Underweight"):
             logger.info("inject_signal: ignoring non-entry signal %r", signal)
@@ -2387,7 +2410,8 @@ class AxonDaemon:
         trade_result = None
         try:
             trade_result = self.trade_executor.execute_signal(
-                self.mt5_symbol, signal, self.live_state, size_scale, lead_lot)
+                self.mt5_symbol, signal, self.live_state, size_scale, lead_lot,
+                stage_frac=stage_frac, allow_stack=allow_stack)
             if trade_result:
                 ticket = trade_result.get("order")
                 if ticket:
@@ -2602,6 +2626,99 @@ class AxonDaemon:
             logger.error("Retest verdict update failed for ticket %s: %s",
                          getattr(pos, "ticket", "?"), e)
 
+    def _arm_stage_add(self, ticket: int, signal: str, size_scale: float, entry_price: float) -> None:
+        """Arm a staged-entry PROBE so its ADD fires on confirmation (see
+        _maybe_fire_stage_add). Called only when stage_entry_enabled (lead only)."""
+        window_s = float(self.config.get("stage_add_window_min", 30)) * 60.0
+        self._stage_arm[ticket] = {
+            "signal": signal,
+            "buy": signal in ("Buy", "Overweight"),
+            "size_scale": size_scale,
+            "anchor": entry_price,
+            "deadline": time.time() + window_s,
+            "done": False,
+        }
+        logger.info(
+            "STAGE ARM %s: probe ticket %d %s @ %.5f — add %.0f%% on +%.1fp within %.0fmin",
+            self.mt5_symbol, ticket, signal, entry_price,
+            float(self.config.get("stage_add_frac", 0.60)) * 100.0,
+            float(self.config.get("stage_confirm_pips", 2.0)),
+            float(self.config.get("stage_add_window_min", 30)),
+        )
+
+    def _maybe_fire_stage_add(self, pos, bid: float, ask: float, pip: float) -> None:
+        """Staged (confirmation-by-degree) entry — add the rest once the fade confirms.
+
+        REPLAY-VALIDATED 2026-08-13 (memory confirmation-by-degree-replay): the probe
+        opened on the exhaustion tick; once it pulls +stage_confirm_pips favorable within
+        the window, add stage_add_frac as a SECOND position. Fades that go straight-against
+        never confirm → they ride at only the probe fraction (the left-tail truncation).
+        The add gets its OWN hard-distance SL/TP from its (better) entry and is trailed like
+        any position. Fully fail-safe: on any error or missed fill the probe just rides alone;
+        this never raises into or blocks the trading path.
+        """
+        ticket = pos.ticket
+        arm = self._stage_arm.get(ticket)
+        if not arm or arm.get("done"):
+            return
+        try:
+            now = time.time()
+            if now >= arm["deadline"]:
+                arm["done"] = True
+                logger.info("STAGE ADD %s: probe ticket %d expired unconfirmed — probe rides alone.",
+                            self.mt5_symbol, ticket)
+                return
+            confirm = float(self.config.get("stage_confirm_pips", 2.0))
+            mid = (bid + ask) / 2.0
+            disp = ((mid - arm["anchor"]) if arm["buy"] else (arm["anchor"] - mid)) / pip
+            if disp < confirm:
+                return  # not yet confirmed
+            # Confirmed. Mark done BEFORE executing so a re-entrant tick can never double-add.
+            arm["done"] = True
+            add_frac = float(self.config.get("stage_add_frac", 0.60))
+            add_res = self.trade_executor.execute_signal(
+                self.mt5_symbol, arm["signal"], self.live_state, arm["size_scale"],
+                stage_frac=add_frac, allow_stack=True)
+            if add_res and add_res.get("order"):
+                atk = add_res["order"]
+                aprice = add_res.get("price", 0.0) or 0.0
+                self._tracked_positions.add(atk)
+                self._active_trade_initial_sl[atk] = add_res.get("sl")
+                self._active_trade_system[atk] = self._active_trade_system.get(ticket, "optimized")
+                self._active_trade_atr[atk] = self._active_trade_atr.get(
+                    ticket, self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012)
+                self._active_trade_peak_price[atk] = aprice
+                self._active_trade_worst_price[atk] = aprice
+                self._active_trade_entry_time[atk] = now
+                # A confirmed continuation — never let the (disarmed) retest veto re-judge
+                # the add: mark its arm resolved, exactly like a restart-adopted position.
+                self._retest_arm[atk] = {"anchor": aprice, "buy": arm["buy"],
+                                         "verdict": "adopted", "delay": None}
+                if self.correlation_engine is not None:
+                    # Same symbol+direction as the probe → no new USD conflict; just keep
+                    # the engine's view current. Best-effort; never blocks the add.
+                    try:
+                        self.correlation_engine.register_position(
+                            self.mt5_symbol, arm["signal"],
+                            add_res.get("volume", 0.0) or 0.0, aprice, atk)
+                    except Exception:
+                        pass
+                logger.info(
+                    "STAGE ADD %s: CONFIRMED +%.1fp — added %.0f%% tranche ticket %d vol %s @ %.5f",
+                    self.mt5_symbol, disp, add_frac * 100.0, atk, add_res.get("volume"), aprice)
+                # Mirror the add to the node (best-effort; carries the add fraction so the
+                # node opens the matching second tranche via allow_stack).
+                self._mirror_send({"cmd": "enter", "signal": arm["signal"],
+                                   "size_scale": arm["size_scale"], "stage": "add",
+                                   "stage_frac": add_frac, "lead_lot": add_res.get("volume")})
+            else:
+                logger.info("STAGE ADD %s: probe ticket %d confirmed but the add produced no fill.",
+                            self.mt5_symbol, ticket)
+        except Exception as e:
+            arm["done"] = True
+            logger.error("STAGE ADD %s: error for ticket %s: %s",
+                         self.mt5_symbol, getattr(pos, "ticket", "?"), e)
+
     def _update_mfe_exit_shadow(self, pos, bid: float, ask: float, pip: float) -> None:
         """MFE early-exit shadow: record where a 'dead-fade' cutoff WOULD have exited.
 
@@ -2708,6 +2825,65 @@ class AxonDaemon:
             logger.error("Exit-capture shadow update failed for ticket %s: %s",
                          getattr(pos, "ticket", "?"), e)
 
+    def _compute_zigzag(self, R: float, pip: float):
+        """M5 swing zigzag over the last N bars, cached ~per minute. R = reversal
+        threshold in PRICE. Returns {last_high, last_low, dir, ext} (the most recent
+        CONFIRMED swing high/low) or None. Self-contained (pulls its own M5 bars, so it
+        works identically on the lead and the node); never raises into the trail path."""
+        try:
+            now = time.time()
+            cache = getattr(self, "_zz_cache", None)
+            if cache and (now - cache.get("t", 0.0)) < 60.0:
+                return cache.get("zz")
+            lookback = int(self.config.get("structure_trail_lookback_m5", 80))
+            rates = mt5.copy_rates_from_pos(self.mt5_symbol, mt5.TIMEFRAME_M5, 0, lookback)
+            if rates is None or len(rates) < 5:
+                return cache.get("zz") if cache else None
+            zz = {"dir": 0, "ext": float(rates[0]["close"]), "last_high": None, "last_low": None}
+            for r in rates:
+                h = float(r["high"]); l = float(r["low"])
+                if zz["dir"] >= 0:                       # up-leg (0 = unknown, treat as up)
+                    if h > zz["ext"]: zz["ext"] = h
+                    if l <= zz["ext"] - R:               # fell R from the peak -> swing HIGH
+                        zz["last_high"] = zz["ext"]; zz["dir"] = -1; zz["ext"] = l
+                else:                                    # down-leg
+                    if l < zz["ext"]: zz["ext"] = l
+                    if h >= zz["ext"] + R:               # rose R from the trough -> swing LOW
+                        zz["last_low"] = zz["ext"]; zz["dir"] = 1; zz["ext"] = h
+            old = cache.get("zz") if cache else None
+            if not old or old.get("last_high") != zz["last_high"] or old.get("last_low") != zz["last_low"]:
+                logger.info("STRUCT %s: swing pivots — last_high=%s last_low=%s (reversal=%.1fp, dir=%s)",
+                            self.mt5_symbol, zz["last_high"], zz["last_low"], R / pip, zz["dir"])
+            self._zz_cache = {"t": now, "zz": zz}
+            return zz
+        except Exception as e:
+            logger.debug("structure zigzag failed: %s", e)
+            return None
+
+    def _structure_stop(self, pos, pip: float, digits: int):
+        """Structure-trail stop price for `pos`: last confirmed lower-high + buffer for a
+        SELL / last higher-low − buffer for a BUY. None until a pivot forms (the hard SL
+        backstops the warm-up). Only ever the RAW structure level — the caller enforces
+        the monotonic ratchet + the valid-side (10016) guard, exactly like the ATR trail."""
+        try:
+            atr = self._active_trade_atr.get(pos.ticket) or (
+                self.live_state._state.atr_14_h1 if self.live_state and self.live_state._state else 0.0)
+            R = float(self.config.get("structure_trail_reversal_atr", 0.4)) * (atr or (pip * 40))
+            if R <= 0:
+                return None
+            zz = self._compute_zigzag(R, pip)
+            if not zz:
+                return None
+            buf = float(self.config.get("structure_trail_buffer_pips", 1.0)) * pip
+            if pos.type == mt5.POSITION_TYPE_SELL:
+                lh = zz.get("last_high")
+                return round(lh + buf, digits) if lh else None
+            ll = zz.get("last_low")
+            return round(ll - buf, digits) if ll else None
+        except Exception as e:
+            logger.debug("structure stop failed for ticket %s: %s", getattr(pos, "ticket", "?"), e)
+            return None
+
     def _manage_trailing_stops(self, bid: float, ask: float):
         """Manage trailing stop modifications on active MT5 positions."""
         if not mt5 or not mt5.terminal_info():
@@ -2793,6 +2969,10 @@ class AxonDaemon:
 
             # Retest-confirmation verdict (shadow logs it; veto acts only when armed).
             self._update_retest_verdict(pos, bid, ask, pip)
+            # Staged-entry ADD: fire the remaining tranche once the probe confirms
+            # (lead only; no-op unless stage_entry_enabled armed this probe).
+            if not self._exec_node and self._stage_arm:
+                self._maybe_fire_stage_add(pos, bid, ask, pip)
             # MFE early-exit shadow (records where a dead-fade cutoff WOULD exit).
             self._update_mfe_exit_shadow(pos, bid, ask, pip)
             # Exit-capture shadow (records where a TIGHTER trail WOULD exit).
@@ -2833,12 +3013,19 @@ class AxonDaemon:
                     if target_sl < breakeven_sl:
                         target_sl = breakeven_sl
                         
-                if peak_profit >= trail_trigger:
+                # Structure-trail (when armed) REPLACES the ATR trail: ratchet the stop up
+                # to just under the last confirmed higher-low. Falls back to the ATR trail
+                # when OFF or before a pivot forms. Same monotonic-tighten + valid-side guard.
+                if self.config.get("structure_trail_enabled", False):
+                    struct_sl = self._structure_stop(pos, pip, digits)
+                    if struct_sl is not None and target_sl < struct_sl:
+                        target_sl = struct_sl
+                elif peak_profit >= trail_trigger:
                     trail_distance = hard_trail_dist if use_fixed_trail else trail_mult * atr
                     trail_sl = round(peak_price - trail_distance, digits)
                     if target_sl < trail_sl:
                         target_sl = trail_sl
-                
+
                 if pos.sl < target_sl:
                     # A BUY stop must sit BELOW the market by >= the broker min
                     # distance. After a retrace the peak-anchored target can be at/
@@ -2874,12 +3061,19 @@ class AxonDaemon:
                     if target_sl > breakeven_sl or target_sl == 0.0:
                         target_sl = breakeven_sl
                         
-                if peak_profit >= trail_trigger:
+                # Structure-trail (when armed) REPLACES the ATR trail: ratchet the stop down
+                # to just above the last confirmed lower-high. Falls back to the ATR trail
+                # when OFF or before a pivot forms. Same monotonic-tighten + valid-side guard.
+                if self.config.get("structure_trail_enabled", False):
+                    struct_sl = self._structure_stop(pos, pip, digits)
+                    if struct_sl is not None and (target_sl > struct_sl or target_sl == 0.0):
+                        target_sl = struct_sl
+                elif peak_profit >= trail_trigger:
                     trail_distance = hard_trail_dist if use_fixed_trail else trail_mult * atr
                     trail_sl = round(peak_price + trail_distance, digits)
                     if target_sl > trail_sl or target_sl == 0.0:
                         target_sl = trail_sl
-                        
+
                 if pos.sl > target_sl or pos.sl == 0.0:
                     # A SELL stop must sit ABOVE the market by >= the broker min
                     # distance. After a retrace up, the peak-anchored target can be
@@ -3302,6 +3496,7 @@ class AxonDaemon:
             self._active_trade_peak_price.pop(ticket, None)
             self._active_trade_worst_price.pop(ticket, None)
             self._retest_arm.pop(ticket, None)
+            self._stage_arm.pop(ticket, None)
             self._mfe_exit_shadow.pop(ticket, None)
             self._exit_shadow.pop(ticket, None)
             self._active_trade_entry_time.pop(ticket, None)

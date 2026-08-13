@@ -25,7 +25,9 @@ class _FakeExecutor:
         self.calls = []
         self.lead_lots = []
 
-    def execute_signal(self, symbol, signal, live_state, size_scale=1.0, lead_lot=None):
+    def execute_signal(self, symbol, signal, live_state, size_scale=1.0, lead_lot=None,
+                       stage_frac=1.0, allow_stack=False):
+        # stage_frac/allow_stack mirror the real execute_signal contract (staged entry).
         self.calls.append((symbol, signal, size_scale))
         self.lead_lots.append(lead_lot)
         return self.result
@@ -122,7 +124,9 @@ class _FakeDaemon:
         self.close_reason = None
         self.lead_lot = None
 
-    def inject_signal(self, signal, size_scale, source="mirror", lead_lot=None):
+    def inject_signal(self, signal, size_scale, source="mirror", lead_lot=None,
+                      stage_frac=1.0, allow_stack=False):
+        # stage_frac/allow_stack mirror the real inject_signal contract (staged entry).
         self.enter_calls.append((signal, size_scale, source))
         self.lead_lot = lead_lot
         return {"order": 777, "volume": 5.0}

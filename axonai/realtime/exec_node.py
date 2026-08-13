@@ -159,7 +159,21 @@ class ExecNodeServer:
                     return {"ok": False, "cmd": cmd, "symbol": symbol,
                             "reason": "size_scale <= 0"}
                 lead_lot = req.get("lead_lot")
-                res = daemon.inject_signal(signal, size_scale, source="mirror", lead_lot=lead_lot)
+                # Staged (confirmation-by-degree) entry: the lead sends a PROBE then,
+                # on confirmation, an ADD (stage=="add"). Mirror each tranche at the
+                # lead's fraction; the ADD needs allow_stack (a 2nd position on this
+                # symbol+magic). Absent/legacy payloads → frac 1.0, no stack = a single
+                # full entry, unchanged.
+                stage = (req.get("stage") or "").lower()
+                try:
+                    stage_frac = float(req.get("stage_frac", 1.0))
+                except (TypeError, ValueError):
+                    stage_frac = 1.0
+                if not (0.0 < stage_frac <= 1.0):
+                    stage_frac = 1.0
+                allow_stack = (stage == "add")
+                res = daemon.inject_signal(signal, size_scale, source="mirror", lead_lot=lead_lot,
+                                           stage_frac=stage_frac, allow_stack=allow_stack)
                 return {
                     "ok": bool(res), "cmd": cmd, "symbol": symbol,
                     "ticket": (res or {}).get("order"),

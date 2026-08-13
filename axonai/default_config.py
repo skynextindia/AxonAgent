@@ -337,6 +337,44 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "retest_x_pips": 2.0,                # favorable pull-away that CONFIRMS the fade
     "retest_adverse_cap_pips": 2.0,      # adverse move that marks a straight-against VETO
     "retest_window_min": 30,             # minutes to resolve confirm vs veto
+
+    # ── Staged (confirmation-by-degree) entry — probe small, add on confirmation ──
+    # REPLAY-VALIDATED 2026-08-13 (n=83 natural-exit trades, Jul30-Aug13, commissions
+    # ignored; memory confirmation-by-degree-replay). Instead of full size on the first
+    # exhaustion tick, enter a PROBE (stage_probe_frac) and ADD the rest (stage_add_frac)
+    # only once the fade pulls +stage_confirm_pips favorable within stage_add_window_min.
+    # Total risk is UNCHANGED (probe+add = 1.0). The edge is LEFT-TAIL TRUNCATION: fades
+    # that go straight-against never confirm → they ride at only the probe fraction, so the
+    # big trend-fade losers are cut to ~40% size. Shuffle-null P<=0.004 (the confirm signal
+    # genuinely selects losers, it is not "just trade smaller"). REGIME-DEPENDENT: in pure
+    # chop ~90% confirm → all tax, no benefit; it pays when the tape carries continuation
+    # risk. Per-pair via SYMBOL_CALIBRATION; ships OFF. USDJPY is the strong case (weak SELL
+    # trend-fade leg), EURUSD marginal — arm USDJPY first. Reuses the tick-based favorable
+    # displacement (same math as the retest arm) as the add trigger.
+    "stage_entry_enabled": False,        # master per-pair switch (default OFF = today's behaviour)
+    "stage_probe_frac": 0.40,            # size opened on the exhaustion tick
+    "stage_add_frac": 0.60,              # size added on confirmation (probe+add = 1.0)
+    "stage_confirm_pips": 2.0,           # favorable pull-away that triggers the ADD
+    "stage_add_window_min": 30,          # minutes to confirm; after this the probe rides alone
+
+    # ── Structure-trail exit — hold by DIRECTION, not by a fixed give-back ────────
+    # DESIGNED 2026-08-14 (memory structure-trail). The problem: no fixed-distance
+    # trail can separate a runner from a reverter (loose gives back on small winners,
+    # tight chokes the runners — both tested, both lose). Fix: trail behind SWING
+    # STRUCTURE. For a SELL, hold while price prints lower-highs; the stop rides just
+    # above the last confirmed lower-high and ratchets down as new ones form. A wobble
+    # that doesn't break the last lower-high is HELD; a break above it exits at the turn
+    # (BUY mirrors: higher-lows, exit on break below the last higher-low). Noise-immune
+    # (ignores sub-`reversal` wobbles) yet exits on a real reversal. When ON it REPLACES
+    # the trail_dist_atr_mult ATR trail for that pair; breakeven + the hard SL/TP stay as
+    # backstops. Per-pair via SYMBOL_CALIBRATION; ships OFF (offline-unvalidatable exit —
+    # arm USDJPY-only, live A/B on daily results). Runs on BOTH accounts (each manages
+    # its own trail from its own broker's M5 bars). See [[eurusd-mfe-giveback]] for why a
+    # fixed trail can't win this.
+    "structure_trail_enabled": False,    # master per-pair switch (default OFF = ATR trail unchanged)
+    "structure_trail_reversal_atr": 0.4, # swing pivot confirms after price reverses this ×ATR
+    "structure_trail_buffer_pips": 1.0,  # stop sits this many pips beyond the last swing pivot
+    "structure_trail_lookback_m5": 80,   # M5 bars used to build the zigzag (~6.5h)
     # ── Reversal-confirmation PRE-ENTRY gate (SHADOW-ONLY, never acts) ─────────
     # The retest veto ENTERS EARLY then scratches; this asks the opposite question:
     # what if we WAIT and only enter once the reversal CONFIRMS? On each fired peak
@@ -597,6 +635,12 @@ SYMBOL_CALIBRATION = {
                                         # right before they ran (+17 to +53p missed). Confirm stays
                                         # +2p (bias to hold). Bounded by the hard SL; EXPERIMENT on
                                         # n=1 day — revert if premature/protective mix doesn't improve.
+        "stage_entry_enabled": False,   # STAGED ENTRY OFF for EURUSD — replay marginal here (+43->+50
+                                        # sum, slightly negative in the late OOS half; fades confirm fast,
+                                        # little left-tail to truncate). Arm only after USDJPY proves out.
+        "structure_trail_enabled": False, # STRUCTURE-TRAIL OFF for EURUSD — arm USDJPY first, judge on
+                                        # daily results, then consider EURUSD (its moves are smaller;
+                                        # reversal auto-scales with its ~6p ATR).
     },
     "USDJPY": {
         "magic_number": 123458,      # distinct from EURUSD
@@ -662,6 +706,19 @@ SYMBOL_CALIBRATION = {
                                         # on 2026-08-12 were USDJPY sells cut on a pullback then ran
                                         # +40/+53/+41p. Gives room for the pullback; hard SL (17.5p)
                                         # still backstops. Confirm stays +2p. EXPERIMENT (n=1 day).
+        "stage_entry_enabled": False,   # STAGED ENTRY — the replay-validated arm point (memory
+                                        # confirmation-by-degree-replay). Set True to enter a 40% probe
+                                        # on the exhaustion tick + add 60% on the first +2p confirm; the
+                                        # 7 straight-against SELL losers in the sample rode at 40% size
+                                        # (-158p -> -63p), total +105 -> +152p, drop-best-robust. Ships
+                                        # OFF; enable + restart WHILE FLAT to arm. probe+add stay 1.0.
+        "structure_trail_enabled": False, # STRUCTURE-TRAIL — the arm point (memory structure-trail). Set
+                                        # True to REPLACE the ATR trail with a swing-structure trail: hold
+                                        # while lower-highs form, exit on a break above the last lower-high.
+                                        # Designed to stop giving back on small winners AND stop choking the
+                                        # +30 runners (both failure modes of a fixed trail). reversal auto-
+                                        # scales with ATR (~5-6p here). Ships OFF; enable + restart to arm
+                                        # (exit-only, so restart-while-flat is safer but not required).
     },
 }
 
@@ -744,6 +801,19 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
     for _k, _d in (("retest_confirm_enabled", False), ("retest_confirm_shadow", True),
                    ("retest_x_pips", 2.0), ("retest_adverse_cap_pips", 2.0),
                    ("retest_window_min", 30)):
+        cfg[_k] = spec.get(_k, base.get(_k, _d))
+    # Per-pair staged (confirmation-by-degree) entry (whitelist mapping — without these
+    # lines the SYMBOL_CALIBRATION keys never reach self.config). Ships OFF; arm USDJPY
+    # first (replay-validated loss-truncator). probe+add MUST sum to 1.0 (risk-constant).
+    for _k, _d in (("stage_entry_enabled", False), ("stage_probe_frac", 0.40),
+                   ("stage_add_frac", 0.60), ("stage_confirm_pips", 2.0),
+                   ("stage_add_window_min", 30)):
+        cfg[_k] = spec.get(_k, base.get(_k, _d))
+    # Per-pair structure-trail exit (whitelist mapping — without these lines the
+    # SYMBOL_CALIBRATION keys never reach self.config). Ships OFF; when armed it REPLACES
+    # the ATR trail for that pair. Arm USDJPY-first (live A/B). See memory structure-trail.
+    for _k, _d in (("structure_trail_enabled", False), ("structure_trail_reversal_atr", 0.4),
+                   ("structure_trail_buffer_pips", 1.0), ("structure_trail_lookback_m5", 80)):
         cfg[_k] = spec.get(_k, base.get(_k, _d))
     # Per-pair breakout discriminator (whitelist mapping — without these lines the
     # SYMBOL_CALIBRATION keys never reach self.config). Shadow logs for all pairs;

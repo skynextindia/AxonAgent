@@ -30,7 +30,8 @@ class MT5TradeExecutor:
         self.circuit_breaker = self.risk_guard
 
     def execute_signal(self, symbol: str, signal: str, live_state: Optional[Any] = None,
-                       size_scale: float = 1.0, lead_lot: Optional[float] = None) -> Optional[dict]:
+                       size_scale: float = 1.0, lead_lot: Optional[float] = None,
+                       stage_frac: float = 1.0, allow_stack: bool = False) -> Optional[dict]:
         """Convert a 5-tier signal into an MT5 order action.
 
         Signals: Buy, Overweight, Hold, Underweight, Sell
@@ -39,6 +40,11 @@ class MT5TradeExecutor:
         ``lead_lot`` is the lot the LEAD terminal just executed; on an exec node
         with ``exec_node_lot_multiple`` set, sizing mirrors that lot × the
         multiple instead of re-deriving risk-based size.
+        ``stage_frac`` (1.0 = full) multiplies the FINAL lot after every sizing
+        mode + risk cap — used by the staged (confirmation-by-degree) entry to
+        open a probe (e.g. 0.40) then an add (0.60). ``allow_stack`` lets a
+        second position on the same symbol+magic through the 1-per-magic guard
+        (the add tranche); both default to today's single-full-entry behaviour.
         """
         import MetaTrader5 as mt5
 
@@ -55,15 +61,18 @@ class MT5TradeExecutor:
             return {"success": False, "reason": "circuit_breaker_tripped"}
 
         if signal in ["Buy", "Overweight"]:
-            return self.send_order(symbol, mt5.ORDER_TYPE_BUY, live_state, size_scale, lead_lot)
+            return self.send_order(symbol, mt5.ORDER_TYPE_BUY, live_state, size_scale, lead_lot,
+                                   stage_frac, allow_stack)
         elif signal in ["Sell", "Underweight"]:
-            return self.send_order(symbol, mt5.ORDER_TYPE_SELL, live_state, size_scale, lead_lot)
+            return self.send_order(symbol, mt5.ORDER_TYPE_SELL, live_state, size_scale, lead_lot,
+                                   stage_frac, allow_stack)
         else:
             logger.info("TradeExecutor: Signal is %s. No order action taken (HOLD).", signal)
             return None
 
     def send_order(self, symbol: str, order_type: int, live_state: Optional[Any] = None,
-                   size_scale: float = 1.0, lead_lot: Optional[float] = None) -> Optional[dict]:
+                   size_scale: float = 1.0, lead_lot: Optional[float] = None,
+                   stage_frac: float = 1.0, allow_stack: bool = False) -> Optional[dict]:
         """Send a market order with dynamic SL/TP and position sizing to MT5."""
         import MetaTrader5 as mt5
 
@@ -98,13 +107,16 @@ class MT5TradeExecutor:
 
         # Position conflict guard: cap at 1 open position per strategy. Filter by
         # symbol AND magic so concurrent per-pair daemons never cross-block.
-        existing = mt5.positions_get(symbol=symbol)
-        if existing:
-            # Filter by magic number to allow concurrent systems to trade independently
-            system_existing = [p for p in existing if p.magic == self.magic]
-            if len(system_existing) >= 1:
-                logger.info("TradeExecutor: Position already open for magic %d. Skipping new order.", self.magic)
-                return None
+        # allow_stack bypasses it for the staged-entry ADD tranche, which is an
+        # INTENTIONAL second position on the same symbol+magic (probe + add).
+        if not allow_stack:
+            existing = mt5.positions_get(symbol=symbol)
+            if existing:
+                # Filter by magic number to allow concurrent systems to trade independently
+                system_existing = [p for p in existing if p.magic == self.magic]
+                if len(system_existing) >= 1:
+                    logger.info("TradeExecutor: Position already open for magic %d. Skipping new order.", self.magic)
+                    return None
 
         # 1. Fetch H1 ATR for SL/TP calculations
         atr = 0.0
@@ -272,6 +284,17 @@ class MT5TradeExecutor:
                 except Exception:
                     pass
                 return None
+
+        # Staged-entry fraction (1.0 = full, unchanged). Applied AFTER every sizing
+        # mode + risk cap so it shrinks whatever lot those produced — probe (0.40) or
+        # add (0.60) — uniformly for the lead (risk-% sizing) and the node (max-loss
+        # budget sizing), which is why it lives here and not inside a sizing branch.
+        # The broker vmin/step clamp below still enforces a legal size.
+        if stage_frac != 1.0:
+            staged = round(lot * float(stage_frac), 2)
+            logger.info("TradeExecutor: staged-entry frac %.2f → %s lot %.2f → %.2f",
+                        stage_frac, symbol, lot, staged)
+            lot = staged
 
         # Broker volume-limit clamp (ALWAYS on — this is correctness, not a
         # feature, so it runs in every mode). The final lot MUST obey the symbol's

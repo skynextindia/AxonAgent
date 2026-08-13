@@ -224,9 +224,14 @@ class _FakeNodeDaemon:
         self.calls = []
         self.lead_lots = []
 
-    def inject_signal(self, signal, size_scale, source="mirror", lead_lot=None):
+    def inject_signal(self, signal, size_scale, source="mirror", lead_lot=None,
+                      stage_frac=1.0, allow_stack=False):
+        # stage_frac/allow_stack mirror the real inject_signal contract (staged
+        # confirmation-by-degree entry); recorded so staging can be asserted.
         self.calls.append((signal, size_scale))
         self.lead_lots.append(lead_lot)
+        self.stages = getattr(self, "stages", [])
+        self.stages.append((stage_frac, allow_stack))
         return {"order": 1, "volume": 1.0}
 
     def inject_close(self, reason):
