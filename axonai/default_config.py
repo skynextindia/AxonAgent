@@ -577,7 +577,10 @@ SYMBOL_CALIBRATION = {
         "structure_veto_enabled": True, # ARMED 2026-08-12 at user direction (both pairs). Skips
                                         # an against-structure fade (fights the higher-TF trend).
                                         # Bounded (only skips); thin evidence — watch trade count.
-        "retest_confirm_enabled": True, # ARMED 2026-08-11 at user direction. Scratches a fade
+        "retest_confirm_enabled": False, # DISARMED 2026-08-13 (user: "early cuts are problem … disarm the veto"):
+                                        # every loss on 2026-08-13 was a retest-veto scratch; trades left to
+                                        # trail/hard-stop won. Shadow still logs (retest_confirm_shadow). Was
+                                        # ARMED 2026-08-11 — Scratches a fade
                                         # that goes straight-against (>=retest_adverse_cap_pips
                                         # adverse BEFORE +retest_x_pips favorable) or stalls the
                                         # full window (timeout) — the "fades into continuation"
@@ -635,7 +638,8 @@ SYMBOL_CALIBRATION = {
         # n=2 so this is a watch-item, not a proven number.
         "breakout_margin_atr": 0.10,
         "breakout_push_atr": 0.35,
-        "retest_confirm_enabled": True, # ARMED 2026-08-11 at user direction. Same straight-against
+        "retest_confirm_enabled": False, # DISARMED 2026-08-13 (user: early cuts / disarm the veto). Shadow still
+                                        # logs. Was ARMED 2026-08-11 — Same straight-against
                                         # scratch as EURUSD, and it is the RIGHT lever for today's
                                         # USDJPY loser (sold 16p INSIDE the range → the breakout
                                         # veto structurally can't catch that; the retest veto CAN,

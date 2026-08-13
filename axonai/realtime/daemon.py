@@ -1191,7 +1191,10 @@ class AxonDaemon:
             size_scale = 1.0
             if self.correlation_engine is not None:
                 try:
-                    allow, size_scale, corr_reason = self.correlation_engine.evaluate_entry(
+                    # Atomic check-and-reserve (race-safe): reserves this entry's USD
+                    # direction so a concurrently-firing follower on the other pair
+                    # cannot open the conflicting side before this one registers.
+                    allow, size_scale, corr_reason = self.correlation_engine.reserve_entry(
                         self.mt5_symbol, signal, self.live_state, self.live_evidence)
                 except Exception as ce:
                     allow, size_scale, corr_reason = True, 1.0, f"engine error: {ce}"
@@ -1216,6 +1219,10 @@ class AxonDaemon:
 
             # Execute order on MT5 terminal using the correct trade executor
             trade_result = None
+            # We hold an in-flight correlation reservation from reserve_entry above
+            # (whenever the engine is active). It must be cleared exactly once: by
+            # register_position on a real fill, else by release_pending below.
+            _reserved = self.correlation_engine is not None
             try:
                 trade_result = self.trade_executor.execute_signal(self.mt5_symbol, signal, self.live_state, size_scale)
                 if trade_result:
@@ -1235,12 +1242,18 @@ class AxonDaemon:
                                 self.mt5_symbol, signal,
                                 trade_result.get("volume", 0.0) or 0.0,
                                 trade_result.get("price", 0.0) or 0.0, ticket)
+                            _reserved = False   # reservation consumed by the registered position
                     # Mirror this entry decision to the execution node (best-effort;
                     # lead side only — a no-op when mirror_client is None).
                     self._mirror_send({"cmd": "enter", "signal": signal, "size_scale": size_scale,
                                        "lead_lot": trade_result.get("volume")})
             except Exception as ex_err:
                 logger.error("AxonDaemon: Trade execution error: %s", ex_err, exc_info=True)
+            finally:
+                # No fill / no ticket / error → drop the reservation so this symbol
+                # isn't blocked by a phantom in-flight entry.
+                if _reserved and self.correlation_engine is not None:
+                    self.correlation_engine.release_pending(self.mt5_symbol)
             
             # Persistently log signal to file
             self._log_signal(event, ws, signal, trade_result,
@@ -2724,6 +2737,19 @@ class AxonDaemon:
         use_fixed_trail = bool(self.config.get("hard_distance_mode") and hard_trail_pips)
         hard_trail_dist = (float(hard_trail_pips) * pip) if use_fixed_trail else None
 
+        # Broker minimum stop distance. The trail target is anchored to the best
+        # (peak) price, which only ratchets in the profit direction — so after a
+        # retrace it can end up on the WRONG SIDE of the current market (a SELL stop
+        # below the ask / a BUY stop above the bid). Re-sending such a target every
+        # tick is rejected as retcode 10016 "Invalid stops" and spams the alert log
+        # while the stop never advances. We gate every modify on the target being a
+        # valid distance on the correct side, so a crossed target is skipped, not
+        # re-fired. (stops_level is 0 on this broker; the guard still kills the
+        # wrong-side case, which is the actual bug.)
+        _si = mt5.symbol_info(self.mt5_symbol)
+        _point = (getattr(_si, "point", pip) or pip)
+        min_stop_dist = (getattr(_si, "trade_stops_level", 0) or 0) * _point
+
         for pos in positions:
             ticket = pos.ticket
             # If we don't have the initial SL recorded, initialize it from pos.sl
@@ -2734,9 +2760,17 @@ class AxonDaemon:
                 self._active_trade_atr[ticket] = atr
                 self._active_trade_peak_price[ticket] = pos.price_open
                 self._active_trade_worst_price[ticket] = pos.price_open
+                # This block is reached ONLY for a position we did NOT originate this
+                # session (a restart re-adoption) — a fresh entry is already in
+                # _active_trade_initial_sl from the execute path. Mark its retest arm
+                # already-RESOLVED ("adopted") so the veto never re-judges a position
+                # whose retest history we cannot reconstruct. Restart-safety bug fixed
+                # 2026-08-13: a fresh arm here re-ran the veto and scratched 4 adopted
+                # positions "after 0s" (−$474). Mirrors the no-progress-abort's fresh-
+                # window treatment below.
                 self._retest_arm[ticket] = {"anchor": pos.price_open,
                                             "buy": pos.type == mt5.POSITION_TYPE_BUY,
-                                            "verdict": None, "delay": None}
+                                            "verdict": "adopted", "delay": None}
 
             # Ensure ATR and peak price are recorded
             if ticket not in self._active_trade_atr:
@@ -2806,9 +2840,17 @@ class AxonDaemon:
                         target_sl = trail_sl
                 
                 if pos.sl < target_sl:
-                    logger.info("AxonDaemon: Trailing SL triggered for BUY ticket %d. Modifying SL: %.5f -> %.5f",
-                                ticket, pos.sl, target_sl)
-                    self._modify_sl(ticket, target_sl, pos.tp, "BUY")
+                    # A BUY stop must sit BELOW the market by >= the broker min
+                    # distance. After a retrace the peak-anchored target can be at/
+                    # above the bid -> invalid (10016); skip rather than re-fire.
+                    if target_sl <= bid - min_stop_dist:
+                        logger.info("AxonDaemon: Trailing SL triggered for BUY ticket %d. Modifying SL: %.5f -> %.5f",
+                                    ticket, pos.sl, target_sl)
+                        self._modify_sl(ticket, target_sl, pos.tp, "BUY")
+                    else:
+                        logger.debug("AxonDaemon: BUY ticket %d trail target %.5f not below market "
+                                     "(bid %.5f, min-dist %.5f) — crossed/too-close, SL stays %.5f",
+                                     ticket, target_sl, bid, min_stop_dist, pos.sl)
 
             elif pos.type == mt5.POSITION_TYPE_SELL:
                 # Update peak price using the ask price
@@ -2839,9 +2881,18 @@ class AxonDaemon:
                         target_sl = trail_sl
                         
                 if pos.sl > target_sl or pos.sl == 0.0:
-                    logger.info("AxonDaemon: Trailing SL triggered for SELL ticket %d. Modifying SL: %.5f -> %.5f",
-                                ticket, pos.sl, target_sl)
-                    self._modify_sl(ticket, target_sl, pos.tp, "SELL")
+                    # A SELL stop must sit ABOVE the market by >= the broker min
+                    # distance. After a retrace up, the peak-anchored target can be
+                    # at/below the ask -> invalid (10016, the observed bug); skip
+                    # rather than re-fire a rejected modify every tick.
+                    if target_sl >= ask + min_stop_dist:
+                        logger.info("AxonDaemon: Trailing SL triggered for SELL ticket %d. Modifying SL: %.5f -> %.5f",
+                                    ticket, pos.sl, target_sl)
+                        self._modify_sl(ticket, target_sl, pos.tp, "SELL")
+                    else:
+                        logger.debug("AxonDaemon: SELL ticket %d trail target %.5f not above market "
+                                     "(ask %.5f, min-dist %.5f) — crossed/too-close, SL stays %.5f",
+                                     ticket, target_sl, ask, min_stop_dist, pos.sl)
 
     @staticmethod
     def _effective_trail_mult(config) -> float:

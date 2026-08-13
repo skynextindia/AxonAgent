@@ -87,6 +87,14 @@ class CorrelationEngine:
 
         self._lock = threading.RLock()
         self._positions: Dict[int, Tuple[str, str, float, float]] = {}  # ticket -> (sym, dir, lot, price)
+        # In-flight entry reservations (canon symbol -> direction). One daemon thread
+        # per pair evaluates concurrently, and a position is only registered AFTER its
+        # order fills — so two conflicting-USD entries could both pass evaluate_entry
+        # before either registered (observed 2026-08-13: EURUSD+USDJPY both SELL 1.3s
+        # apart). reserve_entry() re-checks + reserves under the lock so the 2nd thread
+        # sees the 1st's in-flight entry and is vetoed. Cleared by register_position
+        # (fill) or release_pending (fill failed). In-memory: a restart clears it.
+        self._pending: Dict[str, str] = {}
         self.rolling_corr = 0.0
         self.lead_bias = 0.0             # signed recent return of the lead pair
         self.atr_pips: Dict[str, float] = {}
@@ -103,6 +111,7 @@ class CorrelationEngine:
     def register_position(self, symbol, direction, lot, price, ticket) -> None:
         with self._lock:
             self._positions[int(ticket)] = (_canon(symbol), str(direction), float(lot), float(price))
+            self._pending.pop(_canon(symbol), None)   # fill confirmed → clear the reservation
 
     def unregister_position(self, ticket) -> None:
         with self._lock:
@@ -258,3 +267,49 @@ class CorrelationEngine:
 
         scale = max(self.size_scale_min, min(1.0, scale))
         return True, scale, f"corr={corr:+.2f} net={net:+.0f} scale={scale:.2f}"
+
+    def reserve_entry(self, symbol, direction, live_state=None, live_evidence=None) -> Tuple[bool, float, str]:
+        """Atomic check-and-reserve — the race-safe wrapper the daemon must call
+        instead of evaluate_entry. Runs the normal evaluation, then re-checks the
+        USD-alignment rule against BOTH open positions AND in-flight reservations
+        under a single lock, and (if clear) reserves this entry's direction. Two
+        follower threads therefore serialize here: the second sees the first's
+        pending entry and is vetoed, closing the cross-thread race that let both
+        pairs open the same (conflicting-USD) side. The caller MUST, after this
+        returns allow=True, later call register_position (on fill) or
+        release_pending (on fill failure) — otherwise the reservation leaks and
+        blocks that symbol until the next restart.
+        """
+        allow, scale, reason = self.evaluate_entry(symbol, direction, live_state, live_evidence)
+        if not allow:
+            return allow, scale, reason
+        c = _canon(symbol)
+        if not self.config.get("corr_require_usd_alignment", True):
+            return allow, scale, reason
+        _eu = position_usd(symbol, direction, 1.0, 1.0)
+        entry_sign = 1.0 if _eu > 0 else -1.0 if _eu < 0 else 0.0
+        if entry_sign == 0:
+            return allow, scale, reason
+        with self._lock:
+            # Re-check under the lock against open positions AND pending reservations.
+            candidates = [(s, d) for (s, d, l, p) in self._positions.values()]
+            candidates += list(self._pending.items())
+            for (s, d) in candidates:
+                if _canon(s) == c:
+                    continue
+                _pu = position_usd(s, d, 1.0, 1.0)
+                psign = 1.0 if _pu > 0 else -1.0 if _pu < 0 else 0.0
+                if psign != 0 and psign != entry_sign:
+                    edir = "UP" if entry_sign > 0 else "DOWN"
+                    odir = "UP" if psign > 0 else "DOWN"
+                    return (False, 0.0,
+                            f"vetoed: {c} {str(direction).upper()} (dollar {edir}) conflicts with "
+                            f"open/pending {_canon(s)} {str(d).upper()} (dollar {odir})")
+            self._pending[c] = str(direction)   # no conflict → reserve atomically
+        return allow, scale, reason
+
+    def release_pending(self, symbol) -> None:
+        """Drop an in-flight reservation whose order did NOT fill (execute returned
+        nothing or raised), so the symbol isn't blocked by a phantom entry."""
+        with self._lock:
+            self._pending.pop(_canon(symbol), None)
