@@ -638,9 +638,9 @@ SYMBOL_CALIBRATION = {
         "stage_entry_enabled": False,   # STAGED ENTRY OFF for EURUSD — replay marginal here (+43->+50
                                         # sum, slightly negative in the late OOS half; fades confirm fast,
                                         # little left-tail to truncate). Arm only after USDJPY proves out.
-        "structure_trail_enabled": False, # STRUCTURE-TRAIL OFF for EURUSD — arm USDJPY first, judge on
-                                        # daily results, then consider EURUSD (its moves are smaller;
-                                        # reversal auto-scales with its ~6p ATR).
+        "structure_trail_enabled": True, # STRUCTURE-TRAIL ARMED 2026-08-14 (user: "arm to all"). EURUSD moves
+                                        # are smaller so reversal auto-scales with its ~6p ATR; less tested than
+                                        # USDJPY — watch that it doesn't over-hold/whipsaw in tight EURUSD ranges.
     },
     "USDJPY": {
         "magic_number": 123458,      # distinct from EURUSD
@@ -712,8 +712,8 @@ SYMBOL_CALIBRATION = {
                                         # 7 straight-against SELL losers in the sample rode at 40% size
                                         # (-158p -> -63p), total +105 -> +152p, drop-best-robust. Ships
                                         # OFF; enable + restart WHILE FLAT to arm. probe+add stay 1.0.
-        "structure_trail_enabled": False, # STRUCTURE-TRAIL — the arm point (memory structure-trail). Set
-                                        # True to REPLACE the ATR trail with a swing-structure trail: hold
+        "structure_trail_enabled": True, # STRUCTURE-TRAIL — ARMED 2026-08-14 (user, USDJPY-only; staged
+                                        # entry left OFF). REPLACES the ATR trail with a swing-structure trail: hold
                                         # while lower-highs form, exit on a break above the last lower-high.
                                         # Designed to stop giving back on small winners AND stop choking the
                                         # +30 runners (both failure modes of a fixed trail). reversal auto-
