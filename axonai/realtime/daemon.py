@@ -11,6 +11,7 @@ import logging
 import queue
 import signal
 import sys
+import threading
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Optional
@@ -106,6 +107,13 @@ class AxonDaemon:
         self._exit_shadow: dict[int, dict] = {}  # ticket -> alt-trail exit-capture shadow (first shadow-stop hit)
         self._brk_setups: list = []  # active break-and-retest continuation-shadow state machines
         self._revconf_watches: list = []  # active reversal-confirmation PRE-ENTRY shadow watches
+        self._retest_setup: Optional[dict] = None  # armed structure-shift retest entry setup (lead-only)
+        self._retest_fwd: list = []  # structure-retest forward fixed-rail P&L shadow trackers
+        self._retest_last_fire_ts: float = 0.0  # cooldown anchor for structure-retest fires
+        self._retest_shift_cache: Optional[dict] = None  # cached shift-zigzag (~30s)
+        self._entry_lock = threading.Lock()  # serializes the two entry paths (exhaustion event-thread
+        #                                       vs structure-retest tick-thread) so they can never both
+        #                                       open a position on this symbol+magic (1-per-magic race).
         self._active_trade_entry_time: dict[int, float] = {}  # ticket -> wall-clock entry epoch (for no-progress abort)
         self._sl_fail_alert_ts: dict[int, float] = {}   # per-ticket throttle for SL-modify-failure alerts
 
@@ -626,6 +634,19 @@ class AxonDaemon:
         if not self._exec_node and self.config.get("revconf_shadow", True) and self._revconf_watches:
             try:
                 self._update_revconf_shadow(bid, ask)
+            except Exception:
+                pass
+
+        # Structure-shift RETEST entry (LEAD only): a WITH-trend trigger the exhaustion
+        # fader lacks. Detects a confirmed shift, arms the broken swing level, and fires
+        # on a retest+rejection — shadow-logs every would-fire, places a real order only
+        # when structure_retest_enabled. Fully fail-safe (an entry-trigger bug must never
+        # interrupt tick processing). See _maybe_fire_structure_retest.
+        if not self._exec_node and self.config.get("structure_retest_shadow", True):
+            try:
+                _rpip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+                self._maybe_fire_structure_retest(bid, ask, _rpip)
+                self._update_retest_fwd(bid, ask, _rpip)
             except Exception:
                 pass
 
@@ -1229,6 +1250,10 @@ class AxonDaemon:
             # _stage=False → probe_frac 1.0 → identical to a single full entry.
             _stage = bool(self.config.get("stage_entry_enabled", False))
             _probe_frac = float(self.config.get("stage_probe_frac", 0.40)) if _stage else 1.0
+            # Serialize with the structure-retest entry (which runs on the tick thread): both
+            # entry paths hold _entry_lock across execute + track/register so they cannot race
+            # into two positions on the same symbol+magic (review 2026-08-14).
+            self._entry_lock.acquire()
             try:
                 trade_result = self.trade_executor.execute_signal(
                     self.mt5_symbol, signal, self.live_state, size_scale, stage_frac=_probe_frac)
@@ -1270,7 +1295,8 @@ class AxonDaemon:
                 # isn't blocked by a phantom in-flight entry.
                 if _reserved and self.correlation_engine is not None:
                     self.correlation_engine.release_pending(self.mt5_symbol)
-            
+                self._entry_lock.release()
+
             # Persistently log signal to file
             self._log_signal(event, ws, signal, trade_result,
                              impulse_shadow=impulse_shadow, breakout_shadow=breakout_shadow,
@@ -2883,6 +2909,251 @@ class AxonDaemon:
         except Exception as e:
             logger.debug("structure stop failed for ticket %s: %s", getattr(pos, "ticket", "?"), e)
             return None
+
+    def _compute_structure_shift(self, pip: float):
+        """Shift-zigzag on structure_retest_tf: returns {'highs':[..],'lows':[..],'dir':int,'R':px}
+        with the last few CONFIRMED swing highs/lows (most-recent last), or None. Cached ~30s.
+        Self-contained (pulls its own bars) — the detection substrate for the structure-retest
+        entry trigger. Never raises into the tick loop."""
+        try:
+            now = time.time()
+            c = self._retest_shift_cache
+            if c and (now - c.get("t", 0.0)) < 30.0:
+                return c.get("val")
+            tf_name = str(self.config.get("structure_retest_tf", "M15")).upper()
+            tf = getattr(mt5, "TIMEFRAME_" + tf_name, mt5.TIMEFRAME_M15)
+            lookback = int(self.config.get("structure_retest_lookback", 48))
+            rates = mt5.copy_rates_from_pos(self.mt5_symbol, tf, 0, lookback)
+            if rates is None or len(rates) < 8:
+                return c.get("val") if c else None
+            atr = sum(float(x["high"]) - float(x["low"]) for x in rates[-14:]) / 14.0
+            R = float(self.config.get("structure_retest_reversal_atr", 0.4)) * atr
+            if R <= 0:
+                return None
+            d = 0; ext = float(rates[0]["close"]); highs = []; lows = []
+            for x in rates:
+                h = float(x["high"]); l = float(x["low"])
+                if d >= 0:                               # up-leg (0 = unknown, treat as up)
+                    if h > ext: ext = h
+                    if l <= ext - R:                     # fell R from the peak -> swing HIGH
+                        highs.append(ext); d = -1; ext = l
+                else:                                    # down-leg
+                    if l < ext: ext = l
+                    if h >= ext + R:                     # rose R from the trough -> swing LOW
+                        lows.append(ext); d = 1; ext = h
+            val = {"highs": highs[-3:], "lows": lows[-3:], "dir": d, "R": R}
+            self._retest_shift_cache = {"t": now, "val": val}
+            return val
+        except Exception as e:
+            logger.debug("structure shift zigzag failed: %s", e)
+            return None
+
+    def _arm_retest_fwd(self, signal: str, entry_px: float, pip: float, fired_real: bool):
+        """Arm a forward fixed-rail P&L tracker for a structure-retest would-fire. Resolves to
+        structure_retest_shadow.jsonl as WIN(+tp) / LOSS(-sl, adverse-first = pessimistic) /
+        TIMEOUT(mark-to-market). Measures ENTRY quality on the live 20/30 rails even when the
+        armed exit differs — the shadow that validates the trigger before it is armed."""
+        self._retest_fwd.append({
+            "signal": signal, "entry": entry_px, "pip": pip, "t0": time.time(),
+            "mfe": 0.0, "mae": 0.0, "real": bool(fired_real),
+            "sl": float(self.config.get("structure_retest_sl_pips", 20.0)),
+            "tp": float(self.config.get("structure_retest_tp_pips", 30.0)),
+        })
+        if len(self._retest_fwd) > 40:                   # hard cap, prune oldest
+            self._retest_fwd = self._retest_fwd[-40:]
+
+    def _update_retest_fwd(self, bid: float, ask: float, pip: float):
+        """Advance + resolve structure-retest forward trackers (LEAD-only). Pure observation —
+        reads prices, never touches a position; runs in parallel with the real managed exit."""
+        if self._exec_node or not self._retest_fwd:
+            return
+        try:
+            import os, json
+            fwd_min = float(self.config.get("structure_retest_forward_min", 90))
+            now = time.time(); keep = []
+            for t in self._retest_fwd:
+                e = t["entry"]
+                if t["signal"] == "Sell":
+                    fav = (e - bid) / pip; adv = (ask - e) / pip
+                else:
+                    fav = (ask - e) / pip; adv = (e - bid) / pip
+                t["mfe"] = max(t["mfe"], fav); t["mae"] = max(t["mae"], adv)
+                status = None; outcome = None
+                if t["mae"] >= t["sl"]:                   # adverse checked FIRST = pessimistic
+                    status = "LOSS"; outcome = -t["sl"]
+                elif t["mfe"] >= t["tp"]:
+                    status = "WIN"; outcome = t["tp"]
+                elif (now - t["t0"]) >= fwd_min * 60.0:
+                    status = "TIMEOUT"; outcome = fav     # mark-to-market at expiry
+                if status is None:
+                    keep.append(t); continue
+                row = {"type": "structure_retest", "mt5_symbol": self.mt5_symbol,
+                       "signal": t["signal"], "status": status, "real": t["real"],
+                       "entry": round(e, 5), "outcome_pips": round(outcome, 1),
+                       "mfe": round(t["mfe"], 1), "mae": round(t["mae"], 1),
+                       "sl_pips": t["sl"], "tp_pips": t["tp"], "logged_epoch": int(now)}
+                try:
+                    os.makedirs("reports", exist_ok=True)
+                    with open(self._report_path("structure_retest_shadow.jsonl"), "a", encoding="utf-8") as f:
+                        f.write(json.dumps(row) + "\n")
+                except Exception as we:
+                    logger.debug("structure-retest log failed: %s", we)
+            self._retest_fwd = keep
+        except Exception as e:
+            logger.debug("structure-retest fwd update failed: %s", e)
+
+    def _maybe_fire_structure_retest(self, bid: float, ask: float, pip: float):
+        """Structure-shift RETEST entry (LEAD-only, config-gated). Detects a confirmed structure
+        shift, arms the broken swing level, and on a retest+rejection fires a WITH-trend entry —
+        the entry the exhaustion fader lacks. Shadow-logs every would-fire (+forward fixed-rail
+        P&L via _arm_retest_fwd). Places a real order ONLY when structure_retest_enabled, and only
+        when flat + past every entry gate. Fully fail-safe — never raises into the tick loop."""
+        if self._exec_node or not self.config.get("structure_retest_shadow", True):
+            return
+        try:
+            cfg = self.config
+            buf = float(cfg.get("structure_retest_buffer_pips", 1.5)) * pip
+            rej = float(cfg.get("structure_retest_reject_pips", 1.0)) * pip
+            inv = float(cfg.get("structure_retest_invalidate_pips", 1.0)) * pip
+            sh = self._compute_structure_shift(pip)
+            if not sh:
+                return
+            highs = sh["highs"]; lows = sh["lows"]
+            setup = self._retest_setup
+
+            # ── (Re)arm on a CONFIRMED break of structure ───────────────────────────
+            # A real roll-over needs BOTH a lower high AND a lower low (down-shift), not a bare
+            # lower-high — a lone lower-high inside an intact (higher-low) uptrend is a pullback,
+            # and arming a sell there is a COUNTER-trend entry (review 2026-08-14). Up-shift is the
+            # mirror: a higher low AND a higher high.
+            want = None  # (signal, level, invalidation)
+            if (len(highs) >= 2 and len(lows) >= 2
+                    and highs[-1] < highs[-2] and lows[-1] < lows[-2]):
+                want = ("Sell", highs[-1], highs[-2])         # lower-high + lower-low = down-shift
+            elif (len(highs) >= 2 and len(lows) >= 2
+                    and lows[-1] > lows[-2] and highs[-1] > highs[-2]):
+                want = ("Buy", lows[-1], lows[-2])            # higher-low + higher-high = up-shift
+            if want is not None:
+                if (setup is None or setup["signal"] != want[0]
+                        or abs(setup["level"] - want[1]) > 0.5 * pip):
+                    setup = {"signal": want[0], "level": want[1], "invalidate": want[2],
+                             "touched": False, "extreme": None, "armed_ts": time.time()}
+                    self._retest_setup = setup
+            if setup is None:
+                return
+
+            sig = setup["signal"]; level = setup["level"]; invlvl = setup["invalidate"]
+
+            # ── Invalidation: structure un-shifted (broke back beyond the prior swing) ──
+            if sig == "Sell" and ask > invlvl + inv:
+                self._retest_setup = None; return
+            if sig == "Buy" and bid < invlvl - inv:
+                self._retest_setup = None; return
+
+            # ── Retest touch, then rejection back away from the level ──────────────────
+            # Track the rejection extreme on the SAME quote the fire test uses, so the spread can't
+            # erode the reject threshold (review 2026-08-14): SELL tracks peak BID + fires on a bid
+            # fall; BUY tracks trough ASK + fires on an ask rise. (Mixing peak-ask with a bid fall
+            # let a fire trigger with ~zero real pullback whenever spread ≈ reject_pips.)
+            fire = False
+            if sig == "Sell":
+                if ask >= level - buf:                        # rallied back into the zone
+                    setup["touched"] = True
+                if setup["touched"]:
+                    setup["extreme"] = bid if setup["extreme"] is None else max(setup["extreme"], bid)
+                    if bid <= setup["extreme"] - rej:         # bid fell rej from its peak = rejection
+                        fire = True
+            else:  # Buy
+                if bid <= level + buf:
+                    setup["touched"] = True
+                if setup["touched"]:
+                    setup["extreme"] = ask if setup["extreme"] is None else min(setup["extreme"], ask)
+                    if ask >= setup["extreme"] + rej:         # ask rose rej from its trough = rejection
+                        fire = True
+            if not fire:
+                return
+
+            # ── Fire (one per setup) ───────────────────────────────────────────────────
+            entry_px = bid if sig == "Sell" else ask
+            self._retest_setup = None                          # consume the setup (re-arms on next shift)
+            # Entry gates (same as the exhaustion path): session / SL-lockout / EOD / flat.
+            ws = self.live_state.snapshot()
+            gated = None
+            if ws and ws.session not in self._current_active_sessions():
+                gated = "session %s" % ws.session
+            elif self._sl_locked_out:
+                gated = "SL lockout"
+            elif self._eod_flat_blocked:
+                gated = "EOD cutoff"
+            elif mt5.positions_get(symbol=self.mt5_symbol) or self._tracked_positions:
+                gated = "not flat"
+            armed = bool(cfg.get("structure_retest_enabled", False))
+            cd = float(cfg.get("structure_retest_cooldown_min", 20)) * 60.0
+            cooldown = (time.time() - self._retest_last_fire_ts) < cd
+            place_real = armed and (gated is None) and (not cooldown)
+            logger.info("RETEST %s: %s retest of %s-shift level %.5f -> entry %.5f%s%s%s",
+                        self.mt5_symbol, sig, ("down" if sig == "Sell" else "up"), level, entry_px,
+                        ("" if armed else " [SHADOW]"), (" — GATED (%s)" % gated if gated else ""),
+                        (" — COOLDOWN" if (armed and gated is None and cooldown) else ""))
+            # Forward shadow tracker ALWAYS (measures RAW signal quality on fixed rails). The
+            # cooldown + gates suppress only the LIVE order — never the shadow — else the very
+            # WIN/LOSS sample used to decide whether to arm would be biased (review 2026-08-14).
+            self._arm_retest_fwd(sig, entry_px, pip, place_real)
+            if not place_real:
+                return
+            self._retest_last_fire_ts = time.time()
+
+            # ── Real order: serialize with the exhaustion entry under _entry_lock and RE-CHECK
+            #    flat INSIDE the lock, so the tick-thread retest and the event-thread exhaustion
+            #    entry can never both open a position on this symbol+magic (reserve → execute →
+            #    register → mirror; reservation cleared exactly once). ──
+            self._entry_lock.acquire()
+            _reserved = False
+            try:
+                if mt5.positions_get(symbol=self.mt5_symbol) or self._tracked_positions:
+                    logger.info("RETEST %s: not flat at fire (raced the exhaustion entry) — skip",
+                                self.mt5_symbol)
+                    return
+                size_scale = 1.0
+                if self.correlation_engine is not None:
+                    try:
+                        allow, size_scale, _cr = self.correlation_engine.reserve_entry(
+                            self.mt5_symbol, sig, self.live_state, self.live_evidence)
+                        _reserved = True
+                        if not allow:
+                            self.correlation_engine.release_pending(self.mt5_symbol); _reserved = False
+                            logger.info("RETEST %s: correlation gate blocked (%s)", self.mt5_symbol, _cr)
+                            return
+                    except Exception:
+                        size_scale, _reserved = 1.0, False
+                tr = self.trade_executor.execute_signal(self.mt5_symbol, sig, self.live_state, size_scale)
+                if tr and tr.get("order"):
+                    tk = tr["order"]
+                    self._tracked_positions.add(tk)
+                    self._active_trade_initial_sl[tk] = tr.get("sl")
+                    self._active_trade_system[tk] = "structure_retest"
+                    atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
+                    self._active_trade_atr[tk] = atr
+                    self._active_trade_peak_price[tk] = tr.get("price", 0.0)
+                    self._active_trade_worst_price[tk] = tr.get("price", 0.0)
+                    self._active_trade_entry_time[tk] = time.time()
+                    if self.correlation_engine is not None:
+                        self.correlation_engine.register_position(
+                            self.mt5_symbol, sig, tr.get("volume", 0.0) or 0.0,
+                            tr.get("price", 0.0) or 0.0, tk)
+                        _reserved = False              # reservation consumed by the registered position
+                    self._mirror_send({"cmd": "enter", "signal": sig, "size_scale": size_scale,
+                                       "lead_lot": tr.get("volume")})
+                    logger.info("RETEST %s: FIRED %s ticket %s vol %s", self.mt5_symbol, sig,
+                                tk, tr.get("volume"))
+                else:
+                    logger.info("RETEST %s: no fill (%s — position open or rejected)", self.mt5_symbol, sig)
+            finally:
+                if _reserved and self.correlation_engine is not None:
+                    self.correlation_engine.release_pending(self.mt5_symbol)
+                self._entry_lock.release()
+        except Exception as e:
+            logger.debug("structure-retest trigger failed: %s", e)
 
     def _manage_trailing_stops(self, bid: float, ask: float):
         """Manage trailing stop modifications on active MT5 positions."""

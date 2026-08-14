@@ -375,6 +375,38 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "structure_trail_reversal_atr": 0.4, # swing pivot confirms after price reverses this ×ATR
     "structure_trail_buffer_pips": 1.0,  # stop sits this many pips beyond the last swing pivot
     "structure_trail_lookback_m5": 80,   # M5 bars used to build the zigzag (~6.5h)
+    # ── Structure-shift RETEST entry (WITH-trend) — a real entry trigger, ships OFF ──
+    # ADDED 2026-08-14 (user: "add a structure-retest entry trigger"). The exhaustion fader
+    # has NO with-trend entry: it only sells tops / buys bottoms, and the structure veto then
+    # BLOCKS the against-trend ones — so when a trend rolls over into a clean lower-high
+    # (EURUSD 2026-08-14: 1.15711<1.15719, price retested the lower-high) the machine can SEE
+    # the sell setup but has no trigger to take it. This adds one: on a CONFIRMED structure
+    # shift on structure_retest_tf (a lower-high after an up-leg = down-shift → SELL; a higher-
+    # low after a down-leg = up-shift → BUY) it arms the broken swing level, and when price
+    # RETESTS that level and REJECTS (ticks structure_retest_reject_pips back away) it fires a
+    # WITH-trend entry in the new direction. Invalidates if price breaks back beyond the PRIOR
+    # swing (structure un-shifts). Tick-driven, LEAD-only, respects every entry gate (session /
+    # SL-lockout / EOD) + fires only when FLAT (1-per-magic, never stacks the exhaustion entry);
+    # mirrors to the node exactly like an exhaustion entry. Restart-safe (touches no open
+    # position — unlike the retest VETO). structure_retest_shadow (master, ON) computes + logs
+    # every would-fire with forward fixed-rail (sl/tp) P&L to structure_retest_shadow.jsonl so
+    # it VALIDATES before arming; structure_retest_enabled (per-pair, OFF) is the single flag
+    # that places the real order. NOTE the existing break-retest CONTINUATION shadow reads
+    # EURUSD-NEGATIVE / USDJPY-positive (memory breakout-retest-continuation) — cross-check
+    # that before arming EURUSD. Offline-unvalidatable like every entry/exit lever here → ships
+    # OFF, arm per-pair on POST-BUILD shadow rows.
+    "structure_retest_shadow": True,        # master: compute + shadow-log would-fire (lead-only)
+    "structure_retest_enabled": False,      # per-pair: actually PLACE the retest entry (OFF)
+    "structure_retest_tf": "M15",           # timeframe whose zigzag defines the shift (M15 = veto TF)
+    "structure_retest_reversal_atr": 0.4,   # swing pivot confirms after price reverses this ×ATR
+    "structure_retest_lookback": 48,        # bars pulled to build the shift zigzag
+    "structure_retest_buffer_pips": 1.5,    # a retest counts as a touch within this of the level
+    "structure_retest_reject_pips": 1.0,    # price must tick back this far from the touch extreme to fire
+    "structure_retest_invalidate_pips": 1.0, # break beyond the PRIOR swing by this = setup dead
+    "structure_retest_cooldown_min": 20,    # min minutes between retest fires (anti-churn)
+    "structure_retest_sl_pips": 20.0,       # shadow forward P&L uses these fixed rails (the live 20/30);
+    "structure_retest_tp_pips": 30.0,       #   the real armed exit is whatever's configured — this measures ENTRY quality
+    "structure_retest_forward_min": 90,     # shadow resolves WIN/LOSS/TIMEOUT within this window
     # ── Reversal-confirmation PRE-ENTRY gate (SHADOW-ONLY, never acts) ─────────
     # The retest veto ENTERS EARLY then scratches; this asks the opposite question:
     # what if we WAIT and only enter once the reversal CONFIRMS? On each fired peak
@@ -822,6 +854,17 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
     # the ATR trail for that pair. Arm USDJPY-first (live A/B). See memory structure-trail.
     for _k, _d in (("structure_trail_enabled", False), ("structure_trail_reversal_atr", 0.4),
                    ("structure_trail_buffer_pips", 1.0), ("structure_trail_lookback_m5", 80)):
+        cfg[_k] = spec.get(_k, base.get(_k, _d))
+    # Per-pair structure-shift RETEST entry (whitelist mapping — without these the
+    # SYMBOL_CALIBRATION keys never reach self.config). Shadow-logs for all pairs; the real
+    # entry fires only where structure_retest_enabled is set. Arm per-pair on POST-BUILD shadow
+    # rows (cross-check breakout-retest-continuation: EURUSD continuation reads negative).
+    for _k, _d in (("structure_retest_shadow", True), ("structure_retest_enabled", False),
+                   ("structure_retest_tf", "M15"), ("structure_retest_reversal_atr", 0.4),
+                   ("structure_retest_lookback", 48), ("structure_retest_buffer_pips", 1.5),
+                   ("structure_retest_reject_pips", 1.0), ("structure_retest_invalidate_pips", 1.0),
+                   ("structure_retest_cooldown_min", 20), ("structure_retest_sl_pips", 20.0),
+                   ("structure_retest_tp_pips", 30.0), ("structure_retest_forward_min", 90)):
         cfg[_k] = spec.get(_k, base.get(_k, _d))
     # Per-pair breakout discriminator (whitelist mapping — without these lines the
     # SYMBOL_CALIBRATION keys never reach self.config). Shadow logs for all pairs;
