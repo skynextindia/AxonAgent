@@ -619,6 +619,14 @@ SYMBOL_CALIBRATION = {
         "structure_veto_enabled": True, # ARMED 2026-08-12 at user direction (both pairs). Skips
                                         # an against-structure fade (fights the higher-TF trend).
                                         # Bounded (only skips); thin evidence — watch trade count.
+        "structure_veto_require_h1_trend": False, # DROPPED 2026-08-14 (user, EURUSD-only). The H1 gate held
+                                        # the veto off when H1 read "sideways" — but 2026-08-14's opposite
+                                        # EURUSD sells were flagged against_structure on M15 while H1 still
+                                        # lagged "sideways", so they slipped through and faded a 20p up-trend.
+                                        # Now vetoes an M15 against_structure fade directly (no H1 wait).
+                                        # TRADEOFF: may also skip winning mean-reversion fades in true chop
+                                        # (the reason the gate existed) — live A/B, watch EURUSD trade count +
+                                        # whether it starves good fades. Bounded (only skips). USDJPY keeps H1.
         "retest_confirm_enabled": False, # DISARMED 2026-08-13 (user: "early cuts are problem … disarm the veto"):
                                         # every loss on 2026-08-13 was a retest-veto scratch; trades left to
                                         # trail/hard-stop won. Shadow still logs (retest_confirm_shadow). Was
