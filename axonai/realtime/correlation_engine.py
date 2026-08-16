@@ -83,6 +83,7 @@ class CorrelationEngine:
         self.max_net_usd = float(self.config.get("corr_max_net_usd", 200000.0))
         self.bias_lookback = int(self.config.get("corr_bias_lookback_bars", 10))
         self.bias_threshold = float(self.config.get("corr_veto_bias_threshold", 0.0015))
+        self.bias_veto_enabled = bool(self.config.get("corr_bias_veto_enabled", True))
         self.size_scale_min = float(self.config.get("corr_size_scale_min", 0.25))
 
         self._lock = threading.RLock()
@@ -250,7 +251,7 @@ class CorrelationEngine:
         # (c) veto: a USD-strengthening entry contradicts a strong up-bias in the
         # lead (EURUSD up = USD weak), and a USD-weakening entry contradicts a
         # strong down-bias (EURUSD down = USD strong).
-        if abs(bias) >= self.bias_threshold and entry_sign != 0:
+        if self.bias_veto_enabled and abs(bias) >= self.bias_threshold and entry_sign != 0:
             if (entry_sign > 0 and bias > 0) or (entry_sign < 0 and bias < 0):
                 return False, 0.0, f"vetoed: {self.lead} bias {bias:+.4f} contradicts USD direction"
 

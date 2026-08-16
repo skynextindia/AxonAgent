@@ -304,6 +304,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "corr_max_net_usd": 200000.0,       # cap on combined net-USD exposure across pairs
     "corr_bias_lookback_bars": 10,      # H1 bars for the lead-pair bias
     "corr_veto_bias_threshold": 0.0015, # |lead return| that vetoes a contradicting entry
+    "corr_bias_veto_enabled": False,    # DISABLED 2026-08-16 (user, after 90d real-tick validation):
+                                        # the EURUSD-lead bias veto (take a follower entry only if the
+                                        # lead's recent bias agrees on USD dir) removed 34 WINNING USDJPY
+                                        # trades on the 90d replay through the real engine (anti-predictive,
+                                        # no portfolio-DD benefit). Set True to restore. The alignment LOCK
+                                        # + exposure cap + size-scale are UNCHANGED (kept as risk controls).
+                                        # See memory cross-pair-usd-confirmation (Phase 2 result).
     "corr_size_scale_min": 0.25,        # floor for correlation/exposure size scaling
     "corr_require_usd_alignment": True, # dollar-direction lock: while any position is open,
                                         # a new entry (lead OR follower) must agree on USD
@@ -317,7 +324,23 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # NOT the tiny currently-forming candle the old gate used.
     "range_gate_lookback": 20,          # closed M15 candles that define the range (~5h)
     "range_gate_edge": 0.25,            # block SELL if pos < edge (lower quarter = support);
-                                        # block BUY if pos > 1-edge (upper quarter = resistance)
+                                        # block BUY if pos > 1-edge (upper quarter = resistance).
+                                        # PER-PAIR 2026-08-14: real-tick test — 0.25 HELPS EURUSD
+                                        # (+$741, PF 1.6->2.0, DD halved) but HURTS USDJPY (−$562,
+                                        # blocks +128p of WINNING range-extreme fades). So base 0.25
+                                        # for EURUSD; USDJPY overridden to 0.0 (gate OFF) in
+                                        # SYMBOL_CALIBRATION. edge=0.0 => never blocks (rel<0 / rel>1).
+    # ── Consolidation gate (user 2026-08-14): don't fade the WRONG END of a TIGHT
+    # consolidation. A fade fired inside a compressed range gets bounced off the near edge (the
+    # entry becomes support/resistance) = the "entered mid-consolidation, got chopped" trap. Finer
+    # window than range_gate (20 candles/~5h misses the immediate consolidation): over the last
+    # consol_lookback M15 closes, if range <= consol_max_atr x avg-M15-bar (tight) AND the fade is
+    # within consol_edge of the near edge, SKIP. Only SKIPS (bounded — a skip never loses); fails
+    # OPEN. Per-pair: EURUSD armed real (SYMBOL_CALIBRATION), USDJPY OFF. Logged on every skip.
+    "consol_gate_enabled": False,       # per-pair master (EURUSD True in SYMBOL_CALIBRATION)
+    "consol_lookback": 8,               # closed M15 candles = the immediate consolidation window (~2h)
+    "consol_max_atr": 1.8,              # range must be <= this x avg-M15-bar to count as a tight consolidation
+    "consol_edge": 0.25,                # block a fade within this fraction of the NEAR edge
     # ── Direction-aware S/R selection (reject wrong-side fades) ────────────────
     # When True, the peak gate only considers S/R levels in the trade's PROFIT
     # direction (resistance at/above for SELL, support at/below for BUY) — it
@@ -375,6 +398,15 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "structure_trail_reversal_atr": 0.4, # swing pivot confirms after price reverses this ×ATR
     "structure_trail_buffer_pips": 1.0,  # stop sits this many pips beyond the last swing pivot
     "structure_trail_lookback_m5": 80,   # M5 bars used to build the zigzag (~6.5h)
+    # Breakeven floor (ADDED 2026-08-14): the structure stop may only TIGHTEN once it locks
+    # breakeven-or-better (at/below entry for a SELL, at/above for a BUY). Before that it keeps
+    # the wider hard stop. Without this, the trail parks the stop just beyond a swing pivot that
+    # can sit only ~1-2p from entry — INSIDE the pair's noise — and a routine counter-spike
+    # scratches a directionally-correct trade right before it runs (USDJPY 245071449 2026-08-14:
+    # struct stop 2.4p from entry, tagged by an 11p spike, price then fell into profit). Same
+    # lesson as the retest cap 2p->5p. Bounded either way by the hard SL; ON by default (strictly
+    # widens the stop, never past the hard SL) — set False per-pair to restore the aggressive trail.
+    "structure_trail_be_floor": True,
     # ── Structure-shift RETEST entry (WITH-trend) — a real entry trigger, ships OFF ──
     # ADDED 2026-08-14 (user: "add a structure-retest entry trigger"). The exhaustion fader
     # has NO with-trend entry: it only sells tops / buys bottoms, and the structure veto then
@@ -403,7 +435,16 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "structure_retest_buffer_pips": 1.5,    # a retest counts as a touch within this of the level
     "structure_retest_reject_pips": 1.0,    # price must tick back this far from the touch extreme to fire
     "structure_retest_invalidate_pips": 1.0, # break beyond the PRIOR swing by this = setup dead
-    "structure_retest_cooldown_min": 20,    # min minutes between retest fires (anti-churn)
+    "structure_retest_cooldown_min": 20,    # min minutes between REAL retest orders (anti-churn)
+    "structure_retest_shadow_dedup_sec": 180, # min seconds between SHADOW logs — caps same-setup / drifting-level re-fires so the validation sample isn't flooded with correlated duplicates
+    "structure_retest_engine_yield": True,  # RETEST PRIORITY (user 2026-08-14): when a retest setup is armed on a pair, the exhaustion engine SKIPS a fade that OPPOSES it (never closes a live position). Inert unless structure_retest_enabled
+    # ER-EXHAUSTION shadow flag (whole-chart-behavior 2026-08-14): a move that arrives at an
+    # entry already efficient (Kaufman ER-20 >= this) continues LESS — the one context feature
+    # that survived a cross-pair shuffle-null for remaining-move. Logged on both exhaustion fades
+    # (regime_shadow.er_exhaustion) and retest fires (structure_retest_shadow.er/er_exhaustion) so
+    # a checkpoint can validate the split on real forward-MFE before any skip/trim is wired
+    # (EURUSD-first per the study; USDJPY signal weaker/non-monotone). Shadow only — never acts.
+    "er_exhaustion_thr": 0.40,
     "structure_retest_sl_pips": 20.0,       # shadow forward P&L uses these fixed rails (the live 20/30);
     "structure_retest_tp_pips": 30.0,       #   the real armed exit is whatever's configured — this measures ENTRY quality
     "structure_retest_forward_min": 90,     # shadow resolves WIN/LOSS/TIMEOUT within this window
@@ -477,6 +518,28 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "regime_lookback": 20,               # M15 closes (~5h) for the efficiency ratio
     "regime_trend_er": 0.50,             # ER >= this = trending
     "regime_range_er": 0.30,             # ER <= this = ranging (else transitional)
+
+    # ── UNIFIED PER-TF REGIME MAP (2026-08-15, PHASE 1 = shadow labeler, gates NOTHING) ──
+    # One nested object per fired signal characterising EVERY timeframe as trend /
+    # retracement / consolidation + its range, logged as `regime_map` in signals.jsonl.
+    # It is PLUMBING, not strategy: it decides nothing here — it consolidates the reads
+    # the existing gates each recompute (range-pos, ER regime, M15 zigzag, H1/H4 EMA) and
+    # ADDS the one thing none of them model — RETRACEMENT, which is inherently a two-TF
+    # relation (a TF moving counter to its PARENT TF without breaking that parent's
+    # structure). Phase 2 will parity-check each gate against this map then flip the gate
+    # to read it; only phase 3 uses the NEW fields (retracement/retr_depth) as gates, each
+    # shuffle-null validated per-pair and shipped OFF. Reuses the same primitives as
+    # _compute_regime_shadow (Kaufman ER) + _compute_structure_shift (shift-zigzag). Pure
+    # observation, LEAD-only, fully fail-safe (a map error can never disturb an entry).
+    "regime_map_enabled": True,          # master switch for the phase-1 labeler
+    "regime_map_tfs": ["D1", "H4", "H1", "M15", "M5"],  # highest->lowest; each TF's parent is the prior entry
+    "regime_map_lookback": 60,           # bars per TF for structure/ER/EMA (>=55 keeps EMA50 valid)
+    "regime_map_range_lookback": 20,     # bars per TF for the range box (hi/lo/pos/width)
+    "regime_map_trend_er": 0.50,         # ER >= this (+ aligned structure & EMA) = trend
+    "regime_map_range_er": 0.30,         # ER <= this (+ range structure & tight width) = consolidation
+    "regime_map_consol_max_atr": 1.8,    # range width <= this x ATR = tight (consolidation gate reuses 1.8)
+    "regime_map_reversal_atr": 0.4,      # shift-zigzag reversal = this x per-TF ATR (matches structure zigzags)
+    "regime_map_cache_sec": 20,          # rebuild the (signal-independent) core at most this often
     # REVP-confluence study: LEAD writes one exhaustion-telemetry row per closed
     # M15 bar (velocity_divergence ~ reversal pressure; efficiency ~ displacement)
     # to reports/revp_telemetry.jsonl, so the last untested pattern idea -- "pattern
@@ -515,6 +578,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # capturing ~42% of MFE (≈3p/trade given back to the 0.50×ATR trail).
     "exit_capture_shadow": True,
     "exit_shadow_trail_atr_mult": 0.35,          # tighter leash to test vs the live 0.50
+    "exit_shadow_giveback_atr": 0.6,             # GIVE-BACK TRAIL A/B (2026-08-14): exit when price gives
+                                                 # back this xATR from the running favorable peak, armed as
+                                                 # soon as in profit. The fade-exit experiment's winner
+                                                 # (beat fixed bracket / loose trail). Shadow counterfactual
+                                                 # vs the live structure-trail (logged giveback vs actual_pips
+                                                 # per close) — the live A/B; judge on accumulated rows.
     "exit_shadow_tp_pips": [3.0, 4.0, 5.0, 6.0], # fixed-TP caps to evaluate
 
     # Break-and-retest CONTINUATION shadow (mirror of the fade; never trades).
@@ -681,6 +750,16 @@ SYMBOL_CALIBRATION = {
         "structure_trail_enabled": True, # STRUCTURE-TRAIL ARMED 2026-08-14 (user: "arm to all"). EURUSD moves
                                         # are smaller so reversal auto-scales with its ~6p ATR; less tested than
                                         # USDJPY — watch that it doesn't over-hold/whipsaw in tight EURUSD ranges.
+        "structure_retest_enabled": True, # RETEST ENTRY ARMED 2026-08-14 (user "arm both"). Places a real BUY
+                                        # on the retest of a confirmed M15 up-shift (higher-low + higher-high).
+                                        # CAUTION: continuation reads EURUSD-NEGATIVE (breakout-retest-
+                                        # continuation) — armed on USER DIRECTION, not shadow validation; this
+                                        # is the first side to disable if the shadow/live rows come back red.
+        "range_gate_edge": 0.25,        # RANGE GATE KEPT ON for EURUSD (real-tick: +$741, PF 1.6->2.0,
+                                        # DD halved — removes losing sell-into-support / buy-into-resistance fades).
+        "consol_gate_enabled": True,    # CONSOLIDATION GATE ARMED REAL for EURUSD (user 2026-08-14): skip a
+                                        # fade at the wrong end of a tight consolidation (the mid-range chop
+                                        # trap). Only skips; logged. USDJPY left OFF. Watch the skip rate.
     },
     "USDJPY": {
         "magic_number": 123458,      # distinct from EURUSD
@@ -759,6 +838,29 @@ SYMBOL_CALIBRATION = {
                                         # +30 runners (both failure modes of a fixed trail). reversal auto-
                                         # scales with ATR (~5-6p here). Ships OFF; enable + restart to arm
                                         # (exit-only, so restart-while-flat is safer but not required).
+        "structure_retest_enabled": True, # RETEST ENTRY ARMED 2026-08-14 (user "arm both"). Places a real SELL
+                                        # on the retest of a confirmed M15 down-shift (lower-high + lower-low).
+                                        # Continuation reads USDJPY-POSITIVE (breakout-retest-continuation) so
+                                        # this side is the more defensible arm; still on user direction, not a
+                                        # validated shadow. Bounded by hard 20/30 SL/TP + node prop caps.
+        "range_gate_edge": 0.0,         # REVERTED to 0.0/OFF 2026-08-15 (user): a 90d REAL-TICK A/B (4.03M USDJPY ticks,
+                                        # scratchpad/bt_realtick_sweep90.py) showed the gate ON COSTS USDJPY -183.3p — it removes
+                                        # n=50 wrong-end fades that were net +145p WINNERS (62% win); USDJPY extremes still BREAK
+                                        # over the full 89d window (May 18->Aug 14). The re-arm below rested on a thin n=21
+                                        # recent-Aug signal the long test can't see -> weight of evidence = OFF. (Same test CONFIRMED
+                                        # EURUSD gate: flips -41p->+253p, kept 0.25.) See memory range-filter-per-pair.
+                                        # --- HISTORY (the now-reversed 1-day re-arm) ---
+                                        # RANGE GATE RE-ARMED 2026-08-14 (user, after regime check). REVERSES the
+                                        # earlier OFF: a 74-trade closed-P&L reconstruction (scratchpad/jpy_regime_check.py,
+                                        # true 20xM15 range-pos at entry via trigger-candle epoch) shows USDJPY's
+                                        # wrong-end bucket has FLIPPED to net-LOSING — n=21 net −59.7p/−$302 (win 67%)
+                                        # vs the rest +200.7p/+$1083 — and it's a RECENCY shift (Jul ~breakeven −0.77p
+                                        # avg -> Aug clearly losing −4.73p avg, −$244 since Aug 1). This is the exact
+                                        # regime-shift contingency the earlier −$562 (memory range-filter-per-pair) was
+                                        # made contingent on. CAVEAT: high-variance bucket (0.25 also kills four +12p
+                                        # winners); net-positive only because 3 big −30p stop-outs slightly outweigh.
+                                        # WATCH the USDJPY trade-count/net and REVERT to 0.0 if the winning-fade regime
+                                        # returns. Also blocks BUY at range-top (rel>0.75) — the #245152295 concern.
     },
 }
 
@@ -853,7 +955,8 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
     # SYMBOL_CALIBRATION keys never reach self.config). Ships OFF; when armed it REPLACES
     # the ATR trail for that pair. Arm USDJPY-first (live A/B). See memory structure-trail.
     for _k, _d in (("structure_trail_enabled", False), ("structure_trail_reversal_atr", 0.4),
-                   ("structure_trail_buffer_pips", 1.0), ("structure_trail_lookback_m5", 80)):
+                   ("structure_trail_buffer_pips", 1.0), ("structure_trail_lookback_m5", 80),
+                   ("structure_trail_be_floor", True)):
         cfg[_k] = spec.get(_k, base.get(_k, _d))
     # Per-pair structure-shift RETEST entry (whitelist mapping — without these the
     # SYMBOL_CALIBRATION keys never reach self.config). Shadow-logs for all pairs; the real
@@ -863,7 +966,8 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
                    ("structure_retest_tf", "M15"), ("structure_retest_reversal_atr", 0.4),
                    ("structure_retest_lookback", 48), ("structure_retest_buffer_pips", 1.5),
                    ("structure_retest_reject_pips", 1.0), ("structure_retest_invalidate_pips", 1.0),
-                   ("structure_retest_cooldown_min", 20), ("structure_retest_sl_pips", 20.0),
+                   ("structure_retest_cooldown_min", 20), ("structure_retest_shadow_dedup_sec", 180),
+                   ("structure_retest_engine_yield", True), ("structure_retest_sl_pips", 20.0),
                    ("structure_retest_tp_pips", 30.0), ("structure_retest_forward_min", 90)):
         cfg[_k] = spec.get(_k, base.get(_k, _d))
     # Per-pair breakout discriminator (whitelist mapping — without these lines the
@@ -879,5 +983,14 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
     for _k, _d in (("structure_veto_enabled", False), ("structure_shadow", True),
                    ("structure_swing_k", 2), ("structure_min_swing_atr", 0.5),
                    ("structure_lookback_m15", 40), ("structure_veto_require_h1_trend", True)):
+        cfg[_k] = spec.get(_k, base.get(_k, _d))
+    # Per-pair range-extreme gate (whitelist mapping — without these the SYMBOL_CALIBRATION
+    # keys never reach self.config). edge 0.25 helps EURUSD / hurts USDJPY (real-tick test),
+    # so USDJPY overrides to 0.0 (OFF). See range_gate_edge doc + memory range-filter-per-pair.
+    for _k, _d in (("range_gate_edge", 0.25), ("range_gate_lookback", 20)):
+        cfg[_k] = spec.get(_k, base.get(_k, _d))
+    # Per-pair consolidation gate (whitelist mapping). EURUSD armed real; other pairs OFF.
+    for _k, _d in (("consol_gate_enabled", False), ("consol_lookback", 8),
+                   ("consol_max_atr", 1.8), ("consol_edge", 0.25)):
         cfg[_k] = spec.get(_k, base.get(_k, _d))
     return cfg

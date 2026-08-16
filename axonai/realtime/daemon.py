@@ -97,6 +97,7 @@ class AxonDaemon:
         # Trailing stop and trade outcome tracking
         self._tracked_positions: set[int] = set()
         self._active_trade_initial_sl: dict[int, float] = {}
+        self._active_trade_sl: dict[int, float] = {}  # ticket -> last SL we CONFIRMED on the broker (ratchet shadow; not the flaky pos.sl read)
         self._active_trade_system: dict[int, str] = {}
         self._active_trade_atr: dict[int, float] = {}
         self._active_trade_peak_price: dict[int, float] = {}
@@ -109,8 +110,10 @@ class AxonDaemon:
         self._revconf_watches: list = []  # active reversal-confirmation PRE-ENTRY shadow watches
         self._retest_setup: Optional[dict] = None  # armed structure-shift retest entry setup (lead-only)
         self._retest_fwd: list = []  # structure-retest forward fixed-rail P&L shadow trackers
-        self._retest_last_fire_ts: float = 0.0  # cooldown anchor for structure-retest fires
+        self._retest_last_fire_ts: float = 0.0  # cooldown anchor for structure-retest REAL fires
+        self._retest_last_log_ts: float = 0.0  # dedup anchor for structure-retest SHADOW logs (churn cap)
         self._retest_shift_cache: Optional[dict] = None  # cached shift-zigzag (~30s)
+        self._regime_map_cache: Optional[dict] = None  # cached per-TF regime map core (~regime_map_cache_sec)
         self._entry_lock = threading.Lock()  # serializes the two entry paths (exhaustion event-thread
         #                                       vs structure-retest tick-thread) so they can never both
         #                                       open a position on this symbol+magic (1-per-magic race).
@@ -1195,6 +1198,66 @@ class AxonDaemon:
                     })
                 continue
 
+            # Retest priority — engine yields (user-directed 2026-08-14). When the structure-
+            # retest is ARMED on this pair and holds a pending setup (a confirmed break-of-
+            # structure awaiting its retest) whose direction OPPOSES this fade, the engine defers:
+            # the retest's with-trend entry takes precedence over fading against it. Never closes
+            # a position — only skips THIS engine entry (lead-only; a skipped entry is not
+            # mirrored). Same-direction setups pass (not a conflict). Inert unless the retest is
+            # actually enabled, so a shadow-only retest never suppresses the engine.
+            _rs = self._retest_setup
+            if (self.config.get("structure_retest_engine_yield", True)
+                    and self.config.get("structure_retest_enabled", False)
+                    and _rs is not None and _rs.get("signal") not in (None, signal)):
+                self._events_skipped += 1
+                ry = (f"retest priority: engine {signal} yields to armed {_rs.get('signal')} "
+                      f"retest (level {_rs.get('level'):.5f})")
+                logger.info("SKIPPED (%s)", ry)
+                self._log_skip(event, ry)
+                if dashboard:
+                    self._broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": ry,
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
+
+            # Consolidation gate (user 2026-08-14; EURUSD-armed, real). Skip a fade fired at the
+            # WRONG END of a TIGHT consolidation — the 'entered mid-range, entry became the near
+            # support/resistance, got chopped' trap (finer window than the 5h range_gate). Only
+            # SKIPS (bounded — a skip never loses); fails OPEN. Lead-side; a skip is not mirrored.
+            if self.config.get("consol_gate_enabled", False):
+                _cg_ok, _cg_reason = self._consolidation_gate(signal, event.price)
+                if not _cg_ok:
+                    self._events_skipped += 1
+                    logger.info("SKIPPED (%s)", _cg_reason)
+                    self._log_skip(event, _cg_reason)
+                    if dashboard:
+                        self._broadcast({
+                            "type": "event",
+                            "id": self._events_detected,
+                            "event_type": event.event_type.value,
+                            "priority": event.priority.name,
+                            "price": event.price,
+                            "details": event.details,
+                            "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                            "status": "skipped",
+                            "reason": _cg_reason,
+                            "events_detected": self._events_detected,
+                            "events_fired": self._events_fired,
+                            "events_skipped": self._events_skipped,
+                        })
+                    continue
+
             system_name = event.details.get("system", "optimized")
             logger.info("EXECUTION (%s): Direct signal: %s", system_name, signal)
             
@@ -1297,11 +1360,15 @@ class AxonDaemon:
                     self.correlation_engine.release_pending(self.mt5_symbol)
                 self._entry_lock.release()
 
+            # Unified per-TF regime map (PHASE 1 shadow labeler; gates NOTHING). Computed
+            # here — AFTER the entry — so its per-TF bar pulls can never add fill latency.
+            regime_map = self._compute_regime_map(signal, event.price)
+
             # Persistently log signal to file
             self._log_signal(event, ws, signal, trade_result,
                              impulse_shadow=impulse_shadow, breakout_shadow=breakout_shadow,
                              structure_shadow=structure_shadow, selectivity_shadow=selectivity_shadow,
-                             regime_shadow=regime_shadow)
+                             regime_shadow=regime_shadow, regime_map=regime_map)
 
             # Reversal-confirmation PRE-ENTRY shadow: arm the "wait for confirmation"
             # counterfactual for this fired signal (LEAD only; never acts, never
@@ -1625,17 +1692,257 @@ class AxonDaemon:
             regime = "trending" if er >= trend_thr else ("ranging" if er <= range_thr else "transitional")
             fade_dir = "down" if signal == "Sell" else "up"   # fade profit direction
             against_trend = bool(regime == "trending" and trend_dir != fade_dir)
+            # ER EXHAUSTION (whole-chart-behavior 2026-08-14): a move that arrives at the entry
+            # ALREADY efficient (high ER-20) continues LESS — the only context feature that
+            # survived a cross-pair shuffle-null for remaining-move. Direction-agnostic (unlike
+            # against_trend), so it flags high-ER entries regardless of trend match. Shadow flag
+            # only — validated at a checkpoint before any skip is wired (EURUSD-first).
+            er_exh_thr = float(self.config.get("er_exhaustion_thr", 0.40))
             return {
                 "regime": regime,
                 "efficiency_ratio": er,
                 "trend_dir": trend_dir,
                 "net_move_pips": round(net / pip, 1),
                 "against_trend": against_trend,
+                "er_exhaustion": bool(er >= er_exh_thr),
                 "verdict": "would_skip" if against_trend else "allow",   # A-mode: skip fade vs strong trend
                 "n": len(m15),
             }
         except Exception as e:
             return {"regime": "error", "error": str(e)}
+
+    # ────────────────────────────────────────────────────────────────────────────
+    # UNIFIED PER-TF REGIME MAP — PHASE 1 (shadow labeler; gates NOTHING).
+    # A nested {tf -> TFState} object that labels every timeframe trend / retracement /
+    # consolidation + its range. Consolidates what the existing gates each recompute and
+    # adds RETRACEMENT (a two-TF relation the system currently can't represent). Pure
+    # observation, LEAD-only, fully fail-safe. See default_config regime_map_* block.
+    # ────────────────────────────────────────────────────────────────────────────
+    def _compute_regime_map(self, signal: str, price: float) -> dict:
+        """Top-level entry: build (cached) the signal-independent per-TF map, then add the
+        signal-dependent roll-up (does THIS fade go WITH or COUNTER to the higher-TF bias).
+        Returns the `regime_map` dict logged on the fired signal, or None when disabled.
+        Never raises — a labeler error must never disturb an entry."""
+        if not self.config.get("regime_map_enabled", True):
+            return None
+        try:
+            pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+            core = self._build_regime_map_core(price, pip)
+            if not core:
+                return {"error": "no_data"}
+            fade_dir = "down" if signal == "Sell" else "up"     # fade profit direction
+            htf = core.get("htf_bias")
+            alignment = ("with_htf" if htf == fade_dir else "counter_htf") if htf in ("up", "down") else "mixed"
+            out = dict(core)
+            out["fade_dir"] = fade_dir
+            out["alignment"] = alignment
+            return out
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _build_regime_map_core(self, price: float, pip: float):
+        """The signal-INDEPENDENT market-state core (cached ~regime_map_cache_sec). Walks the
+        TF list highest->lowest so each TF sees the one above it as its PARENT — the linkage
+        retracement needs. Returns {'symbol','as_of_epoch','tfs':{...},'htf_bias'} or None."""
+        now = time.time()
+        c = getattr(self, "_regime_map_cache", None)
+        if c and (now - c.get("t", 0.0)) < float(self.config.get("regime_map_cache_sec", 20)):
+            return c.get("val")
+        tfs = list(self.config.get("regime_map_tfs", ["D1", "H4", "H1", "M15", "M5"]))
+        lookback = int(self.config.get("regime_map_lookback", 60))
+        range_lb = int(self.config.get("regime_map_range_lookback", 20))
+        rev_atr = float(self.config.get("regime_map_reversal_atr", 0.4))
+        states = {}
+        parent = None                                            # immediate higher TF's state
+        for tf_name in tfs:
+            st = self._tf_state(tf_name, price, pip, parent, lookback, range_lb, rev_atr)
+            states[tf_name] = st
+            if st.get("state") not in ("insufficient_data", "error"):
+                parent = st                                      # only a real state can parent the next TF
+        val = None
+        if any(s.get("state") not in ("insufficient_data", "error") for s in states.values()):
+            val = {"symbol": self.mt5_symbol, "as_of_epoch": int(now),
+                   "tfs": states, "htf_bias": self._htf_bias(states)}
+        self._regime_map_cache = {"t": now, "val": val}
+        return val
+
+    def _tf_bars(self, tf_name: str, n: int):
+        """Last `n` (open,high,low,close) tuples for `tf_name`. M15 reuses the seeded
+        live_evidence deque (so phase-2 parity with the M15 gates is exact); other TFs pull
+        their own bars. Returns [] on any miss."""
+        try:
+            if tf_name.upper() == "M15":
+                cds = list(getattr(self.live_evidence, "_m15_candles", []))[-n:]
+                return [(c.open, c.high, c.low, c.close) for c in cds]
+            tf = getattr(mt5, "TIMEFRAME_" + tf_name.upper(), None)
+            if tf is None:
+                return []
+            rates = mt5.copy_rates_from_pos(self.mt5_symbol, tf, 0, n)
+            if rates is None or len(rates) == 0:
+                return []
+            return [(float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"])) for r in rates]
+        except Exception:
+            return []
+
+    def _tf_state(self, tf_name: str, price: float, pip: float, parent, lookback: int,
+                  range_lb: int, rev_atr: float) -> dict:
+        """Classify ONE timeframe into trend_up/down | retracement | consolidation | unresolved,
+        with its range box + evidence. Retracement uses `parent` (the higher TF's state)."""
+        try:
+            bars = self._tf_bars(tf_name, lookback)
+            if len(bars) < 15:
+                return {"tf": tf_name, "state": "insufficient_data", "n": len(bars)}
+            closes = [b[3] for b in bars]
+            # per-TF ATR (avg bar range over last 14) — drives the zigzag reversal + width
+            rng14 = [bars[i][1] - bars[i][2] for i in range(max(0, len(bars) - 14), len(bars))]
+            atr = sum(rng14) / len(rng14) if rng14 else 0.0
+            # Kaufman efficiency ratio (net / path) — same primitive as _compute_regime_shadow
+            net = abs(closes[-1] - closes[0])
+            path = sum(abs(closes[i] - closes[i - 1]) for i in range(1, len(closes)))
+            er = round(net / path, 3) if path > 0 else 0.0
+            ema_dir = self._ema_dir(closes)
+            # structure via a running-extreme shift-zigzag (same shape as _compute_structure_shift)
+            R = rev_atr * atr if atr > 0 else 0.0
+            highs, lows, _leg = self._zz_swings(bars, R) if R > 0 else ([], [], 0)
+            structure = self._classify_structure(highs, lows)
+            swing_hi = highs[-1] if highs else None
+            swing_lo = lows[-1] if lows else None
+            # range box over the last range_lb bars
+            rb = bars[-range_lb:]
+            r_hi = max(b[1] for b in rb); r_lo = min(b[2] for b in rb)
+            span = (r_hi - r_lo) or pip
+            range_pos = round((price - r_lo) / span, 3)
+            width_atr = round(span / atr, 2) if atr > 0 else None
+            # parent linkage (retracement is only defined against a TRENDING parent)
+            parent_trend = parent_hi = parent_lo = parent_er = None
+            if parent:
+                ps = parent.get("state")
+                parent_trend = "up" if ps == "trend_up" else ("down" if ps == "trend_down" else None)
+                parent_hi = parent.get("swing_hi"); parent_lo = parent.get("swing_lo")
+                parent_er = parent.get("er")
+            # current child leg vs the parent trend
+            rk = min(5, len(closes) - 1)
+            recent_dir = "up" if closes[-1] > closes[-1 - rk] else "down"
+            counter = (parent_trend == "up" and recent_dir == "down") or \
+                      (parent_trend == "down" and recent_dir == "up")
+            broke_parent = bool(
+                (parent_trend == "up" and parent_lo is not None and price < parent_lo) or
+                (parent_trend == "down" and parent_hi is not None and price > parent_hi))
+            state = self._classify_state(er, structure, ema_dir, width_atr, parent_trend, counter, broke_parent)
+            # depth of the parent leg retraced (0=just began … 1=full retrace / near invalidation)
+            retr_depth = None
+            if state == "retracement" and parent_hi is not None and parent_lo is not None and parent_hi > parent_lo:
+                num = (parent_hi - price) if parent_trend == "up" else (price - parent_lo)
+                retr_depth = round(max(0.0, min(1.5, num / (parent_hi - parent_lo))), 3)
+            return {
+                "tf": tf_name, "state": state,
+                "structure": structure, "er": er, "ema_dir": ema_dir,
+                "range_hi": round(r_hi, 5), "range_lo": round(r_lo, 5),
+                "range_pos": range_pos, "range_width_atr": width_atr,
+                "swing_hi": round(swing_hi, 5) if swing_hi is not None else None,
+                "swing_lo": round(swing_lo, 5) if swing_lo is not None else None,
+                "parent_tf": (parent.get("tf") if parent else None),
+                "parent_trend": parent_trend, "retr_depth": retr_depth,
+                "confidence": self._state_confidence(state, er, parent_er),
+                "n": len(bars),
+            }
+        except Exception as e:
+            return {"tf": tf_name, "state": "error", "error": str(e)}
+
+    @staticmethod
+    def _ema_dir(closes) -> str:
+        """EMA20/50 stack + last close → up/down/flat (same rule as trend_direction_h1)."""
+        if len(closes) < 10:
+            return "flat"
+        def ema(vals, p):
+            k = 2.0 / (p + 1); e = vals[0]
+            for v in vals[1:]:
+                e = v * k + e * (1 - k)
+            return e
+        ef = ema(closes, 20); es = ema(closes, min(50, len(closes) - 1)); c = closes[-1]
+        if c > ef > es:
+            return "up"
+        if c < ef < es:
+            return "down"
+        return "flat"
+
+    @staticmethod
+    def _zz_swings(bars, R: float):
+        """Running-extreme shift-zigzag over (o,h,l,c) bars, reversal R in PRICE. Returns
+        (confirmed_swing_highs, confirmed_swing_lows, current_leg_dir) — chronological."""
+        highs = []; lows = []; d = 0; ext = bars[0][3]
+        for (_o, h, l, _c) in bars:
+            if d >= 0:                                           # up-leg (0 = unknown → up)
+                if h > ext: ext = h
+                if l <= ext - R: highs.append(ext); d = -1; ext = l
+            else:                                                # down-leg
+                if l < ext: ext = l
+                if h >= ext + R: lows.append(ext); d = 1; ext = h
+        return highs, lows, d
+
+    @staticmethod
+    def _classify_structure(highs, lows) -> str:
+        """HH+HL → up, LH+LL → down, else range (needs >=2 of each swing)."""
+        if len(highs) >= 2 and len(lows) >= 2:
+            if highs[-1] > highs[-2] and lows[-1] > lows[-2]:
+                return "up"
+            if highs[-1] < highs[-2] and lows[-1] < lows[-2]:
+                return "down"
+        return "range"
+
+    def _classify_state(self, er, structure, ema_dir, width_atr, parent_trend, counter, broke_parent) -> str:
+        """The per-TF state machine (see the regime_map_* config block for the rationale)."""
+        trend_er = float(self.config.get("regime_map_trend_er", 0.50))
+        range_er = float(self.config.get("regime_map_range_er", 0.30))
+        consol_max = float(self.config.get("regime_map_consol_max_atr", 1.8))
+        if er >= trend_er and structure in ("up", "down") and ema_dir == structure:
+            return "trend_" + structure
+        if parent_trend in ("up", "down") and counter and not broke_parent:
+            return "retracement"
+        # Consolidation is DEFINED by no net progress (low ER) + a tight box; we do NOT also
+        # require structure=="range" because a tight chop's zigzag tilts up/down on noise and
+        # would spuriously fall through to unresolved. (Retracement is tested first, so a
+        # low-ER child of a trending parent moving counter is caught above, not here.)
+        if er <= range_er and (width_atr is not None and width_atr <= consol_max):
+            return "consolidation"
+        return "unresolved"
+
+    def _state_confidence(self, state: str, er: float, parent_er) -> float:
+        """Cheap 0..1 confidence: trend = ER vs the trend threshold; consolidation = 1-ER;
+        retracement = strength of the parent trend being retraced; unresolved = low."""
+        if state.startswith("trend"):
+            return round(min(er / max(1e-6, float(self.config.get("regime_map_trend_er", 0.5))), 1.0), 2)
+        if state == "consolidation":
+            return round(max(0.0, min(1.0, 1.0 - er)), 2)
+        if state == "retracement":
+            return round(float(parent_er or 0.0), 2)
+        return 0.3
+
+    @staticmethod
+    def _htf_bias(states) -> str:
+        """Higher-TF bias from the two highest AVAILABLE TFs (trend state, else EMA dir).
+        up/down only when they agree; else mixed."""
+        dirs = []
+        for tf in ("W1", "D1", "H4", "H1", "M15", "M5"):
+            st = states.get(tf)
+            if not st or st.get("state") in ("insufficient_data", "error"):
+                continue
+            s = st.get("state", "")
+            if s == "trend_up":
+                dirs.append("up")
+            elif s == "trend_down":
+                dirs.append("down")
+            elif st.get("ema_dir") in ("up", "down"):
+                dirs.append(st["ema_dir"])
+            if len(dirs) >= 2:
+                break
+        if not dirs:
+            return "mixed"
+        if all(d == "up" for d in dirs):
+            return "up"
+        if all(d == "down" for d in dirs):
+            return "down"
+        return "mixed"
 
     def _log_skip(self, event, reason):
         """Persist a REJECTED fade candidate to signals.jsonl (type=signal_skipped).
@@ -1965,7 +2272,7 @@ class AxonDaemon:
             logger.debug("breakout-retest shadow failed: %s", e)
 
     def _log_signal(self, event, ws, signal, trade_result, *, impulse_shadow=None, breakout_shadow=None,
-                    structure_shadow=None, selectivity_shadow=None, regime_shadow=None):
+                    structure_shadow=None, selectivity_shadow=None, regime_shadow=None, regime_map=None):
         """Persistently log every generated signal to reports/signals.jsonl and reports/signals.log."""
         import json
         import os
@@ -2002,6 +2309,8 @@ class AxonDaemon:
             log_payload["selectivity_shadow"] = selectivity_shadow
         if regime_shadow is not None:
             log_payload["regime_shadow"] = regime_shadow
+        if regime_map is not None:
+            log_payload["regime_map"] = regime_map
 
         # Ensure reports dir exists
         os.makedirs("reports", exist_ok=True)
@@ -2597,6 +2906,44 @@ class AxonDaemon:
                     direction, rel, lookback, rng_lo, rng_hi)
         return True, ""
 
+    def _consolidation_gate(self, signal: str, price: float):
+        """Block a fade fired at the WRONG END of a TIGHT consolidation (user 2026-08-14).
+
+        The 'entered mid-consolidation and got chopped' trap: a fade fires inside a compressed
+        range, the entry becomes the NEAR-edge support/resistance, and price bounces off it
+        (EURUSD SELL 245090872: sold ~16% up a tight 8p range that then held as support). The
+        20-candle range_gate uses a ~5h window and misses the IMMEDIATE consolidation. This is a
+        FINER window: over the last consol_lookback closed M15 candles, if the range is tight
+        (span <= consol_max_atr x avg-M15-bar) AND the fade sits within consol_edge of the near
+        edge (SELL low / BUY high), SKIP. Only ever SKIPS (a skip never loses); fails OPEN so a
+        bug can never block everything. Returns (passed, reason). Signal is 'Buy'/'Sell'."""
+        try:
+            lookback = int(self.config.get("consol_lookback", 8))
+            m15 = list(getattr(self.live_evidence, "_m15_candles", []))[-lookback:]
+            if len(m15) < max(5, lookback):
+                return True, ""                          # thin history -> don't block
+            hi = max(c.high for c in m15); lo = min(c.low for c in m15)
+            rng = hi - lo
+            if rng <= 0:
+                return True, ""
+            atr = sum((c.high - c.low) for c in m15) / max(1, len(m15))   # avg M15 bar (self-consistent)
+            if atr <= 0:
+                return True, ""
+            if rng > float(self.config.get("consol_max_atr", 1.8)) * atr:
+                return True, ""                          # not tight enough -> gate inactive (normal range)
+            edge = float(self.config.get("consol_edge", 0.25))
+            rel = (price - lo) / rng
+            if signal == "Sell" and rel < edge:
+                return False, (f"consolidation gate: SELL in bottom {rel:.2f} of a tight "
+                               f"{rng / atr:.1f}xATR consolidation [{lo:.5f}-{hi:.5f}]")
+            if signal == "Buy" and rel > (1.0 - edge):
+                return False, (f"consolidation gate: BUY in top {rel:.2f} of a tight "
+                               f"{rng / atr:.1f}xATR consolidation [{lo:.5f}-{hi:.5f}]")
+            return True, ""
+        except Exception as e:
+            logger.debug("consolidation gate failed: %s", e)
+            return True, ""                              # fail OPEN — never block on error
+
     def _update_retest_verdict(self, pos, bid: float, ask: float, pip: float) -> None:
         """Resolve the retest-confirmation verdict for an open fade (shadow / veto).
 
@@ -2818,8 +3165,11 @@ class AxonDaemon:
         if not self.config.get("exit_capture_shadow", True):
             return
         ticket = pos.ticket
-        if self._exit_shadow.get(ticket, {}).get("hit"):
-            return  # already recorded the first shadow-stop trip
+        st = self._exit_shadow.get(ticket)
+        if st is None:
+            st = self._exit_shadow[ticket] = {}
+        if st.get("hit") and st.get("gb_hit"):
+            return  # both variants recorded
         try:
             atr = self._active_trade_atr.get(ticket)
             peak = self._active_trade_peak_price.get(ticket)
@@ -2828,25 +3178,30 @@ class AxonDaemon:
             entry = pos.price_open
             arm_mult = float(self.config.get("trail_trigger_atr_mult", 0.80))
             shadow_mult = float(self.config.get("exit_shadow_trail_atr_mult", 0.35))
+            gb_atr = float(self.config.get("exit_shadow_giveback_atr", 0.6))
             is_buy = pos.type == mt5.POSITION_TYPE_BUY
             if is_buy:
                 peak_profit = peak - entry
-                if peak_profit < arm_mult * atr:
-                    return  # tight trail not armed yet (same trigger as the real one)
-                shadow_stop = peak - shadow_mult * atr
-                if bid <= shadow_stop:                       # tight trail would trip
-                    self._exit_shadow[ticket] = {"hit": True,
-                        "pips": round((shadow_stop - entry) / pip, 1),
-                        "mult": shadow_mult}
+                # (1) existing tighter-leash (arm at 0.8xATR, give-back exit_shadow_trail_atr_mult)
+                if not st.get("hit") and peak_profit >= arm_mult * atr:
+                    shadow_stop = peak - shadow_mult * atr
+                    if bid <= shadow_stop:
+                        st.update(hit=True, pips=round((shadow_stop - entry) / pip, 1), mult=shadow_mult)
+                # (2) GIVE-BACK trail A/B: armed as soon as in profit, exit on gb_atr give-back from peak
+                if not st.get("gb_hit") and peak_profit > 0:
+                    gb_stop = peak - gb_atr * atr
+                    if bid <= gb_stop:
+                        st.update(gb_hit=True, gb_pips=round((gb_stop - entry) / pip, 1))
             else:
                 peak_profit = entry - peak
-                if peak_profit < arm_mult * atr:
-                    return
-                shadow_stop = peak + shadow_mult * atr
-                if ask >= shadow_stop:
-                    self._exit_shadow[ticket] = {"hit": True,
-                        "pips": round((entry - shadow_stop) / pip, 1),
-                        "mult": shadow_mult}
+                if not st.get("hit") and peak_profit >= arm_mult * atr:
+                    shadow_stop = peak + shadow_mult * atr
+                    if ask >= shadow_stop:
+                        st.update(hit=True, pips=round((entry - shadow_stop) / pip, 1), mult=shadow_mult)
+                if not st.get("gb_hit") and peak_profit > 0:
+                    gb_stop = peak + gb_atr * atr
+                    if ask >= gb_stop:
+                        st.update(gb_hit=True, gb_pips=round((entry - gb_stop) / pip, 1))
         except Exception as e:
             logger.error("Exit-capture shadow update failed for ticket %s: %s",
                          getattr(pos, "ticket", "?"), e)
@@ -2953,9 +3308,23 @@ class AxonDaemon:
         structure_retest_shadow.jsonl as WIN(+tp) / LOSS(-sl, adverse-first = pessimistic) /
         TIMEOUT(mark-to-market). Measures ENTRY quality on the live 20/30 rails even when the
         armed exit differs — the shadow that validates the trigger before it is armed."""
+        # ER-20 of the move INTO this retest (whole-chart-behavior 2026-08-14): high ER predicts
+        # LOWER follow-through — the one cross-pair-robust remaining-move feature. Log it with the
+        # realized MFE so a checkpoint can test the exhaustion split on real retest rows.
+        er = None
+        try:
+            _lb = int(self.config.get("regime_lookback", 20))
+            m15 = list(getattr(self.live_evidence, "_m15_candles", []))[-_lb:]
+            if len(m15) >= 8:
+                cl = [c.close for c in m15]
+                _net = abs(cl[-1] - cl[0]); _path = sum(abs(cl[i] - cl[i - 1]) for i in range(1, len(cl)))
+                er = round(_net / _path, 3) if _path > 0 else 0.0
+        except Exception:
+            er = None
         self._retest_fwd.append({
             "signal": signal, "entry": entry_px, "pip": pip, "t0": time.time(),
             "mfe": 0.0, "mae": 0.0, "real": bool(fired_real),
+            "er": er, "er_exhaustion": (er is not None and er >= float(self.config.get("er_exhaustion_thr", 0.40))),
             "sl": float(self.config.get("structure_retest_sl_pips", 20.0)),
             "tp": float(self.config.get("structure_retest_tp_pips", 30.0)),
         })
@@ -2991,6 +3360,7 @@ class AxonDaemon:
                        "signal": t["signal"], "status": status, "real": t["real"],
                        "entry": round(e, 5), "outcome_pips": round(outcome, 1),
                        "mfe": round(t["mfe"], 1), "mae": round(t["mae"], 1),
+                       "er": t.get("er"), "er_exhaustion": t.get("er_exhaustion"),
                        "sl_pips": t["sl"], "tp_pips": t["tp"], "logged_epoch": int(now)}
                 try:
                     os.makedirs("reports", exist_ok=True)
@@ -3076,6 +3446,15 @@ class AxonDaemon:
             # ── Fire (one per setup) ───────────────────────────────────────────────────
             entry_px = bid if sig == "Sell" else ask
             self._retest_setup = None                          # consume the setup (re-arms on next shift)
+            now = time.time()
+            # Churn cap for the SHADOW: after a fire the setup re-arms, and a shift level that
+            # DRIFTS re-fires every few seconds → the log floods with correlated duplicates (live
+            # 2026-08-14: USDJPY buy re-fired as the higher-low walked 158.890->158.855). Cap the
+            # shadow to one fire per dedup window; DISTINCT signals minutes apart still log. This
+            # is separate from — and shorter than — the real-order cooldown below.
+            if (now - self._retest_last_log_ts) < float(cfg.get("structure_retest_shadow_dedup_sec", 180)):
+                return
+            self._retest_last_log_ts = now
             # Entry gates (same as the exhaustion path): session / SL-lockout / EOD / flat.
             ws = self.live_state.snapshot()
             gated = None
@@ -3089,7 +3468,7 @@ class AxonDaemon:
                 gated = "not flat"
             armed = bool(cfg.get("structure_retest_enabled", False))
             cd = float(cfg.get("structure_retest_cooldown_min", 20)) * 60.0
-            cooldown = (time.time() - self._retest_last_fire_ts) < cd
+            cooldown = (now - self._retest_last_fire_ts) < cd
             place_real = armed and (gated is None) and (not cooldown)
             logger.info("RETEST %s: %s retest of %s-shift level %.5f -> entry %.5f%s%s%s",
                         self.mt5_symbol, sig, ("down" if sig == "Sell" else "up"), level, entry_px,
@@ -3196,6 +3575,9 @@ class AxonDaemon:
         _si = mt5.symbol_info(self.mt5_symbol)
         _point = (getattr(_si, "point", pip) or pip)
         min_stop_dist = (getattr(_si, "trade_stops_level", 0) or 0) * _point
+        # Below this we treat two SL prices as "the same" — so an unchanged stop is
+        # not re-sent every tick (float noise / sub-point rounding is ignored).
+        sl_change_eps = 0.5 * _point
 
         for pos in positions:
             ticket = pos.ticket
@@ -3262,6 +3644,30 @@ class AxonDaemon:
                 if self._maybe_noprogress_abort(pos, bid, ask, pip):
                     continue
                 
+            # Trustworthy current stop for the monotonic ratchet. positions_get()
+            # is read UNLOCKED from several concurrent threads (both pair loops +
+            # dashboard/mirror + the executor's unfiltered read) against the
+            # non-thread-safe MT5 client, while only WRITES take mt5_lock. A torn
+            # cross-thread read returns pos.sl == 0.0 (or a stale/garbled value)
+            # for a position that genuinely holds a stop — confirmed live
+            # 2026-08-14 on Eightcap-Demo (USDJPY.i ticket 245071449: broker held
+            # SL 159.006 and closed on it, while pos.sl read 0.0). The old code
+            # keyed the ratchet baseline AND the fire test off pos.sl, so a false 0
+            # both (a) re-fired an identical modify every tick and (b) let a RISING
+            # structure stop LOOSEN the real stop (158.994 -> 159.006, defeating the
+            # ratchet). Drive everything off our own shadow of the last SL we
+            # actually set instead; we are the sole writer of the SL, so it stays
+            # authoritative regardless of how the read races. (freeze/stops level is
+            # 0 here, so a genuinely-tight stop is valid and not a freeze artifact.)
+            known_sl = self._current_known_sl(pos)
+            # A real no-SL is nearly impossible here (initial_sl > 0 is enforced
+            # above), but if the shadow is somehow empty, VERIFY with a serialized
+            # re-read before the trail establishes one from scratch — never act on a
+            # lone unlocked 0.
+            genuine_no_sl = known_sl <= 0.0 and self._verify_broker_no_sl(ticket)
+            if genuine_no_sl:
+                known_sl = 0.0
+
             if pos.type == mt5.POSITION_TYPE_BUY:
                 # Update peak price using the bid price
                 self._active_trade_peak_price[ticket] = max(self._active_trade_peak_price[ticket], bid)
@@ -3269,46 +3675,55 @@ class AxonDaemon:
                 # Update worst (adverse) price for MAE — a BUY's adverse move is DOWN
                 self._active_trade_worst_price[ticket] = min(
                     self._active_trade_worst_price.get(ticket, pos.price_open), bid)
-                
+
                 # Check Breakeven Trigger (0.60 * ATR)
                 profit = bid - pos.price_open
                 be_trigger = be_mult * atr
-                
+
                 # Check Trailing Stop (once peak profit >= 0.80 * ATR, trail by 0.35 * ATR)
                 peak_profit = peak_price - pos.price_open
                 trail_trigger = arm_mult * atr
-                
-                target_sl = pos.sl
+
+                target_sl = known_sl
                 if profit >= be_trigger:
                     breakeven_sl = round(pos.price_open + 1 * pip, digits)
-                    if target_sl < breakeven_sl:
+                    if target_sl < breakeven_sl or genuine_no_sl:
                         target_sl = breakeven_sl
-                        
+
                 # Structure-trail (when armed) REPLACES the ATR trail: ratchet the stop up
                 # to just under the last confirmed higher-low. Falls back to the ATR trail
                 # when OFF or before a pivot forms. Same monotonic-tighten + valid-side guard.
                 if self.config.get("structure_trail_enabled", False):
                     struct_sl = self._structure_stop(pos, pip, digits)
-                    if struct_sl is not None and target_sl < struct_sl:
+                    # Breakeven floor (see SELL branch): only tighten to a structure stop that
+                    # locks breakeven-or-better (at/above entry for a BUY); until then keep the
+                    # wider hard stop so a routine pullback inside the noise can't scratch it.
+                    _be_floor_ok = (not self.config.get("structure_trail_be_floor", True)) or (
+                        struct_sl is not None and struct_sl >= pos.price_open)
+                    if struct_sl is not None and _be_floor_ok and (target_sl < struct_sl or genuine_no_sl):
                         target_sl = struct_sl
                 elif peak_profit >= trail_trigger:
                     trail_distance = hard_trail_dist if use_fixed_trail else trail_mult * atr
                     trail_sl = round(peak_price - trail_distance, digits)
-                    if target_sl < trail_sl:
+                    if target_sl < trail_sl or genuine_no_sl:
                         target_sl = trail_sl
 
-                if pos.sl < target_sl:
+                # Fire only when the target is a REAL tighten over the stop the broker
+                # actually holds (higher for a BUY), or we verified there is none —
+                # never on a false 0-read, and never re-send an unchanged stop.
+                if (target_sl > known_sl + sl_change_eps or genuine_no_sl) and target_sl > 0.0:
                     # A BUY stop must sit BELOW the market by >= the broker min
                     # distance. After a retrace the peak-anchored target can be at/
                     # above the bid -> invalid (10016); skip rather than re-fire.
                     if target_sl <= bid - min_stop_dist:
                         logger.info("AxonDaemon: Trailing SL triggered for BUY ticket %d. Modifying SL: %.5f -> %.5f",
-                                    ticket, pos.sl, target_sl)
-                        self._modify_sl(ticket, target_sl, pos.tp, "BUY")
+                                    ticket, known_sl, target_sl)
+                        if self._modify_sl(ticket, target_sl, pos.tp, "BUY"):
+                            self._active_trade_sl[ticket] = target_sl
                     else:
                         logger.debug("AxonDaemon: BUY ticket %d trail target %.5f not below market "
                                      "(bid %.5f, min-dist %.5f) — crossed/too-close, SL stays %.5f",
-                                     ticket, target_sl, bid, min_stop_dist, pos.sl)
+                                     ticket, target_sl, bid, min_stop_dist, known_sl)
 
             elif pos.type == mt5.POSITION_TYPE_SELL:
                 # Update peak price using the ask price
@@ -3317,47 +3732,59 @@ class AxonDaemon:
                 # Update worst (adverse) price for MAE — a SELL's adverse move is UP
                 self._active_trade_worst_price[ticket] = max(
                     self._active_trade_worst_price.get(ticket, pos.price_open), ask)
-                
+
                 # Check Breakeven Trigger (0.60 * ATR)
                 profit = pos.price_open - ask
                 be_trigger = be_mult * atr
-                
+
                 # Check Trailing Stop (once peak profit >= 0.80 * ATR, trail by 0.35 * ATR)
                 peak_profit = pos.price_open - peak_price
                 trail_trigger = arm_mult * atr
-                
-                target_sl = pos.sl
+
+                target_sl = known_sl
                 if profit >= be_trigger:
                     breakeven_sl = round(pos.price_open - 1 * pip, digits)
-                    if target_sl > breakeven_sl or target_sl == 0.0:
+                    if target_sl > breakeven_sl or genuine_no_sl:
                         target_sl = breakeven_sl
-                        
+
                 # Structure-trail (when armed) REPLACES the ATR trail: ratchet the stop down
                 # to just above the last confirmed lower-high. Falls back to the ATR trail
                 # when OFF or before a pivot forms. Same monotonic-tighten + valid-side guard.
                 if self.config.get("structure_trail_enabled", False):
                     struct_sl = self._structure_stop(pos, pip, digits)
-                    if struct_sl is not None and (target_sl > struct_sl or target_sl == 0.0):
+                    # Breakeven floor: only TIGHTEN to a structure stop that locks breakeven-or-
+                    # better (at/below entry for a SELL). Parking it at a small-LOSS level just
+                    # above a nearby swing high sits it INSIDE the noise and gets scratched by a
+                    # routine counter-spike right before the move runs (USDJPY 245071449
+                    # 2026-08-14: struct stop 2.4p from entry, tagged by an 11p spike, price then
+                    # fell into profit). Until structure can lock BE+, keep the wider hard stop.
+                    _be_floor_ok = (not self.config.get("structure_trail_be_floor", True)) or (
+                        struct_sl is not None and struct_sl <= pos.price_open)
+                    if struct_sl is not None and _be_floor_ok and (target_sl > struct_sl or genuine_no_sl):
                         target_sl = struct_sl
                 elif peak_profit >= trail_trigger:
                     trail_distance = hard_trail_dist if use_fixed_trail else trail_mult * atr
                     trail_sl = round(peak_price + trail_distance, digits)
-                    if target_sl > trail_sl or target_sl == 0.0:
+                    if target_sl > trail_sl or genuine_no_sl:
                         target_sl = trail_sl
 
-                if pos.sl > target_sl or pos.sl == 0.0:
+                # Fire only when the target is a REAL tighten over the stop the broker
+                # actually holds (lower for a SELL), or we verified there is none —
+                # never on a false 0-read, and never re-send an unchanged stop. This
+                # is what stops the RISING structure stop from loosening the ratchet.
+                if (target_sl < known_sl - sl_change_eps or genuine_no_sl) and target_sl > 0.0:
                     # A SELL stop must sit ABOVE the market by >= the broker min
                     # distance. After a retrace up, the peak-anchored target can be
-                    # at/below the ask -> invalid (10016, the observed bug); skip
-                    # rather than re-fire a rejected modify every tick.
+                    # at/below the ask -> invalid (10016); skip rather than re-fire.
                     if target_sl >= ask + min_stop_dist:
                         logger.info("AxonDaemon: Trailing SL triggered for SELL ticket %d. Modifying SL: %.5f -> %.5f",
-                                    ticket, pos.sl, target_sl)
-                        self._modify_sl(ticket, target_sl, pos.tp, "SELL")
+                                    ticket, known_sl, target_sl)
+                        if self._modify_sl(ticket, target_sl, pos.tp, "SELL"):
+                            self._active_trade_sl[ticket] = target_sl
                     else:
                         logger.debug("AxonDaemon: SELL ticket %d trail target %.5f not above market "
                                      "(ask %.5f, min-dist %.5f) — crossed/too-close, SL stays %.5f",
-                                     ticket, target_sl, ask, min_stop_dist, pos.sl)
+                                     ticket, target_sl, ask, min_stop_dist, known_sl)
 
     @staticmethod
     def _effective_trail_mult(config) -> float:
@@ -3520,6 +3947,66 @@ class AxonDaemon:
             logger.warning("Close-position: filling=%s failed for ticket %d (retcode=%s %s)",
                            filling, pos.ticket, rc, cm)
         return False
+
+    def _current_known_sl(self, pos) -> float:
+        """The stop we can TRUST the broker is holding for this position — our own
+        shadow of the last SL we successfully set (seeded from the entry SL), NOT
+        the raw pos.sl field.
+
+        pos.sl comes from mt5.positions_get(), which the daemon calls UNLOCKED from
+        several concurrent threads against the non-thread-safe MT5 client (only
+        writes take mt5_lock). Under contention that read comes back torn — 0.0 or
+        a stale value — for a position that genuinely holds a stop (confirmed live
+        2026-08-14: broker held SL 159.006 while pos.sl read 0.0). Keying the
+        monotonic ratchet off this shadow instead keeps a false 0/loose read from
+        re-firing an identical modify or, worse, loosening the stop. We are the only
+        writer of the SL (all modifies go through _modify_sl), so once seeded the
+        shadow stays authoritative without re-reading the flaky field."""
+        ticket = pos.ticket
+        known = self._active_trade_sl.get(ticket)
+        if known is not None:
+            return known
+        # First sight this session: seed from a live read only if it looks real
+        # (>0), else from the recorded entry SL. Never seed 0 over a real entry
+        # stop, so one torn first read cannot zero the baseline.
+        live = pos.sl if (pos.sl and pos.sl > 0.0) else 0.0
+        seed = live or (self._active_trade_initial_sl.get(ticket, 0.0) or 0.0)
+        self._active_trade_sl[ticket] = seed
+        return seed
+
+    def _verify_broker_no_sl(self, ticket: int) -> bool:
+        """Confirm a position REALLY has no stop before the trail establishes one.
+
+        A lone unlocked positions_get() can falsely read sl==0 under cross-thread
+        contention, so re-read the single ticket SERIALIZED under mt5_lock (the same
+        lock that serializes writes) — a few times, bailing out the moment any read
+        shows a real stop. Returns True only if every serialized read still shows
+        sl<=0. If a real value surfaces it is adopted into the shadow (torn-read
+        recovery) and we return False. Cannot-verify (error/None) also returns False
+        so we never fabricate a stop off an unreadable state."""
+        recovered = None
+        for _ in range(3):
+            try:
+                with mt5_lock:
+                    ps = mt5.positions_get(ticket=ticket)
+            except Exception as e:
+                logger.debug("no-SL verify re-read failed for %d: %s", ticket, e)
+                return False
+            if ps is None:
+                return False
+            if len(ps) == 0:
+                # Position is gone (closed) — nothing to establish.
+                return False
+            sl = float(getattr(ps[0], "sl", 0.0) or 0.0)
+            if sl > 0.0:
+                recovered = sl
+                break
+        if recovered is not None:
+            self._active_trade_sl[ticket] = recovered
+            logger.debug("AxonDaemon: ticket %d SL re-read recovered %.5f (unlocked read was torn to 0)",
+                         ticket, recovered)
+            return False
+        return True
 
     def _modify_sl(self, ticket: int, target_sl: float, tp: float, side: str) -> bool:
         """Send a lock-serialized SLTP modify; log + alert (throttled) on failure.
@@ -3706,8 +4193,14 @@ class AxonDaemon:
                 _alt_trail = {"mult": _es.get("mult", self.config.get("exit_shadow_trail_atr_mult", 0.35)),
                               "pips": _es.get("pips") if _es.get("hit") else round(pips, 1),
                               "hit": bool(_es.get("hit"))}
+                # Give-back trail A/B (2026-08-14): counterfactual exit of a give-back trail
+                # (exit_shadow_giveback_atr from peak, armed in profit) vs the live structure-trail.
+                # null-hit -> trade closed before the give-back tripped, so it equals the actual.
+                _gb = {"atr": self.config.get("exit_shadow_giveback_atr", 0.6),
+                       "pips": _es.get("gb_pips") if _es.get("gb_hit") else round(pips, 1),
+                       "hit": bool(_es.get("gb_hit"))}
                 _exit_cap = {"actual_pips": round(pips, 1), "mfe_pips": _mfe_r,
-                             "fixed_tp": _fixed_tp, "alt_trail": _alt_trail}
+                             "fixed_tp": _fixed_tp, "alt_trail": _alt_trail, "giveback": _gb}
                 payload = {
                     "timestamp": exit_time_str,
                     "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -3763,6 +4256,7 @@ class AxonDaemon:
             # Remove from tracking cache
             self._tracked_positions.discard(ticket)
             self._active_trade_initial_sl.pop(ticket, None)
+            self._active_trade_sl.pop(ticket, None)
             self._active_trade_atr.pop(ticket, None)
             self._active_trade_peak_price.pop(ticket, None)
             self._active_trade_worst_price.pop(ticket, None)
