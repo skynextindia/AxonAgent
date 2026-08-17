@@ -1067,6 +1067,34 @@ class AxonDaemon:
             else:
                 signal = "Sell"
 
+            # Per-pair entry kill-switch (config entries_enabled; USDJPY OFF 2026-08-18).
+            # When False this pair opens NO new positions — every fade is skipped here, at
+            # the top of the entry path — but the instance keeps running so any already-open
+            # position is still trailed / exited / managed normally. This is the config-level
+            # "zero the pair's size". Lead-side gate = the sole origin of new positions, so a
+            # skipped entry is never sent to the node either. Bounded: it can only skip.
+            if not self.config.get("entries_enabled", True):
+                self._events_skipped += 1
+                _ee = f"entries disabled for {self.mt5_symbol} (entries_enabled=False)"
+                logger.info("SKIPPED (%s)", _ee)
+                self._log_skip(event, _ee)
+                if dashboard:
+                    self._broadcast({
+                        "type": "event",
+                        "id": self._events_detected,
+                        "event_type": event.event_type.value,
+                        "priority": event.priority.name,
+                        "price": event.price,
+                        "details": event.details,
+                        "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "status": "skipped",
+                        "reason": _ee,
+                        "events_detected": self._events_detected,
+                        "events_fired": self._events_fired,
+                        "events_skipped": self._events_skipped,
+                    })
+                continue
+
             # Entry filter (default OFF): veto a BUY whose M15 trigger candle
             # closed below its open — the "falling-knife" long. Validated net
             # -2.0 pips/trade, robust out-of-sample and on both symbols. Only
@@ -3469,7 +3497,11 @@ class AxonDaemon:
             armed = bool(cfg.get("structure_retest_enabled", False))
             cd = float(cfg.get("structure_retest_cooldown_min", 20)) * 60.0
             cooldown = (now - self._retest_last_fire_ts) < cd
-            place_real = armed and (gated is None) and (not cooldown)
+            # entries_enabled is the authoritative per-pair kill-switch: even if the retest
+            # is armed, a pair with entries disabled (USDJPY 2026-08-18) places no real order.
+            # Shadow forward-tracking below still runs (gated only suppresses the LIVE order).
+            place_real = armed and (gated is None) and (not cooldown) \
+                and self.config.get("entries_enabled", True)
             logger.info("RETEST %s: %s retest of %s-shift level %.5f -> entry %.5f%s%s%s",
                         self.mt5_symbol, sig, ("down" if sig == "Sell" else "up"), level, entry_px,
                         ("" if armed else " [SHADOW]"), (" — GATED (%s)" % gated if gated else ""),
@@ -3550,9 +3582,20 @@ class AxonDaemon:
         # trail_dist honors an optional override so a wider trail can be soaked
         # without editing the per-pair spec; default keeps the validated 0.35.
         # Applies to BOTH accounts (each manages its own trail).
-        be_mult = float(self.config.get("be_atr_mult", 0.60))
-        arm_mult = float(self.config.get("trail_trigger_atr_mult", 0.80))
-        trail_mult = self._effective_trail_mult(self.config)
+        # Exit multipliers. hold_for_profit (per-pair; EURUSD 2026-08-18) makes the WHOLE
+        # position ride breakeven-OFF (be_mult 0.0, guarded below) + a wider/later trail —
+        # no +1p park — and BYPASS the structure trail (_struct_on=False). Off → the default
+        # scalp params + structure trail, unchanged. Applies uniformly (one entry per pair).
+        if bool(self.config.get("hold_for_profit_enabled", False)):
+            be_mult = float(self.config.get("hold_be_atr_mult", 0.0))
+            arm_mult = float(self.config.get("hold_trail_trigger_atr_mult", 1.0))
+            trail_mult = float(self.config.get("hold_trail_dist_atr_mult", 0.6))
+            _struct_on = False
+        else:
+            be_mult = float(self.config.get("be_atr_mult", 0.60))
+            arm_mult = float(self.config.get("trail_trigger_atr_mult", 0.80))
+            trail_mult = self._effective_trail_mult(self.config)
+            _struct_on = bool(self.config.get("structure_trail_enabled", False))
 
         # Trail distance. A FIXED pip leash is used ONLY when hard_distance_mode is on
         # AND a dedicated realtime_hard_trail_pips is configured. Otherwise — including
@@ -3685,7 +3728,10 @@ class AxonDaemon:
                 trail_trigger = arm_mult * atr
 
                 target_sl = known_sl
-                if profit >= be_trigger:
+                # be_mult > 0.0 guard: the runner leg sets be_mult 0.0 = breakeven DISABLED.
+                # Without the guard, be_trigger would be 0 and this would lock breakeven the
+                # instant the trade is profitable — the exact +1p park the runner must avoid.
+                if be_mult > 0.0 and profit >= be_trigger:
                     breakeven_sl = round(pos.price_open + 1 * pip, digits)
                     if target_sl < breakeven_sl or genuine_no_sl:
                         target_sl = breakeven_sl
@@ -3693,7 +3739,8 @@ class AxonDaemon:
                 # Structure-trail (when armed) REPLACES the ATR trail: ratchet the stop up
                 # to just under the last confirmed higher-low. Falls back to the ATR trail
                 # when OFF or before a pivot forms. Same monotonic-tighten + valid-side guard.
-                if self.config.get("structure_trail_enabled", False):
+                # _struct_on is False for a runner leg (it uses the wide ATR trail instead).
+                if _struct_on:
                     struct_sl = self._structure_stop(pos, pip, digits)
                     # Breakeven floor (see SELL branch): only tighten to a structure stop that
                     # locks breakeven-or-better (at/above entry for a BUY); until then keep the
@@ -3742,7 +3789,9 @@ class AxonDaemon:
                 trail_trigger = arm_mult * atr
 
                 target_sl = known_sl
-                if profit >= be_trigger:
+                # be_mult > 0.0 guard: runner leg disables breakeven (be_mult 0.0); without it
+                # be_trigger=0 would park the stop at breakeven the moment the trade is green.
+                if be_mult > 0.0 and profit >= be_trigger:
                     breakeven_sl = round(pos.price_open - 1 * pip, digits)
                     if target_sl > breakeven_sl or genuine_no_sl:
                         target_sl = breakeven_sl
@@ -3750,7 +3799,8 @@ class AxonDaemon:
                 # Structure-trail (when armed) REPLACES the ATR trail: ratchet the stop down
                 # to just above the last confirmed lower-high. Falls back to the ATR trail
                 # when OFF or before a pivot forms. Same monotonic-tighten + valid-side guard.
-                if self.config.get("structure_trail_enabled", False):
+                # _struct_on is False for a runner leg (it uses the wide ATR trail instead).
+                if _struct_on:
                     struct_sl = self._structure_stop(pos, pip, digits)
                     # Breakeven floor: only TIGHTEN to a structure stop that locks breakeven-or-
                     # better (at/below entry for a SELL). Parking it at a small-LOSS level just

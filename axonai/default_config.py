@@ -341,6 +341,29 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "consol_lookback": 8,               # closed M15 candles = the immediate consolidation window (~2h)
     "consol_max_atr": 1.8,              # range must be <= this x avg-M15-bar to count as a tight consolidation
     "consol_edge": 0.25,                # block a fade within this fraction of the NEAR edge
+    # ── Per-pair entry master kill-switch ─────────────────────────────────────
+    # When False for a pair, that pair's daemon instance NEVER opens a new entry
+    # (all fades skipped at the top of the entry path) but STAYS ALIVE to trail /
+    # exit / manage any position already open. This is the config-level "zero the
+    # pair's size" — cleaner than a 0-lot (broker rejects 0 volume) or dropping the
+    # symbol from --symbols (which would orphan an open position's exit management).
+    # Lead-side gate = the single origin of new positions, so setting it False also
+    # stops the node (the node only mirrors what the lead sends). Default ON.
+    "entries_enabled": True,            # per-pair master (USDJPY False in SYMBOL_CALIBRATION 2026-08-18)
+    # ── Hold-for-profit exit (single position; stop cutting winners at +1p) ────
+    # When True (per-pair), the WHOLE position rides a "hold for profit" exit instead of
+    # the default: breakeven is DISABLED (hold_be_atr_mult 0.0 = off, NOT breakeven-at-0,
+    # so the stop never parks at entry+1pip at +2.4p — the '+1.0p wall') and the trail arms
+    # LATER + trails WIDER, so a fade that pops 4-6p then reverts isn't cut to +1p; it holds
+    # for the move. ONE entry per pair (no split). Trade-off (whole size, not a fraction):
+    # a modest-peak trade that reverts before the trail arms gives back to the HARD stop
+    # instead of a +1p scratch — the give-back cost to watch. Ships OFF; EURUSD-armed
+    # 2026-08-18 (user "do it for real, one entry per pair"). Magnitude UNVALIDATED; the
+    # exit-capture shadow keeps logging the counterfactuals. Reversible via this flag.
+    "hold_for_profit_enabled": False,       # per-pair master (EURUSD True in SYMBOL_CALIBRATION)
+    "hold_be_atr_mult": 0.0,                # breakeven: 0.0 = DISABLED (guarded, not BE-at-0)
+    "hold_trail_trigger_atr_mult": 1.0,     # trail ARMS later than the default 0.50
+    "hold_trail_dist_atr_mult": 0.6,        # trail trails WIDER than the default 0.35
     # ── Direction-aware S/R selection (reject wrong-side fades) ────────────────
     # When True, the peak gate only considers S/R levels in the trade's PROFIT
     # direction (resistance at/above for SELL, support at/below for BUY) — it
@@ -763,8 +786,25 @@ SYMBOL_CALIBRATION = {
         "consol_gate_enabled": True,    # CONSOLIDATION GATE ARMED REAL for EURUSD (user 2026-08-14): skip a
                                         # fade at the wrong end of a tight consolidation (the mid-range chop
                                         # trap). Only skips; logged. USDJPY left OFF. Watch the skip rate.
+        "hold_for_profit_enabled": True, # HOLD-FOR-PROFIT ARMED REAL 2026-08-18 (user "do it for real, one
+                                        # entry per pair"). The WHOLE EURUSD position rides breakeven-OFF + a
+                                        # wide/late trail so a fade that pops 4-6p then reverts isn't parked at
+                                        # +1p — it holds for the move. ONE entry (no split). Trade-off: a modest
+                                        # revert now gives back to the hard stop, not a +1p scratch. Magnitude
+                                        # UNVALIDATED (n=21 recon, entry-approx, chop week). Disarm = this flag.
     },
     "USDJPY": {
+        "entries_enabled": False,    # ZEROED 2026-08-18 (user). USDJPY opens NO new fades — the
+                                     # instance stays alive to trail/exit any open position, but the
+                                     # entry path skips every fade at the top. Rationale: the fortnight's
+                                     # entry-selectivity study (post-Aug3 n=49, net -$546.59 lead / ~10x
+                                     # node) found NO logged feature separates USDJPY's full-stop losers
+                                     # (displacement flat, room inverted vs EURUSD, structure/ER/range all
+                                     # ~0 separation) — USDJPY BREAKS intraday extremes so fade gates have
+                                     # historically HURT it. EURUSD alone was net-positive (+$185 lead), so
+                                     # turning USDJPY off flips the lead book positive. Re-enable when a
+                                     # USDJPY fade edge re-validates (or a NEW entry feature is logged).
+                                     # Blocks BOTH accounts (lead is the sole origin; node only mirrors).
         "magic_number": 123458,      # distinct from EURUSD
         "pip_size": 0.01,
         # USD-BASE pair: $/pip/lot is price-dependent (~contract*pip/price ≈ $6–7),
@@ -997,5 +1037,15 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
     # Per-pair consolidation gate (whitelist mapping). EURUSD armed real; other pairs OFF.
     for _k, _d in (("consol_gate_enabled", False), ("consol_lookback", 8),
                    ("consol_max_atr", 1.8), ("consol_edge", 0.25)):
+        cfg[_k] = spec.get(_k, base.get(_k, _d))
+    # Per-pair entry kill-switch (whitelist mapping — without this the SYMBOL_CALIBRATION
+    # key never reaches self.config). False → the pair opens no new entries but still
+    # manages open positions. USDJPY OFF 2026-08-18 (no catchable entry tell; net-losing fortnight).
+    cfg["entries_enabled"] = spec.get("entries_enabled", base.get("entries_enabled", True))
+    # Per-pair hold-for-profit exit (whitelist mapping — without these the SYMBOL_CALIBRATION
+    # keys never reach self.config). EURUSD ON 2026-08-18; whole-position breakeven-off + wide trail.
+    for _k, _d in (("hold_for_profit_enabled", False),
+                   ("hold_be_atr_mult", 0.0), ("hold_trail_trigger_atr_mult", 1.0),
+                   ("hold_trail_dist_atr_mult", 0.6)):
         cfg[_k] = spec.get(_k, base.get(_k, _d))
     return cfg
