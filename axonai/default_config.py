@@ -750,8 +750,11 @@ SYMBOL_CALIBRATION = {
         "structure_trail_enabled": True, # STRUCTURE-TRAIL ARMED 2026-08-14 (user: "arm to all"). EURUSD moves
                                         # are smaller so reversal auto-scales with its ~6p ATR; less tested than
                                         # USDJPY — watch that it doesn't over-hold/whipsaw in tight EURUSD ranges.
-        "structure_retest_enabled": True, # RETEST ENTRY ARMED 2026-08-14 (user "arm both"). Places a real BUY
-                                        # on the retest of a confirmed M15 up-shift (higher-low + higher-high).
+        "structure_retest_enabled": False, # DISARMED 2026-08-17 (user) back to shadow-only. Real-fill audit
+                                        # showed it never traded: 0 structure_retest closes, 0 RETEST FIRED,
+                                        # 17 "no fill (position open)" — the exhaustion engine holds the slot +
+                                        # correlation lock blocks it (engine_yield not live). Arming was a no-op;
+                                        # shadow keeps collecting. Was: real BUY on a confirmed M15 up-shift retest.
                                         # CAUTION: continuation reads EURUSD-NEGATIVE (breakout-retest-
                                         # continuation) — armed on USER DIRECTION, not shadow validation; this
                                         # is the first side to disable if the shadow/live rows come back red.
@@ -838,8 +841,10 @@ SYMBOL_CALIBRATION = {
                                         # +30 runners (both failure modes of a fixed trail). reversal auto-
                                         # scales with ATR (~5-6p here). Ships OFF; enable + restart to arm
                                         # (exit-only, so restart-while-flat is safer but not required).
-        "structure_retest_enabled": True, # RETEST ENTRY ARMED 2026-08-14 (user "arm both"). Places a real SELL
-                                        # on the retest of a confirmed M15 down-shift (lower-high + lower-low).
+        "structure_retest_enabled": False, # DISARMED 2026-08-17 (user) back to shadow-only. See the EURUSD
+                                        # note above: real-fill audit showed 0 actual retest fills (slot always
+                                        # occupied), so arming was a no-op. Shadow keeps logging for validation.
+                                        # Was: real SELL on a confirmed M15 down-shift retest.
                                         # Continuation reads USDJPY-POSITIVE (breakout-retest-continuation) so
                                         # this side is the more defensible arm; still on user direction, not a
                                         # validated shadow. Bounded by hard 20/30 SL/TP + node prop caps.
