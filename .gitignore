@@ -229,3 +229,7 @@ reports/
 # generated artifacts alongside it (graph.json, GRAPH_REPORT.md, manifest.json)
 # stay tracked.
 graphify-out/cache/ast/
+
+# Nautilus research spike (isolated, regenerable)
+.venv_nautilus/
+research/nautilus_spike/data/
