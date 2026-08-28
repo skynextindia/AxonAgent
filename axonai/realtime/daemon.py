@@ -2543,8 +2543,16 @@ class AxonDaemon:
             zone = mtf_stamp.get("intraday_zone", "equilibrium")
             thr = float(self.config.get("mtf_location_buy_premium_pos", 60.0))
             if direction == "BUY" and pos >= thr:
-                return False, (f"MTF location: BUY at intraday {zone} ({pos:.0f}% of the "
-                               f"multi-TF range) — buying the structural top")
+                reason = (f"MTF location: BUY at intraday {zone} ({pos:.0f}% of the "
+                          f"multi-TF range) — buying the structural top")
+                # SHADOW mode (default): log the would-block but do NOT block a live order.
+                # The backtest showed the live block removed winners; observe on forward,
+                # multi-regime data before arming it (and re-check which SIDE to block).
+                if self.config.get("mtf_location_veto_shadow", True):
+                    logger.info("MTF LOCATION SHADOW %s: would-block %s — allowed (observe): %s",
+                                self.mt5_symbol, direction, reason)
+                    return True, ""
+                return False, reason
             return True, ""
         except Exception as e:
             logger.debug("mtf location gate failed: %s", e)

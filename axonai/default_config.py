@@ -653,8 +653,18 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # sell veto from data. Entry-only (adds a skip); reversible via the flag; needs a flat
     # restart to take effect. Evidence is THIN (live n=12) — this is a bounded, principled
     # skip, not a validated edge.
+    # SHADOW / OBSERVE MODE 2026-08-29. Backtest (n=24) showed the LIVE block was BACKWARDS —
+    # it removed the WINNING premium-buys (would-block n=12 net +$148 vs kept n=12 net -$22);
+    # it was armed on n=1 (the Aug-28 -$104 outlier). Rather than disarm, run it in SHADOW: the
+    # gate still computes its would-block decision and LOGS it, but never blocks a live order.
+    # The stamp records intraday_pos on every entry, so the Sept re-test judges whether would-
+    # block trades actually LOSE on forward, multi-regime data. Only then arm a REAL block — and
+    # mind the SIGN: the backtest says premium-buys WIN, so a real gate likely blocks DISCOUNT-
+    # buys, or becomes a soft directional bias, not this hard premium veto. See
+    # research/mtf_structure/backtest_buy_premium_veto.py.
     "mtf_location_veto_enabled": True,
-    "mtf_location_buy_premium_pos": 60.0,   # block BUY when intraday_pos >= this (premium)
+    "mtf_location_veto_shadow": True,       # observe-only: log would-block, never block a live order
+    "mtf_location_buy_premium_pos": 60.0,   # would-block BUY when intraday_pos >= this (premium)
 
     # INVERSE USDJPY MIRROR — user 2026-08-29 ("do real, not shadow"). When a EURUSD
     # (lead) entry FILLS, immediately fire the OPPOSITE-direction USDJPY order at the
