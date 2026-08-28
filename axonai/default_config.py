@@ -167,6 +167,15 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "eod_entry_cutoff_utc": 17.5,               # 23:00 IST — no NEW entries after this
     "eod_flatten_before_close_min": 5,          # flatten this many min before the NY 5pm rollover
     "eod_resume_utc": 0.5,                       # 06:00 IST — reset day + resume entries
+    # WEEKEND-ONLY FLATTEN — user 2026-08-29. True = do NOT force-flat every night;
+    # hold positions OVERNIGHT Mon–Thu and let them ride to their own 20p SL/TP, and
+    # force-flat only before the Friday weekly close (weekday()==4, ~20:55 UTC). The
+    # daily entry cutoff above is UNCHANGED. Safe from stacking: the one-position-per-
+    # pair "not flat" guard means the machine just WAITS for the held trade to resolve
+    # before taking the next (fewer trades). TRADE-OFF: overnight exposure = rollover
+    # swap cost + wider rollover spreads + overnight/gap risk on the held trade. Revert:
+    # set False (nightly flatten). Needs a flat restart to take effect.
+    "eod_flatten_weekend_only": True,
     # Legacy session-transition profit-close is superseded by the pre-rollover
     # flatten above (which holds winners too until the daily close); keep it off.
     "eod_close_enabled": False,
@@ -608,6 +617,50 @@ DEFAULT_CONFIG = _apply_env_overrides({
                                                  # vs the live structure-trail (logged giveback vs actual_pips
                                                  # per close) — the live A/B; judge on accumulated rows.
     "exit_shadow_tp_pips": [3.0, 4.0, 5.0, 6.0], # fixed-TP caps to evaluate
+
+    # Shadow "level broke -> cut" observer (research/exit_cut_forensics, lead-only).
+    # Per open trade, logs a would_cut row the FIRST time price breaks the faded S/R
+    # level by shadow_cut_buffer_pips — i.e. where a "cut the fade when its level
+    # breaks" exit WOULD have exited, vs riding to the full hard stop. Pure
+    # observation; never touches the position. Motivated by the exit-cut forensic:
+    # full-stop breakout-fade SELLs = ~52% of all lead loss; the cut nets +95..+140p
+    # across every buffer on the in-sample MFE subset. OFF by default — this is the
+    # out-of-sample confirmation gate before any real exit change. Judge by joining
+    # would_cut_pips to the trade's actual close pips over a fresh (non-Aug) window.
+    "shadow_cut_enabled": True,                  # ON 2026-08-20 (user) — lead-solo restart; read-only would-cut logger
+    "shadow_cut_buffer_pips": 3.0,               # robust 3-5p band; 3p keeps casualties low
+
+    # DAILY-LOSS CAP — user 2026-08-21. Replaces the one-loss SL lockout: the machine
+    # keeps trading through individual stop-outs and only halts new entries when the
+    # day's CUMULATIVE realized loss breaches this dollar cap (per pair). Set 0 to fall
+    # back to the legacy one-loss lockout. This is the replacement guardrail against a
+    # bad day compounding — do NOT set it to 0 without an alternative in place.
+    "daily_loss_cap_usd": 300.0,
+
+    # LIVE MTF STRUCTURAL STAMP — user 2026-08-21. Tag every entry in signals.jsonl with
+    # its 5Y..5M trend + premium/discount position (event_details.mtf_position), for
+    # per-trade structural analysis. Read-only telemetry; ~60s cached; never blocks entry.
+    "mtf_stamp_enabled": True,
+
+    # MTF STRUCTURAL LOCATION VETO — 2026-08-29. Uses the live mtf_stamp intraday
+    # premium/discount zone (a MULTI-TF range position the 20xM15 range_extreme_gate
+    # cannot see). ARMED half only: block a BUY at a structural PREMIUM (buying the top
+    # of the 5Y..5M range) — the location error behind the 2026-08-28 -$104 buy-at-premium
+    # full stop, and the structural mirror of the validated sell-into-support range gate.
+    # Rarely fires (a fade-BUY normally triggers at an intraday LOW). The SELL side is NOT
+    # vetoed here: discount-sells both win small and lose big, and the stamp already records
+    # intraday_pos on every entry, so the Sept re-test ([[mtf-sell-veto-retro]]) judges a
+    # sell veto from data. Entry-only (adds a skip); reversible via the flag; needs a flat
+    # restart to take effect. Evidence is THIN (live n=12) — this is a bounded, principled
+    # skip, not a validated edge.
+    "mtf_location_veto_enabled": True,
+    "mtf_location_buy_premium_pos": 60.0,   # block BUY when intraday_pos >= this (premium)
+
+    # DIRECTION FLIP — user-directed 2026-08-21. Inverts every entry (Buy<->Sell) at
+    # the decision source. ON RECORD / against the evidence: 3yr backtest shows flipping
+    # LOSES (~-1.6p/trade overall, ~-2.9p in the current regime). Live real-money change.
+    # REVERT INSTANTLY: set this False and restart the lead. Watch it closely + cap losses.
+    "flip_direction_enabled": False,
 
     # Break-and-retest CONTINUATION shadow (mirror of the fade; never trades).
     # On M15 close: detect a breakout beyond prior structure, wait for a retest of

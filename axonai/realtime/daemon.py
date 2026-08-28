@@ -106,6 +106,8 @@ class AxonDaemon:
         self._stage_arm: dict[int, dict] = {}  # probe ticket -> staged-entry add state (confirmation-by-degree)
         self._mfe_exit_shadow: dict[int, dict] = {}  # ticket -> MFE early-exit shadow state (first-fire snapshot)
         self._exit_shadow: dict[int, dict] = {}  # ticket -> alt-trail exit-capture shadow (first shadow-stop hit)
+        self._active_trade_sr_level: dict[int, float] = {}  # ticket -> faded S/R level @ entry (shadow-cut observer)
+        self._shadow_cut = None  # lazily-built ShadowCutTracker (research/, lead-only, flag-gated OFF)
         self._brk_setups: list = []  # active break-and-retest continuation-shadow state machines
         self._revconf_watches: list = []  # active reversal-confirmation PRE-ENTRY shadow watches
         self._retest_setup: Optional[dict] = None  # armed structure-shift retest entry setup (lead-only)
@@ -131,6 +133,8 @@ class AxonDaemon:
         self._eod_flat_tradeday = None      # trading day we last hard-flatted
         self._eod_flat_blocked = False      # bar entries during the pre-close window
         self._sl_locked_out = False         # per-pair SL lockout (Phase 2, live)
+        self._daily_loss_usd = 0.0          # cumulative realized loss this trading day (daily-loss-cap mode)
+        self._mtf_cache = None              # (epoch, stamp) — ~60s cache for the MTF entry stamp
 
         # Self-configuring session selector (learns per-session movement of this pair)
         self.auto_sessions = bool(config.get("realtime_auto_sessions", False))
@@ -889,6 +893,10 @@ class AxonDaemon:
                         event.details["sr_level_dist_pips"] = round(closest_dist, 2)
                         event.details["daily_trend"] = getattr(
                             self.live_evidence, "trend_direction_h4", "sideways")
+                        # LIVE MTF structural stamp (user 2026-08-21): tag every entry
+                        # with its 5Y..5M trend + premium/discount position, for analysis.
+                        if self.config.get("mtf_stamp_enabled", True):
+                            event.details["mtf_position"] = self._compute_mtf_stamp()
 
                     if closest_lvl is None or closest_dist > 5.0:
                         is_gate_passed = False
@@ -910,6 +918,15 @@ class AxonDaemon:
                             if not passed:
                                 is_gate_passed = False
                                 gate_reason = reason
+
+                            # 4. MTF structural LOCATION gate — block a BUY at a multi-TF
+                            #    PREMIUM (top of the 5Y..5M range) the 20xM15 gate can't see.
+                            if is_gate_passed:
+                                _ml_ok, _ml_reason = self._mtf_location_gate(
+                                    direction, event.details.get("mtf_position"))
+                                if not _ml_ok:
+                                    is_gate_passed = False
+                                    gate_reason = _ml_reason
 
                             if is_gate_passed:
                                 logger.info("LIVE PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f is %.2f pips from %s level %.5f. Trend=%s, Trade=%s",
@@ -1066,6 +1083,17 @@ class AxonDaemon:
                 signal = "Buy"
             else:
                 signal = "Sell"
+
+            # DIRECTION FLIP (user-directed 2026-08-21, config flip_direction_enabled).
+            # Inverts the fade decision AT SOURCE so every downstream stage (entry gates,
+            # sizing, S/R selection, logging, mirror) operates consistently on the flipped
+            # direction. Default OFF; set True + restart to arm, set False + restart to revert.
+            # ON RECORD: the 3yr backtest shows flipping LOSES (~-1.6p/trade overall,
+            # ~-2.9p/trade in the current regime). Kept as a trivially-reversible toggle.
+            if self.config.get("flip_direction_enabled", False):
+                _orig_signal = signal
+                signal = "Sell" if signal == "Buy" else "Buy"
+                logger.info("DIRECTION FLIP: %s -> %s (flip_direction_enabled)", _orig_signal, signal)
 
             # Per-pair entry kill-switch (config entries_enabled; USDJPY OFF 2026-08-18).
             # When False this pair opens NO new positions — every fade is skipped here, at
@@ -1359,6 +1387,8 @@ class AxonDaemon:
                         self._active_trade_atr[ticket] = atr
                         self._active_trade_peak_price[ticket] = trade_result.get("price", 0.0)
                         self._active_trade_worst_price[ticket] = trade_result.get("price", 0.0)
+                        # Faded S/R level for the shadow-cut observer (read-only; unset -> N/A)
+                        self._active_trade_sr_level[ticket] = event.details.get("sr_level_price")
                         self._active_trade_entry_time[ticket] = time.time()
                         if self.correlation_engine is not None:
                             self.correlation_engine.register_position(
@@ -1406,6 +1436,28 @@ class AxonDaemon:
                     self._arm_revconf_shadow(event, signal)
                 except Exception as _rce:
                     logger.debug("revconf arm failed: %s", _rce)
+
+            # Risk-Engine LIVE observer (SHADOW INTEGRATION; default OFF). Records a
+            # HYPOTHETICAL sizing decision from research/risk_engine for this
+            # just-executed entry — observe-only. It runs AFTER the order is already
+            # placed (cannot perturb it), reads state strictly read-only, never sends/
+            # modifies/closes an order, never chooses direction, and writes ONLY to
+            # research/risk_engine/shadow_out/. Fully fail-safe + config-gated OFF, so
+            # with the flag unset (its default) this branch and its import never run.
+            if (not self._exec_node and trade_result
+                    and self.config.get("shadow_risk_observer_enabled", False)):
+                try:
+                    from research.risk_engine.live_observer import observe_entry as _re_observe
+                    _re_observe(
+                        symbol=self.mt5_symbol, production_signal=signal,
+                        live_state=self.live_state, size_scale=size_scale,
+                        risk_guard=getattr(self.trade_executor, "risk_guard", None),
+                        correlation_engine=self.correlation_engine,
+                        trade_result=trade_result, config=self.config,
+                        signal_id=str(getattr(event, "id", "") or self._events_detected),
+                    )
+                except Exception as _roe:
+                    logger.debug("shadow risk observer failed: %s", _roe)
 
             # Set cooldown on event detector
             cooldown = self.config.get("realtime_cooldown_seconds", 300)
@@ -2414,8 +2466,86 @@ class AxonDaemon:
             if self._sl_locked_out:
                 logger.info("Daily reset: new trading day %s; clearing SL lockout", td)
             self._sl_locked_out = False
+            self._daily_loss_usd = 0.0      # reset the daily-loss-cap accumulator
 
-    def _maybe_engage_sl_lockout(self, reason: str, pips: float = 0.0) -> None:
+    def _compute_mtf_stamp(self):
+        """LIVE MTF structural stamp for an entry: trend + range-position at every scale
+        (5Y..5M) plus the premium/discount read, from MT5 D1/H1/M15/M5 rates. ~60s cached,
+        best-effort, read-only — never raises into the entry path. Uses the isolated
+        research.mtf_structure module for the pure calc."""
+        try:
+            now = time.time()
+            if self._mtf_cache and (now - self._mtf_cache[0]) < 60.0:
+                return self._mtf_cache[1]
+            from research.mtf_structure.structure import classify_tf, MTFSnapshot
+            pip = 0.01 if "JPY" in (self.mt5_symbol or "").upper() else 0.0001
+
+            def rates(tf, count):
+                r = mt5.copy_rates_from_pos(self.mt5_symbol, tf, 0, count)
+                if r is None or len(r) == 0:
+                    return None
+                return ([float(x["high"]) for x in r], [float(x["low"]) for x in r],
+                        [float(x["close"]) for x in r])
+
+            d = rates(mt5.TIMEFRAME_D1, 1300); h = rates(mt5.TIMEFRAME_H1, 120)
+            m15 = rates(mt5.TIMEFRAME_M15, 60); m5 = rates(mt5.TIMEFRAME_M5, 60)
+            base = m5 or h or d
+            if base is None:
+                return None
+            cur = base[2][-1]
+            plan = [("5Y", d, 1260), ("1Y", d, 252), ("3M", d, 63), ("1M", d, 21),
+                    ("1W", d, 5), ("1D", h, 24), ("1H", h, 12), ("15M", m15, 24), ("5M", m5, 24)]
+            tfs = []
+            for name, src, bars in plan:
+                if src is None:
+                    continue
+                H, L, C = src
+                tf = classify_tf(name, H, L, C, cur, pip, bars)
+                if tf is not None:
+                    tfs.append(tf)
+            if not tfs:
+                return None
+            snap = MTFSnapshot(price=round(cur, 5), tfs=tfs)
+            pdr = snap.premium_discount()
+            stamp = {
+                "summary": snap.summary(),
+                "macro_zone": pdr["macro_zone"], "macro_pos": pdr["macro_pos"],
+                "intraday_zone": pdr["intraday_zone"], "intraday_pos": pdr["intraday_pos"],
+                "tfs": {t.name: [t.trend, t.position_pct] for t in tfs},
+            }
+            self._mtf_cache = (now, stamp)
+            return stamp
+        except Exception as e:
+            logger.debug("MTF stamp failed: %s", e)
+            return None
+
+    def _mtf_location_gate(self, direction: str, mtf_stamp):
+        """Structural LOCATION gate off the live MTF intraday premium/discount zone.
+
+        Blocks a BUY at a structural PREMIUM — buying the top of the multi-TF (5Y..5M)
+        range, the location error the short 20xM15 ``_range_extreme_gate`` cannot see
+        (it only ranks the last ~5h). This is the mirror of the validated sell-into-
+        support range gate. Flag-gated (``mtf_location_veto_enabled``), entry-only,
+        best-effort — never raises into the entry path. The SELL side is deliberately
+        NOT vetoed (discount-sells are too noisy on the current sample; the stamp already
+        records intraday_pos for the Sept re-test). Returns (passed, reason)."""
+        try:
+            if not self.config.get("mtf_location_veto_enabled", False):
+                return True, ""
+            if not mtf_stamp:
+                return True, ""          # no structural read -> don't block
+            pos = float(mtf_stamp.get("intraday_pos", 50.0))
+            zone = mtf_stamp.get("intraday_zone", "equilibrium")
+            thr = float(self.config.get("mtf_location_buy_premium_pos", 60.0))
+            if direction == "BUY" and pos >= thr:
+                return False, (f"MTF location: BUY at intraday {zone} ({pos:.0f}% of the "
+                               f"multi-TF range) — buying the structural top")
+            return True, ""
+        except Exception as e:
+            logger.debug("mtf location gate failed: %s", e)
+            return True, ""
+
+    def _maybe_engage_sl_lockout(self, reason: str, pips: float = 0.0, profit: float = 0.0) -> None:
         """Engage the per-pair SL lockout only on a genuine *losing* stop-out.
 
         The exit reason alone is NOT sufficient: a trailing stop that has been
@@ -2430,7 +2560,24 @@ class AxonDaemon:
         Trailing/TP/manual closes and any profitable stop do NOT lock out.
         Cleared by ``_check_daily_reset`` when the trading day rolls.
         """
-        if reason in ("Stop Loss (SL) Hit", "Stop Out (SO)") and pips < 0:
+        if not (reason in ("Stop Loss (SL) Hit", "Stop Out (SO)") and pips < 0):
+            return
+        # DAILY-LOSS-CAP mode (user 2026-08-21): keep trading through single losses;
+        # halt new entries only when the day's cumulative realized loss breaches
+        # daily_loss_cap_usd. Falls back to the legacy one-loss lockout when cap<=0.
+        cap = float(self.config.get("daily_loss_cap_usd", 0) or 0)
+        if cap > 0:
+            self._daily_loss_usd += min(float(profit), 0.0)   # profit < 0 on a loss
+            if self._daily_loss_usd <= -cap:
+                if not self._sl_locked_out:
+                    logger.info("DAILY LOSS CAP hit for %s: day loss %.2f <= -%.0f; halting new "
+                                "entries until the next trading day", self.mt5_symbol,
+                                self._daily_loss_usd, cap)
+                self._sl_locked_out = True
+            else:
+                logger.info("Loss %.2f on %s (day total %.2f / cap -%.0f) — still trading",
+                            float(profit), self.mt5_symbol, self._daily_loss_usd, cap)
+        else:
             if not self._sl_locked_out:
                 logger.info(
                     "SL lockout ENGAGED for %s (%s, %.1f pips loss); no new entries until the next trading day",
@@ -2468,24 +2615,38 @@ class AxonDaemon:
         self._eod_flat_blocked = (utc_hour >= cutoff) or (utc_hour < resume)
 
         # 2) Pre-rollover flatten: force-close ALL remaining positions once, a few
-        #    minutes before the NY 5pm daily rollover (ny_close + 3h, DST-aware).
+        #    minutes before the NY 5pm rollover (ny_close + 3h, DST-aware). With
+        #    eod_flatten_weekend_only (user 2026-08-29) this fires ONLY before the
+        #    Friday weekly close — positions are HELD overnight Mon–Thu and ride to
+        #    their own 20p SL/TP. The daily entry cutoff above is unaffected, and the
+        #    one-position-per-pair "not flat" guard means no stacking (it just waits
+        #    for the held trade to resolve before taking the next).
         _, _, _, ny_close = get_dst_session_hours(now_utc)
         rollover = (ny_close + 3.0) % 24.0
         before_min = float(self.config.get("eod_flatten_before_close_min", 5))
         flat_after = (rollover - before_min / 60.0) % 24.0             # ~20:55 UTC / 02:25 IST
 
-        # Flatten window [flat_after, resume), wrapping past midnight UTC. Keyed to
-        # the trading day so it fires exactly once per night (and again after a
+        # Daily mode: flatten window [flat_after, resume) wrapping past midnight UTC.
+        # Weekend-only mode: just the Friday-evening pre-close (weekday()==4, after
+        # flat_after); the Sat 00:00–00:30 wrap is dropped (market already closed).
+        if bool(self.config.get("eod_flatten_weekend_only", False)):
+            in_flat_window = (now_utc.weekday() == 4 and utc_hour >= flat_after)
+            flat_reason = "EOD Flat (weekend/Friday close)"
+        else:
+            in_flat_window = (utc_hour >= flat_after) or (utc_hour < resume)
+            flat_reason = "EOD Flat (pre-rollover)"
+
+        # Keyed to the trading day so it fires exactly once (and again after a
         # mid-window restart, which re-adopts and then flattens open positions).
-        if (utc_hour >= flat_after) or (utc_hour < resume):
+        if in_flat_window:
             td = self._trading_day(now_utc)
             if td != self._eod_flat_tradeday:
-                closed = self._close_all_positions("EOD Flat (pre-rollover)")
+                closed = self._close_all_positions(flat_reason)
                 self._eod_flat_tradeday = td
                 logger.info(
-                    "AxonDaemon: EOD pre-rollover flat at %.2fh UTC (rollover=%.2fh, ~02:25 IST) — "
-                    "force-closed %d position(s); entries stay blocked until %.2fh UTC (06:00 IST)",
-                    utc_hour, rollover, closed, resume,
+                    "AxonDaemon: %s at %.2fh UTC (rollover=%.2fh) — force-closed %d "
+                    "position(s); entries stay blocked until %.2fh UTC (06:00 IST)",
+                    flat_reason, utc_hour, rollover, closed, resume,
                 )
 
     def _check_pre_news_close(self, bid: float, ask: float) -> None:
@@ -3673,6 +3834,27 @@ class AxonDaemon:
             self._update_mfe_exit_shadow(pos, bid, ask, pip)
             # Exit-capture shadow (records where a TIGHTER trail WOULD exit).
             self._update_exit_capture_shadow(pos, bid, ask, pip)
+            # Shadow "level broke -> cut" observer (lead-only; logs would-cut, never
+            # touches the position). Inert unless shadow_cut_enabled; lazily built.
+            if not self._exec_node and self.config.get("shadow_cut_enabled", False):
+                try:
+                    if self._shadow_cut is None:
+                        from research.exit_cut_forensics.shadow_cut import ShadowCutTracker
+                        self._shadow_cut = ShadowCutTracker(
+                            buffer_pips=float(self.config.get("shadow_cut_buffer_pips", 3.0)),
+                            enabled=True)
+                    _init_sl = self._active_trade_initial_sl.get(ticket)
+                    _sl_pips = (abs(pos.price_open - _init_sl) / pip
+                                if _init_sl else None)
+                    self._shadow_cut.observe(
+                        ticket=ticket,
+                        direction=("SELL" if pos.type == mt5.POSITION_TYPE_SELL else "BUY"),
+                        entry=pos.price_open,
+                        sr_level=self._active_trade_sr_level.get(ticket),
+                        symbol=self.mt5_symbol, bid=bid, ask=ask,
+                        sl_pips=_sl_pips, epoch=int(time.time()))
+                except Exception as _sce:
+                    logger.debug("shadow-cut observe failed: %s", _sce)
 
             atr = self._active_trade_atr[ticket]
             initial_sl = self._active_trade_initial_sl[ticket]
@@ -4186,7 +4368,7 @@ class AxonDaemon:
 
             # Per-pair SL lockout (F4): engage only on a real *losing* stop-out
             # (pips < 0), never on a profitable trailed stop wearing the same label.
-            self._maybe_engage_sl_lockout(reason, pips)
+            self._maybe_engage_sl_lockout(reason, pips, profit)
             # Mirror the exit to the execution node so the follower flattens the
             # matching position too (best-effort; idempotent if B is already flat).
             self._mirror_send({"cmd": "close", "reason": reason, "ticket": ticket})
@@ -4310,6 +4492,9 @@ class AxonDaemon:
             self._active_trade_atr.pop(ticket, None)
             self._active_trade_peak_price.pop(ticket, None)
             self._active_trade_worst_price.pop(ticket, None)
+            self._active_trade_sr_level.pop(ticket, None)
+            if self._shadow_cut is not None:
+                self._shadow_cut.forget(ticket)
             self._retest_arm.pop(ticket, None)
             self._stage_arm.pop(ticket, None)
             self._mfe_exit_shadow.pop(ticket, None)
