@@ -656,6 +656,22 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "mtf_location_veto_enabled": True,
     "mtf_location_buy_premium_pos": 60.0,   # block BUY when intraday_pos >= this (premium)
 
+    # INVERSE USDJPY MIRROR — user 2026-08-29 ("do real, not shadow"). When a EURUSD
+    # (lead) entry FILLS, immediately fire the OPPOSITE-direction USDJPY order at the
+    # same spot (EURUSD SELL -> USDJPY BUY, the negative EURUSD/USDJPY correlation).
+    # USDJPY trades ONLY as this mirror — its own fade detection stays OFF
+    # (entries_enabled False), so it never fires an independent signal. Requires the
+    # MULTI-PAIR launch (run_system.bat option 2) so a USDJPY daemon exists; in single-
+    # pair mode (supervisor None) the mirror is inert. RISK: this DOUBLES USD exposure —
+    # both legs bet the same dollar direction (not a hedge). User chose FULL size + the
+    # $300 daily-loss cap PER PAIR (~$600/day worst-case). The follower still honors its
+    # own SL lockout / daily-loss cap before firing. UNVALIDATED coupling: the +58p
+    # continuation edge was USDJPY's OWN breakout-retest signal, NOT this EURUSD-mirror —
+    # watch the live P&L. Flag-gated/reversible (set False); needs a flat restart.
+    "inverse_mirror_enabled": True,
+    "inverse_mirror_lead": "EURUSD",        # the pair whose FILLS trigger the mirror
+    "inverse_mirror_follower": "USDJPY",    # the pair that fires the opposite order
+
     # DIRECTION FLIP — user-directed 2026-08-21. Inverts every entry (Buy<->Sell) at
     # the decision source. ON RECORD / against the evidence: 3yr backtest shows flipping
     # LOSES (~-1.6p/trade overall, ~-2.9p in the current regime). Live real-money change.

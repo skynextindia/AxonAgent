@@ -1401,6 +1401,11 @@ class AxonDaemon:
                         if _stage:
                             self._arm_stage_add(ticket, signal, size_scale,
                                                 trade_result.get("price", 0.0) or 0.0)
+                        # Inverse USDJPY mirror (user 2026-08-29): on a real EURUSD fill,
+                        # fire the opposite-direction USDJPY order at the same spot. Lead-
+                        # side only; inert in single-pair mode. Best-effort, never blocks.
+                        if self._is_inverse_mirror_lead():
+                            self._fire_follower_inverse(signal)
                     # Mirror this entry decision to the execution node (best-effort;
                     # lead side only — a no-op when mirror_client is None). The staged
                     # PROBE carries its fraction so the node opens the same probe size.
@@ -2544,6 +2549,75 @@ class AxonDaemon:
         except Exception as e:
             logger.debug("mtf location gate failed: %s", e)
             return True, ""
+
+    def _is_inverse_mirror_lead(self) -> bool:
+        """True if THIS daemon is the lead pair whose fills trigger the inverse USDJPY
+        mirror, and the multi-pair supervisor is present (single-pair mode -> inert)."""
+        return bool(self.config.get("inverse_mirror_enabled", False)
+                    and self.supervisor is not None
+                    and self.config.get("inverse_mirror_lead", "EURUSD") in (self.mt5_symbol or ""))
+
+    def _fire_follower_inverse(self, lead_signal: str) -> None:
+        """Lead-side dispatch: find the follower daemon in the supervisor registry and
+        fire its opposite-direction mirror. Best-effort; never raises into the lead
+        entry path."""
+        try:
+            follower = self.config.get("inverse_mirror_follower", "USDJPY")
+            for d in self.supervisor.daemons.values():
+                if d is self:
+                    continue
+                if follower in (getattr(d, "mt5_symbol", "") or ""):
+                    d.fire_inverse_mirror(lead_signal, self.mt5_symbol)
+                    return
+            logger.info("INVERSE MIRROR: no %s follower daemon found (single-pair launch?)", follower)
+        except Exception as e:
+            logger.error("INVERSE MIRROR dispatch failed: %s", e, exc_info=True)
+
+    def fire_inverse_mirror(self, lead_signal: str, lead_symbol: str) -> None:
+        """Follower-side: open the OPPOSITE-direction order on THIS pair, triggered by a
+        lead-pair fill at the same spot (EURUSD SELL -> USDJPY BUY, the negative
+        correlation). Real order on this pair's own executor + live_state. Honors this
+        pair's flat guard and daily-loss lockout. Best-effort — never raises to the caller."""
+        try:
+            if not self.config.get("inverse_mirror_enabled", False):
+                return
+            if self._sl_locked_out:
+                logger.info("INVERSE MIRROR %s: skip — daily-loss cap / lockout active", self.mt5_symbol)
+                return
+            if self._eod_flat_blocked:
+                logger.info("INVERSE MIRROR %s: skip — EOD entry cutoff", self.mt5_symbol)
+                return
+            inv = "Buy" if str(lead_signal).strip().lower().startswith("s") else "Sell"
+            self._entry_lock.acquire()
+            try:
+                if mt5.positions_get(symbol=self.mt5_symbol) or self._tracked_positions:
+                    logger.info("INVERSE MIRROR %s: not flat — skip (lead %s %s)",
+                                self.mt5_symbol, lead_symbol, lead_signal)
+                    return
+                tr = self.trade_executor.execute_signal(self.mt5_symbol, inv, self.live_state, 1.0)
+                if tr and tr.get("order"):
+                    ticket = tr.get("order")
+                    self._tracked_positions.add(ticket)
+                    self._active_trade_initial_sl[ticket] = tr.get("sl")
+                    self._active_trade_system[ticket] = "inverse_mirror"
+                    atr = self.live_state._state.atr_14_h1 if self.live_state._state else 0.0012
+                    self._active_trade_atr[ticket] = atr
+                    self._active_trade_peak_price[ticket] = tr.get("price", 0.0)
+                    self._active_trade_worst_price[ticket] = tr.get("price", 0.0)
+                    self._active_trade_entry_time[ticket] = time.time()
+                    if self.correlation_engine is not None:
+                        self.correlation_engine.register_position(
+                            self.mt5_symbol, inv, tr.get("volume", 0.0) or 0.0,
+                            tr.get("price", 0.0) or 0.0, ticket)
+                    logger.info("INVERSE MIRROR %s: opened %s (inverse of lead %s %s) ticket=%s vol=%s",
+                                self.mt5_symbol, inv, lead_symbol, lead_signal, ticket, tr.get("volume"))
+                else:
+                    logger.warning("INVERSE MIRROR %s: order returned no ticket (result=%s)",
+                                   self.mt5_symbol, tr)
+            finally:
+                self._entry_lock.release()
+        except Exception as e:
+            logger.error("INVERSE MIRROR %s failed: %s", self.mt5_symbol, e, exc_info=True)
 
     def _maybe_engage_sl_lockout(self, reason: str, pips: float = 0.0, profit: float = 0.0) -> None:
         """Engage the per-pair SL lockout only on a genuine *losing* stop-out.
