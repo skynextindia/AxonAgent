@@ -109,6 +109,7 @@ class AxonDaemon:
         self._active_trade_sr_level: dict[int, float] = {}  # ticket -> faded S/R level @ entry (shadow-cut observer)
         self._shadow_cut = None  # lazily-built ShadowCutTracker (research/, lead-only, flag-gated OFF)
         self._brk_setups: list = []  # active break-and-retest continuation-shadow state machines
+        self._wtms_setups: list = []  # wide-TP MTF-regime shadow: virtual fade+with-trend brackets (read-only)
         self._revconf_watches: list = []  # active reversal-confirmation PRE-ENTRY shadow watches
         self._retest_setup: Optional[dict] = None  # armed structure-shift retest entry setup (lead-only)
         self._retest_fwd: list = []  # structure-retest forward fixed-rail P&L shadow trackers
@@ -787,6 +788,12 @@ class AxonDaemon:
         if candle.timeframe == "M15" and self.config.get("breakout_retest_shadow", True):
             self._update_breakout_retest_shadow(candle)
 
+        # Wide-TP MTF-regime shadow (2026-09-01): resolve the virtual fade + with-trend
+        # wide brackets armed on each gated fade signal, to ~5-day / weekend horizon.
+        # READ-ONLY; feeds the forward good-spot map (research/mtf_regime_switch/).
+        if candle.timeframe == "M15" and self.config.get("wide_tp_mtf_shadow_enabled", True):
+            self._update_wtms_shadow(candle)
+
         # Broadcast closed candle
         dashboard = get_dashboard()
         if dashboard:
@@ -931,6 +938,10 @@ class AxonDaemon:
                             if is_gate_passed:
                                 logger.info("LIVE PEAK GATE: S/R Zone Proximity + Trend Aligned! Price=%.5f is %.2f pips from %s level %.5f. Trend=%s, Trade=%s",
                                             event.price, closest_dist, closest_lvl.level_type, closest_lvl.price, daily_trend, direction)
+                                # Wide-TP MTF-regime shadow: arm a READ-ONLY virtual wide
+                                # bracket (fade + with-trend) on this gated signal.
+                                if self.config.get("wide_tp_mtf_shadow_enabled", True):
+                                    self._arm_wtms_setup(direction, float(event.price), event.details)
 
             dashboard = get_dashboard()
             if not self.config.get("test_mode", False) and not (is_peak and is_exhaustion and is_gate_passed):
@@ -2355,6 +2366,109 @@ class AxonDaemon:
                 self._brk_setups = self._brk_setups[-12:]
         except Exception as e:
             logger.debug("breakout-retest shadow failed: %s", e)
+
+    def _arm_wtms_setup(self, direction, entry, details) -> None:
+        """Arm a READ-ONLY virtual wide-bracket PAIR (fade + with-trend) on a gated
+        fade signal, stamped with the live MTF cross-regime. Never places an order.
+
+        Tracks BOTH the fade direction and its opposite (with-trend) to a wide bracket
+        (SL20/TP100) so the forward good-spot map can score any regime rule offline.
+        LEAD/entry-enabled pair only (USDJPY runs entries-off, so it never arms here).
+        """
+        if not self.config.get("wide_tp_mtf_shadow_enabled", True):
+            return
+        if not self.config.get("entries_enabled", True):
+            return
+        try:
+            pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+            sl_p = float(self.config.get("wtms_sl_pips", 20.0))
+            tp_p = float(self.config.get("wtms_tp_pips", 100.0))
+            fade_long = str(direction).upper().startswith("B")     # BUY fade = long
+
+            def levels(is_long):
+                return (entry - sl_p * pip, entry + tp_p * pip) if is_long \
+                    else (entry + sl_p * pip, entry - tp_p * pip)
+
+            f_sl, f_tp = levels(fade_long)
+            o_sl, o_tp = levels(not fade_long)
+            det = details if isinstance(details, dict) else {}
+            lvl = det.get("sr_level_price")
+            self._wtms_setups.append({
+                "sig_epoch": int(datetime.now(timezone.utc).timestamp()),
+                "fade_dir": "Buy" if fade_long else "Sell", "entry": float(entry),
+                "pip": pip, "bars": 0, "sl_pips": sl_p, "tp_pips": tp_p,
+                "sr_level": (float(lvl) if lvl else None), "level_type": det.get("sr_level_type"),
+                "mtf": det.get("mtf_position"),
+                "fade": {"long": fade_long, "sl": f_sl, "tp": f_tp, "mfe": 0.0, "mae": 0.0, "out": None},
+                "opp": {"long": not fade_long, "sl": o_sl, "tp": o_tp, "mfe": 0.0, "mae": 0.0, "out": None},
+            })
+            if len(self._wtms_setups) > 200:                       # hard cap, prune oldest
+                self._wtms_setups = self._wtms_setups[-200:]
+        except Exception as e:
+            logger.debug("wtms arm failed: %s", e)
+
+    def _update_wtms_shadow(self, candle) -> None:
+        """Resolve the virtual wide brackets on each M15 close (READ-ONLY). When both
+        the fade and with-trend legs resolve (or max hold), write one row to
+        reports/wide_tp_mtf_shadow.jsonl. NEVER touches the executor."""
+        if not self.config.get("wide_tp_mtf_shadow_enabled", True):
+            return
+        try:
+            import os, json
+            max_bars = int(float(self.config.get("wtms_max_hold_hours", 120.0)) * 60 / 15)
+            hi, lo, cl = candle.high, candle.low, candle.close
+            keep = []
+            for s in self._wtms_setups:
+                s["bars"] += 1
+                pip = s["pip"]; e = s["entry"]
+                for leg in (s["fade"], s["opp"]):
+                    if leg["out"] is not None:
+                        continue
+                    if leg["long"]:
+                        leg["mfe"] = max(leg["mfe"], (hi - e) / pip)
+                        leg["mae"] = max(leg["mae"], (e - lo) / pip)
+                        hit_sl = lo <= leg["sl"]; hit_tp = hi >= leg["tp"]
+                    else:
+                        leg["mfe"] = max(leg["mfe"], (e - lo) / pip)
+                        leg["mae"] = max(leg["mae"], (hi - e) / pip)
+                        hit_sl = hi >= leg["sl"]; hit_tp = lo <= leg["tp"]
+                    if hit_sl and hit_tp:
+                        leg["out"] = -s["sl_pips"]                  # conservative: adverse first
+                    elif hit_tp:
+                        leg["out"] = s["tp_pips"]
+                    elif hit_sl:
+                        leg["out"] = -s["sl_pips"]
+                done = s["fade"]["out"] is not None and s["opp"]["out"] is not None
+                if done or s["bars"] >= max_bars:
+                    for leg in (s["fade"], s["opp"]):               # mark unresolved to close
+                        if leg["out"] is None:
+                            leg["out"] = ((cl - e) if leg["long"] else (e - cl)) / pip
+                    mtf = s.get("mtf") if isinstance(s.get("mtf"), dict) else {}
+                    row = {
+                        "type": "wtms", "mt5_symbol": self.mt5_symbol, "sig_epoch": s["sig_epoch"],
+                        "fade_dir": s["fade_dir"], "entry": round(e, 5),
+                        "sr_level": (round(s["sr_level"], 5) if s.get("sr_level") else None),
+                        "level_type": s.get("level_type"), "bars_held": s["bars"],
+                        "sl_pips": s["sl_pips"], "tp_pips": s["tp_pips"],
+                        "fade_pips": round(s["fade"]["out"], 1), "fade_mfe": round(s["fade"]["mfe"], 1),
+                        "fade_mae": round(s["fade"]["mae"], 1),
+                        "withtrend_pips": round(s["opp"]["out"], 1), "withtrend_mfe": round(s["opp"]["mfe"], 1),
+                        "withtrend_mae": round(s["opp"]["mae"], 1),
+                        "mtf_summary": mtf.get("summary"), "mtf_macro_zone": mtf.get("macro_zone"),
+                        "mtf_macro_pos": mtf.get("macro_pos"), "mtf_intraday_pos": mtf.get("intraday_pos"),
+                        "mtf_tfs": mtf.get("tfs"),
+                    }
+                    try:
+                        os.makedirs("reports", exist_ok=True)
+                        with open(self._report_path("wide_tp_mtf_shadow.jsonl"), "a", encoding="utf-8") as f:
+                            f.write(json.dumps(row) + "\n")
+                    except Exception as we:
+                        logger.debug("wtms log failed: %s", we)
+                else:
+                    keep.append(s)
+            self._wtms_setups = keep
+        except Exception as e:
+            logger.debug("wtms shadow failed: %s", e)
 
     def _log_signal(self, event, ws, signal, trade_result, *, impulse_shadow=None, breakout_shadow=None,
                     structure_shadow=None, selectivity_shadow=None, regime_shadow=None, regime_map=None):

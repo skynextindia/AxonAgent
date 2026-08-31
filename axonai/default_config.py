@@ -682,6 +682,18 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "inverse_mirror_lead": "EURUSD",        # the pair whose FILLS trigger the mirror
     "inverse_mirror_follower": "USDJPY",    # the pair that fires the opposite order
 
+    # WIDE-TP MTF-REGIME SHADOW (2026-09-01). On every GATED fade signal, arm a
+    # READ-ONLY virtual wide bracket (SL20/TP100) in BOTH the fade and the opposite
+    # (with-trend) direction, resolve it to ~5-day/weekend horizon on M15 closes, and
+    # log the outcome stamped with the live MTF cross-regime. Feeds the forward
+    # "good-spot" map (research/mtf_regime_switch/) so the wide-TP + MTF-adaptive
+    # redesign can be validated on live ticks BEFORE any execution change. Never
+    # places an order; entry-enabled (LEAD/EURUSD) pair only. Revert: flag False.
+    "wide_tp_mtf_shadow_enabled": True,
+    "wtms_sl_pips": 20.0,
+    "wtms_tp_pips": 100.0,
+    "wtms_max_hold_hours": 120.0,
+
     # DIRECTION FLIP — user-directed 2026-08-21. Inverts every entry (Buy<->Sell) at
     # the decision source. ON RECORD / against the evidence: 3yr backtest shows flipping
     # LOSES (~-1.6p/trade overall, ~-2.9p in the current regime). Live real-money change.
