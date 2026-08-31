@@ -2628,44 +2628,57 @@ class AxonDaemon:
             logger.error("INVERSE MIRROR %s failed: %s", self.mt5_symbol, e, exc_info=True)
 
     def _maybe_engage_sl_lockout(self, reason: str, pips: float = 0.0, profit: float = 0.0) -> None:
-        """Engage the per-pair SL lockout only on a genuine *losing* stop-out.
+        """Accrue realized losses toward the daily-loss cap (or the legacy lockout).
 
-        The exit reason alone is NOT sufficient: a trailing stop that has been
-        moved into profit is still reported by the broker with an "sl" comment,
-        so it gets the same "Stop Loss (SL) Hit" label as a real loss (the
-        classifier only tags "Trailing SL Hit" when the exit sits near
-        breakeven). In practice most "Stop Loss (SL) Hit" exits are actually
-        profitable trailed stops, so keying the lockout on the label alone
-        barred the pair after winning trades. Gate on the actual outcome:
-        price must have moved against the entry (``pips < 0``).
+        Two modes, keyed on ``daily_loss_cap_usd``:
 
-        Trailing/TP/manual closes and any profitable stop do NOT lock out.
+        * CAP mode (cap>0): every *losing* close (``profit < 0``) — SL/Stop-Out,
+          EOD/weekend flat, or manual — accrues to ``self._daily_loss_usd``, and
+          new entries halt only once the day's cumulative loss breaches the cap.
+          Any profitable close (``profit >= 0``) is ignored, so a trailed stop
+          moved into profit — reported by the broker with the same "sl" comment
+          as a real stop — never counts against the pair.
+
+        * LEGACY mode (cap<=0): the pair locks out after a single genuine losing
+          stop-out. Here the exit *reason* alone is not sufficient (the profitable
+          trailed stop wears the same "Stop Loss (SL) Hit" label), so it gates on
+          both the SL/Stop-Out label and ``pips < 0``.
+
         Cleared by ``_check_daily_reset`` when the trading day rolls.
         """
-        if not (reason in ("Stop Loss (SL) Hit", "Stop Out (SO)") and pips < 0):
-            return
-        # DAILY-LOSS-CAP mode (user 2026-08-21): keep trading through single losses;
-        # halt new entries only when the day's cumulative realized loss breaches
-        # daily_loss_cap_usd. Falls back to the legacy one-loss lockout when cap<=0.
         cap = float(self.config.get("daily_loss_cap_usd", 0) or 0)
         if cap > 0:
-            self._daily_loss_usd += min(float(profit), 0.0)   # profit < 0 on a loss
-            if self._daily_loss_usd <= -cap:
-                if not self._sl_locked_out:
-                    logger.info("DAILY LOSS CAP hit for %s: day loss %.2f <= -%.0f; halting new "
-                                "entries until the next trading day", self.mt5_symbol,
+            # DAILY-LOSS-CAP mode (user 2026-08-21): keep trading through single
+            # losses; halt new entries only when the day's cumulative realized loss
+            # breaches daily_loss_cap_usd. Accrue EVERY losing close (profit < 0) —
+            # SL/Stop-Out, EOD/weekend flat, or manual — not just SL-labelled ones,
+            # so a non-SL exit (e.g. the Friday weekend flatten) can't dodge the cap.
+            # A profitable trailed stop has profit > 0 and is correctly ignored.
+            if float(profit) < 0:
+                self._daily_loss_usd += float(profit)
+                if self._daily_loss_usd <= -cap:
+                    if not self._sl_locked_out:
+                        logger.info("DAILY LOSS CAP hit for %s: day loss %.2f <= -%.0f; halting new "
+                                    "entries until the next trading day", self.mt5_symbol,
+                                    self._daily_loss_usd, cap)
+                    self._sl_locked_out = True
+                else:
+                    logger.info("Loss %.2f on %s (%s, day total %.2f / cap -%.0f) — still trading",
+                                float(profit), self.mt5_symbol, reason,
                                 self._daily_loss_usd, cap)
-                self._sl_locked_out = True
-            else:
-                logger.info("Loss %.2f on %s (day total %.2f / cap -%.0f) — still trading",
-                            float(profit), self.mt5_symbol, self._daily_loss_usd, cap)
-        else:
-            if not self._sl_locked_out:
-                logger.info(
-                    "SL lockout ENGAGED for %s (%s, %.1f pips loss); no new entries until the next trading day",
-                    self.mt5_symbol, reason, pips,
-                )
-            self._sl_locked_out = True
+            return
+        # LEGACY one-loss lockout (cap<=0): bar the pair after a single genuine
+        # *losing* stop-out only. The exit reason alone is not sufficient — a
+        # trailed stop moved into profit wears the same "SL" label — so gate on
+        # both the SL/Stop-Out label and pips < 0.
+        if not (reason in ("Stop Loss (SL) Hit", "Stop Out (SO)") and pips < 0):
+            return
+        if not self._sl_locked_out:
+            logger.info(
+                "SL lockout ENGAGED for %s (%s, %.1f pips loss); no new entries until the next trading day",
+                self.mt5_symbol, reason, pips,
+            )
+        self._sl_locked_out = True
 
     def _check_eod_hard_flat(self, now_utc: datetime) -> None:
         """End-of-day handling: entry cutoff, hold, pre-rollover flatten, resume.
