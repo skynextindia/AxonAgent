@@ -666,6 +666,20 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "mtf_location_veto_shadow": True,       # observe-only: log would-block, never block a live order
     "mtf_location_buy_premium_pos": 60.0,   # would-block BUY when intraday_pos >= this (premium)
 
+    # MTF TREND-ALIGNMENT veto (2026-09-01) — PRE-WRITTEN + DISARMED. Blocks a
+    # COUNTER-TREND fade: a BUY while the align-TF (default 1H) trend is DOWN, or a
+    # SELL while it is UP (the pattern behind the 2026-09-01 BUY that faded into a
+    # 1H/1W downtrend and lost). OFF pending forward validation by the wide-TP MTF
+    # shadow (research/mtf_regime_switch/wtms_shadow_report.py) at ~the Sept-21
+    # checkpoint — arm only if counter-trend fades are clearly net-negative across
+    # >=2 regimes with real n (live stamp n is tiny today; arming now would repeat
+    # the buy-premium-veto n=1 mistake). ARM PATH: mtf_align_veto_enabled True (still
+    # shadow-logs via mtf_align_veto_shadow True), then mtf_align_veto_shadow False to
+    # enforce. REVERT: mtf_align_veto_enabled False.
+    "mtf_align_veto_enabled": False,        # DISARMED master (default OFF)
+    "mtf_align_veto_shadow": True,          # when enabled, log-only until explicitly enforced
+    "mtf_align_veto_tf": "1H",              # which MTF trend to align to: 1H / 1D / 1W
+
     # INVERSE USDJPY MIRROR — user 2026-08-29 ("do real, not shadow"). When a EURUSD
     # (lead) entry FILLS, immediately fire the OPPOSITE-direction USDJPY order at the
     # same spot (EURUSD SELL -> USDJPY BUY, the negative EURUSD/USDJPY correlation).

@@ -2639,34 +2639,58 @@ class AxonDaemon:
             return None
 
     def _mtf_location_gate(self, direction: str, mtf_stamp):
-        """Structural LOCATION gate off the live MTF intraday premium/discount zone.
+        """MTF structural entry gate off the live 5Y..5M stamp. Two INDEPENDENT checks,
+        each flag-gated and each with its own shadow/observe sub-mode; entry-only,
+        best-effort — never raises into the entry path. Returns (passed, reason).
 
-        Blocks a BUY at a structural PREMIUM — buying the top of the multi-TF (5Y..5M)
-        range, the location error the short 20xM15 ``_range_extreme_gate`` cannot see
-        (it only ranks the last ~5h). This is the mirror of the validated sell-into-
-        support range gate. Flag-gated (``mtf_location_veto_enabled``), entry-only,
-        best-effort — never raises into the entry path. The SELL side is deliberately
-        NOT vetoed (discount-sells are too noisy on the current sample; the stamp already
-        records intraday_pos for the Sept re-test). Returns (passed, reason)."""
+        (A) LOCATION veto (``mtf_location_veto_enabled``, currently SHADOW): blocks a
+            BUY at a structural PREMIUM (top of the multi-TF range) the short 20xM15
+            ``_range_extreme_gate`` cannot see. Backtest showed the live block removed
+            winners, so it observes on forward data before arming.
+
+        (B) TREND-ALIGNMENT veto (``mtf_align_veto_enabled``, currently DISARMED):
+            blocks a COUNTER-TREND fade — a BUY while the align-TF trend is DOWN, or a
+            SELL while it is UP (e.g. the 2026-09-01 BUY faded into a 1H/1W downtrend
+            and lost). Pre-written but OFF pending the wide-TP MTF shadow's forward
+            good-spot validation (~Sept-21): arm only if counter-trend fades are
+            clearly negative across >=2 regimes with real n. Arm path: set
+            ``mtf_align_veto_enabled`` True (starts in shadow via ``mtf_align_veto_shadow``
+            True -> logs would-block), then ``mtf_align_veto_shadow`` False to enforce."""
         try:
-            if not self.config.get("mtf_location_veto_enabled", False):
-                return True, ""
             if not mtf_stamp:
                 return True, ""          # no structural read -> don't block
-            pos = float(mtf_stamp.get("intraday_pos", 50.0))
-            zone = mtf_stamp.get("intraday_zone", "equilibrium")
-            thr = float(self.config.get("mtf_location_buy_premium_pos", 60.0))
-            if direction == "BUY" and pos >= thr:
-                reason = (f"MTF location: BUY at intraday {zone} ({pos:.0f}% of the "
-                          f"multi-TF range) — buying the structural top")
-                # SHADOW mode (default): log the would-block but do NOT block a live order.
-                # The backtest showed the live block removed winners; observe on forward,
-                # multi-regime data before arming it (and re-check which SIDE to block).
-                if self.config.get("mtf_location_veto_shadow", True):
-                    logger.info("MTF LOCATION SHADOW %s: would-block %s — allowed (observe): %s",
-                                self.mt5_symbol, direction, reason)
-                    return True, ""
-                return False, reason
+
+            # (A) premium/discount LOCATION veto (BUY side).
+            if self.config.get("mtf_location_veto_enabled", False):
+                pos = float(mtf_stamp.get("intraday_pos", 50.0))
+                zone = mtf_stamp.get("intraday_zone", "equilibrium")
+                thr = float(self.config.get("mtf_location_buy_premium_pos", 60.0))
+                if direction == "BUY" and pos >= thr:
+                    reason = (f"MTF location: BUY at intraday {zone} ({pos:.0f}% of the "
+                              f"multi-TF range) - buying the structural top")
+                    if self.config.get("mtf_location_veto_shadow", True):
+                        logger.info("MTF LOCATION SHADOW %s: would-block %s - allowed (observe): %s",
+                                    self.mt5_symbol, direction, reason)
+                    else:
+                        return False, reason
+
+            # (B) TREND-ALIGNMENT veto (DISARMED by default): block a counter-trend fade.
+            if self.config.get("mtf_align_veto_enabled", False):
+                tf = str(self.config.get("mtf_align_veto_tf", "1H"))
+                tfs = mtf_stamp.get("tfs", {}) or {}
+                v = tfs.get(tf)
+                state = str(v[0]).upper() if isinstance(v, (list, tuple)) and v else None
+                counter = ((direction == "BUY" and state == "DOWN")
+                           or (direction == "SELL" and state == "UP"))
+                if counter:
+                    reason = (f"MTF align: {direction} against {tf} trend {state} "
+                              f"(counter-trend fade)")
+                    if self.config.get("mtf_align_veto_shadow", True):
+                        logger.info("MTF ALIGN SHADOW %s: would-block %s - allowed (observe): %s",
+                                    self.mt5_symbol, direction, reason)
+                    else:
+                        return False, reason
+
             return True, ""
         except Exception as e:
             logger.debug("mtf location gate failed: %s", e)
