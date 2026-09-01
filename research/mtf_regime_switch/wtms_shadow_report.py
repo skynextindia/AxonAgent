@@ -92,6 +92,23 @@ def main() -> int:
     rally = [r["fade_pips"] for r in rows if htf_state(r) == "DOWN" and r["fade_dir"] == "Sell"]
     summ("  of which: SELL rallies in downtrend", rally)
 
+    print("\n== ARM-CANDIDATE: 'block counter-trend fades' (1H alignment gate) ==")
+    def onehr(r):
+        tfs = r.get("mtf_tfs") or {}
+        v = tfs.get("1H")
+        return str(v[0]).upper() if isinstance(v, (list, tuple)) and v else "?"
+    # counter-trend = BUY (fade of a low) while 1H DOWN, or SELL (fade of a high) while 1H UP.
+    ct = [r["fade_pips"] for r in rows
+          if (r["fade_dir"] == "Buy" and onehr(r) == "DOWN") or (r["fade_dir"] == "Sell" and onehr(r) == "UP")]
+    wt = [r["fade_pips"] for r in rows
+          if (r["fade_dir"] == "Buy" and onehr(r) == "UP") or (r["fade_dir"] == "Sell" and onehr(r) == "DOWN")]
+    rg = [r["fade_pips"] for r in rows if onehr(r) == "RANGE"]
+    summ("COUNTER-TREND fades (the would-BLOCK set)", ct)
+    summ("with-trend fades", wt)
+    summ("range fades", rg)
+    print("  -> ARM the block only if COUNTER-TREND fades are clearly negative across >=2")
+    print("     regimes AND n is real (>=~30). Live stamp n is tiny today; let it accrue.")
+
     print("\nNOTE: compare to the backtest (research/mtf_regime_switch/mtf_cross_regime_spots.py):")
     print("GOOD-SPOTS was +1.11p @limit(1.2). Decide at the checkpoint on n>=60 across >=2 regimes.")
     return 0
