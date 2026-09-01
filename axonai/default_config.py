@@ -845,9 +845,16 @@ SYMBOL_CALIBRATION = {
         "direction_aware_sr": True,     # EURUSD reverts off structure — fade only OFF a
                                         # correct-side level, never INTO one. 249-trade study:
                                         # +$741 / PF 1.25->2.03 / drawdown halved.
-        "structure_veto_enabled": True, # ARMED 2026-08-12 at user direction (both pairs). Skips
-                                        # an against-structure fade (fights the higher-TF trend).
-                                        # Bounded (only skips); thin evidence — watch trade count.
+        "structure_veto_enabled": False, # DISARMED 2026-09-01 — re-check on 2.4y/10-quarter MT5
+                                        # M15 (research/mtf_regime_switch) found it BACKWARDS on
+                                        # EURUSD: against-structure fades are the BEST bucket
+                                        # (scalp -1.39p vs with_structure -3.30p; wide +0.35p/7-of-10q
+                                        # vs -0.60p), so skipping them REMOVED winners and worsened
+                                        # both brackets (scalp -1.77->-1.97, wide +0.21->+0.13).
+                                        # EURUSD mean-reverts: fading AGAINST the recent push (the
+                                        # reversion) works; fading WITH structure loses. Was armed
+                                        # 2026-08-12 on 1 thin row with a "disarm if over-restricts"
+                                        # caveat — this is that evidence. Re-arm only with forward proof.
         "structure_veto_require_h1_trend": False, # DROPPED 2026-08-14 (user, EURUSD-only). The H1 gate held
                                         # the veto off when H1 read "sideways" — but 2026-08-14's opposite
                                         # EURUSD sells were flagged against_structure on M15 while H1 still
