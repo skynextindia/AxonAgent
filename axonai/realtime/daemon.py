@@ -2766,6 +2766,46 @@ class AxonDaemon:
         except Exception as e:
             logger.error("INVERSE MIRROR %s failed: %s", self.mt5_symbol, e, exc_info=True)
 
+    def _close_follower_inverse(self, reason: str) -> None:
+        """Lead-side dispatch: when THIS lead pair's leg closes, tell the follower to
+        close its mirror leg WITH it (coupled exit). Best-effort; never raises."""
+        try:
+            follower = self.config.get("inverse_mirror_follower", "USDJPY")
+            for d in self.supervisor.daemons.values():
+                if d is self:
+                    continue
+                if follower in (getattr(d, "mt5_symbol", "") or ""):
+                    d.close_inverse_mirror(reason)
+                    return
+        except Exception as e:
+            logger.error("INVERSE MIRROR close dispatch failed: %s", e, exc_info=True)
+
+    def close_inverse_mirror(self, reason: str) -> None:
+        """Follower-side: market-close THIS pair's open inverse-mirror leg, triggered
+        when the lead pair's leg closes — so the mirror opens AND closes with the lead,
+        never alone (``mirror_coupled_exit_enabled``). The follower runs entries-off, so
+        every open position here is a mirror leg; we also match the explicit
+        ``inverse_mirror`` system tag. No-op if flat. Best-effort — never raises."""
+        try:
+            if not self.config.get("inverse_mirror_enabled", False):
+                return
+            if not self.config.get("mirror_coupled_exit_enabled", True):
+                return
+            positions = mt5.positions_get(symbol=self.mt5_symbol)
+            if not positions:
+                return
+            entries_off = not self.config.get("entries_enabled", True)
+            for pos in positions:
+                is_mirror = (self._active_trade_system.get(pos.ticket) == "inverse_mirror"
+                             or entries_off)
+                if not is_mirror:
+                    continue
+                if self._close_position(pos, ("coupled-close: " + reason)[:31]):
+                    logger.info("INVERSE MIRROR %s: closed leg ticket=%s WITH lead — %s",
+                                self.mt5_symbol, pos.ticket, reason)
+        except Exception as e:
+            logger.error("INVERSE MIRROR %s coupled-close failed: %s", self.mt5_symbol, e, exc_info=True)
+
     def _maybe_engage_sl_lockout(self, reason: str, pips: float = 0.0, profit: float = 0.0) -> None:
         """Accrue realized losses toward the daily-loss cap (or the legacy lockout).
 
@@ -4163,6 +4203,23 @@ class AxonDaemon:
             if initial_sl <= 0.0:
                 continue
 
+            # Coupled mirror leg (user 2026-09-02): the USDJPY mirror leg gets NO
+            # independent breakeven/trail — it rides its fixed hard +/-30p bracket until
+            # the lead (EURUSD) closes it (mirror_coupled_exit). Keep peak/worst updated
+            # so the hold-for-profit shadow keeps measuring, then SKIP every SL modify
+            # (and the no-progress abort) for this ticket. Hard SL/TP stay as the floor.
+            if (self.config.get("mirror_coupled_exit_enabled", True)
+                    and self._active_trade_system.get(ticket) == "inverse_mirror"):
+                if pos.type == mt5.POSITION_TYPE_BUY:
+                    self._active_trade_peak_price[ticket] = max(self._active_trade_peak_price[ticket], bid)
+                    self._active_trade_worst_price[ticket] = min(
+                        self._active_trade_worst_price.get(ticket, pos.price_open), bid)
+                else:
+                    self._active_trade_peak_price[ticket] = min(self._active_trade_peak_price[ticket], ask)
+                    self._active_trade_worst_price[ticket] = max(
+                        self._active_trade_worst_price.get(ticket, pos.price_open), ask)
+                continue
+
             # No-progress abort (default OFF): scratch a position that has not
             # reached the minimum favorable excursion within the time window.
             # Runs before the trail logic so a dead trade is cut, not trailed.
@@ -4607,7 +4664,15 @@ class AxonDaemon:
         
         for ticket in closed_tickets:
             logger.info("AxonDaemon: Detected closed position for ticket %d", ticket)
-            
+
+            # Coupled mirror exit: if THIS is the lead (EURUSD) pair, close the USDJPY
+            # mirror leg WITH the lead so the pair opens and closes together (never
+            # leaves USDJPY running alone). Fires on any lead close reason (SL/TP/trail/
+            # manual). No-op when single-pair or the coupling flag is off.
+            if (self._is_inverse_mirror_lead()
+                    and self.config.get("mirror_coupled_exit_enabled", True)):
+                self._close_follower_inverse("lead %s ticket %d closed" % (self.mt5_symbol, ticket))
+
             # Fetch deal history for this ticket
             deals = mt5.history_deals_get(position=ticket)
             

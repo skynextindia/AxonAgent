@@ -701,6 +701,16 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "inverse_mirror_enabled": True,
     "inverse_mirror_lead": "EURUSD",        # the pair whose FILLS trigger the mirror
     "inverse_mirror_follower": "USDJPY",    # the pair that fires the opposite order
+    # COUPLED MIRROR EXIT (user 2026-09-02: "usdjpy opens and closes with EURUSD, not
+    # alone; no additional USDJPY trail close"). When True the follower (USDJPY) mirror
+    # leg is bound to the lead's LIFETIME: (1) it gets NO independent breakeven/trail
+    # modify — it rides its fixed hard +/-30p bracket (the disaster floor) instead of
+    # scratching at breakeven early; (2) when the lead (EURUSD) leg closes for ANY
+    # reason, the mirror leg is market-closed WITH it. So the pair opens together and
+    # closes together. USDJPY's own hard SL/TP still applies as a safety floor. The
+    # hold-for-profit shadow keeps measuring (peak still tracked). Reversible; only acts
+    # when inverse_mirror is live (multi-pair). Activates on next flat restart.
+    "mirror_coupled_exit_enabled": True,
 
     # WIDE-TP MTF-REGIME SHADOW (2026-09-01). On every GATED fade signal, arm a
     # READ-ONLY virtual wide bracket (SL20/TP100) in BOTH the fade and the opposite
