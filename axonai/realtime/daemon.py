@@ -106,6 +106,7 @@ class AxonDaemon:
         self._stage_arm: dict[int, dict] = {}  # probe ticket -> staged-entry add state (confirmation-by-degree)
         self._mfe_exit_shadow: dict[int, dict] = {}  # ticket -> MFE early-exit shadow state (first-fire snapshot)
         self._exit_shadow: dict[int, dict] = {}  # ticket -> alt-trail exit-capture shadow (first shadow-stop hit)
+        self._holdprofit_shadow: dict[int, dict] = {}  # ticket -> USDJPY hold-for-profit counterfactual (first B-stop hit)
         self._active_trade_sr_level: dict[int, float] = {}  # ticket -> faded S/R level @ entry (shadow-cut observer)
         self._shadow_cut = None  # lazily-built ShadowCutTracker (research/, lead-only, flag-gated OFF)
         self._brk_setups: list = []  # active break-and-retest continuation-shadow state machines
@@ -3628,6 +3629,70 @@ class AxonDaemon:
             logger.error("Exit-capture shadow update failed for ticket %s: %s",
                          getattr(pos, "ticket", "?"), e)
 
+    def _update_holdprofit_shadow(self, pos, bid: float, ask: float, pip: float) -> None:
+        """USDJPY hold-for-profit counterfactual (READ-ONLY forward validator).
+
+        The A/B sim (research/usdjpy_holdprofit_ab) said arming hold_for_profit for
+        USDJPY is NO-GO, but the sim could not reproduce live policy-A (structure-trail
+        + costs unmodeled). This measures the SAME question on live fills, apples-to-
+        apples: for each real USDJPY leg (all mirror legs, since entries are off) it
+        tracks where a hold_for_profit exit — breakeven OFF, ATR trail arming LATER at
+        hold_trail_trigger_atr_mult (1.0) and trailing WIDER at hold_trail_dist_atr_mult
+        (0.6) behind the SAME peak — WOULD have exited, against the hard +/-30p bracket.
+        The real close (policy A, with its breakeven scratch + structure-trail) is the
+        control. Pure observation — never touches the live SL. Logged at close to
+        reports/usdjpy_holdprofit_shadow.jsonl. Arm hold_for_profit only if B beats A
+        forward across >=2 regimes; today's read is that the early scratch is protective.
+        """
+        if not self.config.get("holdprofit_shadow_enabled", True):
+            return
+        if "JPY" not in self.mt5_symbol.upper():
+            return  # USDJPY-only (the leg that lacks hold_for_profit)
+        ticket = pos.ticket
+        stt = self._holdprofit_shadow.get(ticket)
+        if stt is None:
+            stt = self._holdprofit_shadow[ticket] = {"b_sl": None, "hit": False}
+        if stt.get("hit"):
+            return  # B already resolved; nothing more to record
+        try:
+            atr = self._active_trade_atr.get(ticket)
+            peak = self._active_trade_peak_price.get(ticket)
+            if not atr or peak is None:
+                return
+            entry = pos.price_open
+            is_buy = pos.type == mt5.POSITION_TYPE_BUY
+            hard = float(self.config.get("realtime_hard_stop_pips") or 30.0)
+            arm = float(self.config.get("hold_trail_trigger_atr_mult", 1.0)) * atr
+            trail = float(self.config.get("hold_trail_dist_atr_mult", 0.6)) * atr
+            if stt["b_sl"] is None:                                 # init at the hard stop
+                stt["b_sl"] = entry - hard * pip if is_buy else entry + hard * pip
+            hard_tp = entry + hard * pip if is_buy else entry - hard * pip
+            if is_buy:
+                peak_profit = peak - entry
+                if peak_profit >= arm:                             # late, wide ATR trail (no BE)
+                    t_sl = peak - trail
+                    if t_sl > stt["b_sl"]:
+                        stt["b_sl"] = t_sl
+                if bid <= stt["b_sl"]:                             # adverse-first: stop before TP
+                    _r = "HARD_SL" if abs(stt["b_sl"] - (entry - hard * pip)) < 1e-9 else "TRAIL"
+                    stt.update(hit=True, pips=round((stt["b_sl"] - entry) / pip, 1), reason=_r)
+                elif bid >= hard_tp:
+                    stt.update(hit=True, pips=round(hard, 1), reason="HARD_TP")
+            else:
+                peak_profit = entry - peak
+                if peak_profit >= arm:
+                    t_sl = peak + trail
+                    if t_sl < stt["b_sl"]:
+                        stt["b_sl"] = t_sl
+                if ask >= stt["b_sl"]:
+                    _r = "HARD_SL" if abs(stt["b_sl"] - (entry + hard * pip)) < 1e-9 else "TRAIL"
+                    stt.update(hit=True, pips=round((entry - stt["b_sl"]) / pip, 1), reason=_r)
+                elif ask <= hard_tp:
+                    stt.update(hit=True, pips=round(hard, 1), reason="HARD_TP")
+        except Exception as e:
+            logger.debug("hold-for-profit shadow update failed for ticket %s: %s",
+                         getattr(pos, "ticket", "?"), e)
+
     def _compute_zigzag(self, R: float, pip: float):
         """M5 swing zigzag over the last N bars, cached ~per minute. R = reversal
         threshold in PRICE. Returns {last_high, last_low, dir, ext} (the most recent
@@ -4067,6 +4132,9 @@ class AxonDaemon:
             self._update_mfe_exit_shadow(pos, bid, ask, pip)
             # Exit-capture shadow (records where a TIGHTER trail WOULD exit).
             self._update_exit_capture_shadow(pos, bid, ask, pip)
+            # USDJPY hold-for-profit shadow (records where a breakeven-OFF wide/late
+            # trail WOULD exit; USDJPY-only, forward A/B for arming hold_for_profit).
+            self._update_holdprofit_shadow(pos, bid, ask, pip)
             # Shadow "level broke -> cut" observer (lead-only; logs would-cut, never
             # touches the position). Inert unless shadow_cut_enabled; lazily built.
             if not self._exec_node and self.config.get("shadow_cut_enabled", False):
@@ -4666,6 +4734,27 @@ class AxonDaemon:
                        "hit": bool(_es.get("gb_hit"))}
                 _exit_cap = {"actual_pips": round(pips, 1), "mfe_pips": _mfe_r,
                              "fixed_tp": _fixed_tp, "alt_trail": _alt_trail, "giveback": _gb}
+                # USDJPY hold-for-profit shadow: what a breakeven-OFF wide/late trail
+                # (policy B) WOULD have realised vs the actual scratch-prone default
+                # (policy A = this close). null-hit -> B never tripped in-window, so it
+                # equals the actual. Written to its own file for the forward A/B reader.
+                _hp = self._holdprofit_shadow.get(ticket, {})
+                _b_pips = _hp.get("pips") if _hp.get("hit") else round(pips, 1)
+                _holdprofit = {"a_pips": round(pips, 1), "b_pips": _b_pips,
+                               "b_reason": _hp.get("reason") if _hp.get("hit") else "ACTUAL",
+                               "delta_b_minus_a": round(_b_pips - pips, 1)}
+                if "JPY" in self.mt5_symbol.upper():
+                    try:
+                        _hp_row = {"type": "holdprofit", "timestamp_utc":
+                                   datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                   "symbol": self.mt5_symbol, "ticket": ticket, "direction": direction,
+                                   "entry": entry_price, "atr": self._active_trade_atr.get(ticket),
+                                   "mfe_pips": round(_mfe, 1), "mae_pips": round(_mae, 1),
+                                   "hold_seconds": _hold_seconds, **_holdprofit}
+                        with open(self._report_path("usdjpy_holdprofit_shadow.jsonl"), "a", encoding="utf-8") as f:
+                            f.write(json.dumps(_hp_row) + "\n")
+                    except Exception as _hpe:
+                        logger.debug("hold-for-profit shadow log failed: %s", _hpe)
                 payload = {
                     "timestamp": exit_time_str,
                     "timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -4686,6 +4775,7 @@ class AxonDaemon:
                     "retest_delay_sec": _rt.get("delay"),
                     "mfe_exit_shadow": _mx,
                     "exit_capture_shadow": _exit_cap,
+                    "holdprofit_shadow": _holdprofit,
                     "reason": reason,
                     "outcome": outcome
                 }
@@ -4732,6 +4822,7 @@ class AxonDaemon:
             self._stage_arm.pop(ticket, None)
             self._mfe_exit_shadow.pop(ticket, None)
             self._exit_shadow.pop(ticket, None)
+            self._holdprofit_shadow.pop(ticket, None)
             self._active_trade_entry_time.pop(ticket, None)
             
             # Apply post-trade global cooldown to prevent immediate reversal trades

@@ -373,6 +373,12 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "hold_be_atr_mult": 0.0,                # breakeven: 0.0 = DISABLED (guarded, not BE-at-0)
     "hold_trail_trigger_atr_mult": 1.0,     # trail ARMS later than the default 0.50
     "hold_trail_dist_atr_mult": 0.6,        # trail trails WIDER than the default 0.35
+    # USDJPY hold-for-profit forward shadow (READ-ONLY): logs where policy B (breakeven-
+    # OFF wide/late trail, the hold_* params above) WOULD exit each real USDJPY leg vs
+    # the actual scratch-prone default, to reports/usdjpy_holdprofit_shadow.jsonl. Never
+    # trades. USDJPY-only (gated in _update_holdprofit_shadow). The forward A/B for the
+    # NO-GO sim verdict (research/usdjpy_holdprofit_ab). Reader: holdprofit_shadow_report.
+    "holdprofit_shadow_enabled": True,
     # ── Direction-aware S/R selection (reject wrong-side fades) ────────────────
     # When True, the peak gate only considers S/R levels in the trade's PROFIT
     # direction (resistance at/above for SELL, support at/below for BUY) — it
