@@ -846,13 +846,13 @@ SYMBOL_CALIBRATION = {
                                      # FLOAT the lot to 1.1% risk, instead of shrinking the stop to fit
                                      # a fixed 1.0 lot. Lead sizes via --risk-pct 1.1 (0.55 lot x 20p x
                                      # $10 = $110 = 1.1% of 10k); node via --max-loss-usd 1100 (5.5 lot).
-        "fixed_tp_pips": 3.0,        # STAGED 2026-09-03 (user "stage the fixed-TP=3p change"). TARGET
-                                     # at +3p while SL stays 20p (asymmetric). On 55 recorded EURUSD
-                                     # closes (tick-level MFE) a +3p TP nearly HALVES the trail's bleed
-                                     # (-3.50 -> -1.79 gross pips/trade, win 49%->65%) by booking the
-                                     # small pop before the -20 reversal. STILL net-negative (-2.79p at
-                                     # ~1p cost) = harm reduction, NOT a cure (the real fix is the wide-TP
-                                     # regime redesign). Risk unchanged (sized off the 20p SL). Revert: None.
+        "fixed_tp_pips": None,       # FROZEN OFF 2026-09-03 (user "freeze changes and drive the redesign").
+                                     # The +3p TP was measured as harm-reduction only (-3.50 -> -1.79 gross
+                                     # pips/trade) but STILL net-negative, and the Aug-17 verdict already said
+                                     # no exit tweak rescues EURUSD. So it stays DISABLED (won't activate on a
+                                     # restart); the infra (executor override + resolver) is kept dormant.
+                                     # Re-enable = set 3.0 only if we ever choose the stopgap. The real fix is
+                                     # the wide-TP regime redesign, not this. See [[eurusd-mfe-giveback]].
         # No hard_trail_pips → the trail uses the adaptive trail_dist_atr_mult × ATR.
         "sl_atr_mult": 2.0,
         "tp_atr_mult": 2.0,
