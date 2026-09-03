@@ -736,6 +736,16 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "wtms_sl_pips": 20.0,
     "wtms_tp_pips": 100.0,
     "wtms_max_hold_hours": 120.0,
+    # GOOD-SPOT SELECTOR SHADOW (redesign step 2, 2026-09-03). READ-ONLY: stamps the
+    # selector verdict (take/skip/flip) on every wtms setup via the SAME pure function
+    # (research/mtf_regime_switch/good_spot.py) the live gate will later call, so the
+    # reader scores selection against the wide-TP outcome. Never gates a live trade.
+    # goodspot_htf_key = which stamp TF sets the regime (net/range trend from step 1);
+    # goodspot_flip_counter_trend False = SKIP counter-trend fades (True = flip to
+    # with-trend). Arm live only after the checkpoint validates. Revert: enabled False.
+    "goodspot_shadow_enabled": True,
+    "goodspot_htf_key": "1D",
+    "goodspot_flip_counter_trend": False,
 
     # DIRECTION FLIP — user-directed 2026-08-21. Inverts every entry (Buy<->Sell) at
     # the decision source. ON RECORD / against the evidence: 3yr backtest shows flipping

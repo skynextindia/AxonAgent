@@ -2395,12 +2395,25 @@ class AxonDaemon:
             o_sl, o_tp = levels(not fade_long)
             det = details if isinstance(details, dict) else {}
             lvl = det.get("sr_level_price")
+            # Good-spot selector verdict (redesign step 2, READ-ONLY): the SAME pure
+            # function the live gate will eventually call, stamped here so the reader can
+            # score take/skip/flip against this setup's wide-TP outcome. Never gates.
+            gs = None
+            if self.config.get("goodspot_shadow_enabled", True):
+                try:
+                    from research.mtf_regime_switch.good_spot import good_spot_decision
+                    gs = good_spot_decision(
+                        "Buy" if fade_long else "Sell", det.get("mtf_position"),
+                        htf_key=str(self.config.get("goodspot_htf_key", "1D")),
+                        flip_counter_trend=bool(self.config.get("goodspot_flip_counter_trend", False)))
+                except Exception as _gse:
+                    logger.debug("goodspot decision failed: %s", _gse)
             self._wtms_setups.append({
                 "sig_epoch": int(datetime.now(timezone.utc).timestamp()),
                 "fade_dir": "Buy" if fade_long else "Sell", "entry": float(entry),
                 "pip": pip, "bars": 0, "sl_pips": sl_p, "tp_pips": tp_p,
                 "sr_level": (float(lvl) if lvl else None), "level_type": det.get("sr_level_type"),
-                "mtf": det.get("mtf_position"),
+                "mtf": det.get("mtf_position"), "goodspot": gs,
                 "fade": {"long": fade_long, "sl": f_sl, "tp": f_tp, "mfe": 0.0, "mae": 0.0, "out": None},
                 "opp": {"long": not fade_long, "sl": o_sl, "tp": o_tp, "mfe": 0.0, "mae": 0.0, "out": None},
             })
@@ -2459,6 +2472,8 @@ class AxonDaemon:
                         "mtf_summary": mtf.get("summary"), "mtf_macro_zone": mtf.get("macro_zone"),
                         "mtf_macro_pos": mtf.get("macro_pos"), "mtf_intraday_pos": mtf.get("intraday_pos"),
                         "mtf_tfs": mtf.get("tfs"),
+                        "trend_measure": mtf.get("trend_measure"),
+                        "goodspot": s.get("goodspot"),   # selector verdict (take/skip/flip) at arm time
                     }
                     try:
                         os.makedirs("reports", exist_ok=True)

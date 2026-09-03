@@ -92,6 +92,31 @@ def main() -> int:
     rally = [r["fade_pips"] for r in rows if htf_state(r) == "DOWN" and r["fade_dir"] == "Sell"]
     summ("  of which: SELL rallies in downtrend", rally)
 
+    print("\n== SELECTOR verdict (logged good_spot decision, step 2) vs blind fade ==")
+    # Score the SAME pure function the live gate will call: a 'take' books the fade, a
+    # 'flip' books the with-trend leg, a 'skip' is avoided. Only rows armed after the
+    # step-2 shadow went live carry a "goodspot" verdict.
+    logged = [r for r in rows if isinstance(r.get("goodspot"), dict)]
+    if not logged:
+        print("  (no logged goodspot verdicts yet — needs a post-restart run of the step-2")
+        print("   shadow; existing rows predate it. Falls back to the regime rebuild above.)")
+    else:
+        sel = []
+        acts = defaultdict(list)
+        for r in logged:
+            act = (r["goodspot"] or {}).get("action")
+            if act == "take":
+                sel.append(r["fade_pips"]); acts["take"].append(r["fade_pips"])
+            elif act == "flip":
+                sel.append(r["withtrend_pips"]); acts["flip(withtrend)"].append(r["withtrend_pips"])
+            elif act == "skip":
+                acts["skip (avoided fade)"].append(r["fade_pips"])
+        summ("SELECTOR net (take+flip)", sel)
+        summ("ALWAYS FADE (same rows)", [r["fade_pips"] for r in logged])
+        for a in ("take", "flip(withtrend)", "skip (avoided fade)"):
+            if acts.get(a):
+                summ("  " + a, acts[a])
+
     print("\n== ARM-CANDIDATE: 'block counter-trend fades' (1H alignment gate) ==")
     def onehr(r):
         tfs = r.get("mtf_tfs") or {}
