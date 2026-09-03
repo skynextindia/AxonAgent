@@ -18,6 +18,10 @@ from dataclasses import dataclass, field, asdict
 from typing import Dict, List, Optional, Any
 
 ER_TREND_THRESHOLD = 0.30   # ER >= this + directional net => trending, else range
+NR_TREND_THRESHOLD = 0.50   # |net move| / range >= this => trending. Bounded [-1,1], does
+                            # NOT collapse on long windows the way ER does (a multi-year
+                            # path is never "efficient" so ER forced ~everything to RANGE).
+                            # This is the measure the good-spot backtest used.
 
 
 @dataclass
@@ -30,6 +34,7 @@ class TFStructure:
     range_lo: float
     position_pct: float        # 0..100, where current price sits in the range
     bars: int
+    net_range: float = 0.0     # net move / (hi-lo), in [-1,1] (the primary trend measure)
 
     @property
     def position_label(self) -> str:
@@ -48,26 +53,48 @@ class TFStructure:
 
 def classify_tf(name: str, highs: List[float], lows: List[float],
                 closes: List[float], cur: float, pip: float,
-                bars: int, er_threshold: float = ER_TREND_THRESHOLD
+                bars: int, er_threshold: float = ER_TREND_THRESHOLD,
+                measure: str = "net_range", nr_threshold: float = NR_TREND_THRESHOLD
                 ) -> Optional[TFStructure]:
-    """Classify one timeframe window (the last `bars` bars). None if too short."""
+    """Classify one timeframe window (the last `bars` bars). None if too short.
+
+    Both trend measures are always computed and returned; ``measure`` picks which one
+    sets the ``trend`` label:
+      * "net_range" (DEFAULT, 2026-09-03): net move / (hi-lo), bounded [-1,1]. Trending
+        when |net_range| >= nr_threshold (0.50). Does NOT collapse on long windows —
+        the ER measure classified 8/9 live TFs as RANGE even with large net drifts. This
+        matches the good-spot backtest that showed the +1.11p edge.
+      * "efficiency_ratio": the legacy Kaufman ER >= er_threshold + net sign (kept for
+        A/B; efficiency_ratio is still logged either way).
+    """
     if bars < 2 or len(closes) < bars:
         return None
     c = closes[-bars:]; h = highs[-bars:]; l = lows[-bars:]
     net = (c[-1] - c[0]) / pip
     hi = max(h); lo = min(l)
+    rng = hi - lo
     path = sum(abs(c[k] - c[k - 1]) for k in range(1, len(c)))
     er = abs(c[-1] - c[0]) / path if path > 0 else 0.0
-    if er >= er_threshold and net > 0:
-        trend = "UP"
-    elif er >= er_threshold and net < 0:
-        trend = "DOWN"
-    else:
-        trend = "RANGE"
-    pos = (cur - lo) / (hi - lo) * 100 if hi > lo else 50.0
+    nr = (c[-1] - c[0]) / rng if rng > 0 else 0.0      # net / range, in [-1, 1]
+    if measure == "efficiency_ratio":
+        if er >= er_threshold and net > 0:
+            trend = "UP"
+        elif er >= er_threshold and net < 0:
+            trend = "DOWN"
+        else:
+            trend = "RANGE"
+    else:                                              # net_range (default)
+        if nr >= nr_threshold:
+            trend = "UP"
+        elif nr <= -nr_threshold:
+            trend = "DOWN"
+        else:
+            trend = "RANGE"
+    pos = (cur - lo) / rng * 100 if rng > 0 else 50.0
     return TFStructure(name=name, trend=trend, net_pips=round(net, 1),
                        efficiency_ratio=round(er, 3), range_hi=round(hi, 5),
-                       range_lo=round(lo, 5), position_pct=round(pos, 1), bars=bars)
+                       range_lo=round(lo, 5), position_pct=round(pos, 1), bars=bars,
+                       net_range=round(nr, 3))
 
 
 @dataclass

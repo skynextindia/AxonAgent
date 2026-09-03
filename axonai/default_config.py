@@ -652,6 +652,14 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # its 5Y..5M trend + premium/discount position (event_details.mtf_position), for
     # per-trade structural analysis. Read-only telemetry; ~60s cached; never blocks entry.
     "mtf_stamp_enabled": True,
+    # MTF trend measure (redesign step 1, 2026-09-03): "net_range" = net move / (hi-lo),
+    # bounded [-1,1], the measure the good-spot backtest used. Replaces the legacy
+    # "efficiency_ratio" (ER >= 0.30) that collapsed on long windows (a multi-year path
+    # is never "efficient" so ER forced 8/9 live TFs to RANGE, hiding real drifts). This
+    # only relabels the telemetry/shadow trend — it does NOT gate any live trade. Both
+    # measures are logged per-TF. Revert: "efficiency_ratio".
+    "mtf_trend_measure": "net_range",
+    "mtf_trend_nr_threshold": 0.50,     # |net/range| >= this => trending, else RANGE
 
     # MTF STRUCTURAL LOCATION VETO — 2026-08-29. Uses the live mtf_stamp intraday
     # premium/discount zone (a MULTI-TF range position the 20xM15 range_extreme_gate

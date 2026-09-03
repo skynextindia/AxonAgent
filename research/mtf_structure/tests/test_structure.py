@@ -23,10 +23,29 @@ def test_downtrend_classified_down():
 
 
 def test_choppy_is_range():
-    # oscillating series: net ~0, low ER -> RANGE
-    c = [1.10 + (0.005 if i % 2 else -0.005) for i in range(40)]
-    tf = classify_tf("T", c, c, c, c[-1], PIP, bars=40)
-    assert tf.trend == "RANGE"
+    # ROUND-TRIP (up then back): net ~0 relative to the range -> RANGE under BOTH the
+    # net_range default and legacy ER. (A pure alternation that ENDS at an extreme has
+    # |net/range|=1 and net_range calls it a trend — endpoint-sensitive by design; the
+    # good-spot backtest accepts that, so the range case must be a genuine round trip.)
+    up = [1.10 + 0.0005 * i for i in range(20)]          # 1.1000 -> 1.1095
+    down = [1.1095 - 0.0005 * i for i in range(20)]      # 1.1095 -> 1.1000
+    c = up + down
+    tf = classify_tf("T", c, c, c, c[-1], PIP, bars=40)  # default measure = net_range
+    assert tf.trend == "RANGE", tf.trend
+    assert abs(tf.net_range) < 0.5
+    tf_er = classify_tf("T", c, c, c, c[-1], PIP, bars=40, measure="efficiency_ratio")
+    assert tf_er.trend == "RANGE"
+
+
+def test_measure_switch_net_range_vs_er():
+    # A steady drift that is directional but NOT ER-efficient (net/range high, ER low-ish):
+    # net_range should call it a trend while both measures still populate the fields.
+    c = [1.10 + 0.0004 * i + (0.0003 if i % 2 else -0.0003) for i in range(30)]  # up with jitter
+    nr = classify_tf("T", c, c, c, c[-1], PIP, bars=30, measure="net_range")
+    er = classify_tf("T", c, c, c, c[-1], PIP, bars=30, measure="efficiency_ratio")
+    assert nr.trend == "UP" and nr.net_range >= 0.5          # net/range catches the drift
+    assert nr.efficiency_ratio == er.efficiency_ratio        # both measures always computed
+    assert -1.0 <= nr.net_range <= 1.0
 
 
 def test_position_pct_bounds():

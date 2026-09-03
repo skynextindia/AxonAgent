@@ -2616,12 +2616,17 @@ class AxonDaemon:
             cur = base[2][-1]
             plan = [("5Y", d, 1260), ("1Y", d, 252), ("3M", d, 63), ("1M", d, 21),
                     ("1W", d, 5), ("1D", h, 24), ("1H", h, 12), ("15M", m15, 24), ("5M", m5, 24)]
+            # Trend measure: net_range (default, 2026-09-03 redesign step 1) instead of the
+            # legacy efficiency_ratio that collapsed HTFs to RANGE. Config-reversible via
+            # mtf_trend_measure. Both measures are logged per-TF for the forward A/B.
+            _measure = str(self.config.get("mtf_trend_measure", "net_range"))
+            _nr_thr = float(self.config.get("mtf_trend_nr_threshold", 0.50))
             tfs = []
             for name, src, bars in plan:
                 if src is None:
                     continue
                 H, L, C = src
-                tf = classify_tf(name, H, L, C, cur, pip, bars)
+                tf = classify_tf(name, H, L, C, cur, pip, bars, measure=_measure, nr_threshold=_nr_thr)
                 if tf is not None:
                     tfs.append(tf)
             if not tfs:
@@ -2630,9 +2635,12 @@ class AxonDaemon:
             pdr = snap.premium_discount()
             stamp = {
                 "summary": snap.summary(),
+                "trend_measure": _measure,
                 "macro_zone": pdr["macro_zone"], "macro_pos": pdr["macro_pos"],
                 "intraday_zone": pdr["intraday_zone"], "intraday_pos": pdr["intraday_pos"],
-                "tfs": {t.name: [t.trend, t.position_pct] for t in tfs},
+                # [trend, position_pct, net_range, efficiency_ratio] — readers use [0]/[1];
+                # [2]/[3] carry both trend measures for the ER-vs-net/range comparison.
+                "tfs": {t.name: [t.trend, t.position_pct, t.net_range, t.efficiency_ratio] for t in tfs},
             }
             self._mtf_cache = (now, stamp)
             return stamp
