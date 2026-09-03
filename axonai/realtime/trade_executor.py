@@ -168,6 +168,18 @@ class MT5TradeExecutor:
                     sl_distance = min(sl_distance, cap_dist)
                     tp_distance = min(tp_distance, cap_dist)
 
+        # Fixed-TP override (per-pair, config-gated). When ``fixed_tp_pips`` is set, the
+        # TARGET is that fixed distance while the SL keeps its full (hard) distance —
+        # asymmetric, so it is NOT 1:1. Risk sizing is computed off the SL below, so the
+        # per-trade risk is unchanged. Staged 2026-09-03 for EURUSD (fixed_tp_pips 3.0):
+        # 55-trade recorded tick-MFE analysis showed a +3p TP nearly HALVES the trail's
+        # bleed (-3.50 -> -1.79 gross pips/trade, win 49%->65%) by booking the small pop
+        # before the -20 reversal instead of letting the trail give it back. STILL net-
+        # negative (-2.79p at cost) = harm reduction, not a cure. Revert: fixed_tp_pips None.
+        _ftp = self.config.get("fixed_tp_pips")
+        if _ftp:
+            tp_distance = float(_ftp) * pip
+
         sl = entry - sl_distance if direction == "BUY" else entry + sl_distance
         tp = entry + tp_distance if direction == "BUY" else entry - tp_distance
 

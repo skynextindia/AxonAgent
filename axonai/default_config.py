@@ -268,6 +268,11 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # SYMBOL_CALIBRATION.hard_stop_pips). None → no pair-specific distance, so
     # hard_distance_mode falls back to the ATR path even when the flag is on.
     "realtime_hard_stop_pips": None,
+    # Fixed take-profit distance in pips (per-pair via SYMBOL_CALIBRATION.fixed_tp_pips).
+    # None = TP symmetric to the SL (the 1:1 hard_distance default). When set, the TARGET
+    # is this fixed distance while the SL stays at hard_stop_pips — a tighter, asymmetric
+    # TP that books the small favorable pop instead of letting the trail give it back.
+    "fixed_tp_pips": None,
     # Per-pair hard TRAIL distance in pips (from SYMBOL_CALIBRATION.hard_trail_pips).
     # When set TIGHTER than hard_stop_pips, the trailing stop locks profit BEFORE
     # the equal-distance TP is reached (with a 1:1 TP=SL, an equal trail is dormant
@@ -841,6 +846,13 @@ SYMBOL_CALIBRATION = {
                                      # FLOAT the lot to 1.1% risk, instead of shrinking the stop to fit
                                      # a fixed 1.0 lot. Lead sizes via --risk-pct 1.1 (0.55 lot x 20p x
                                      # $10 = $110 = 1.1% of 10k); node via --max-loss-usd 1100 (5.5 lot).
+        "fixed_tp_pips": 3.0,        # STAGED 2026-09-03 (user "stage the fixed-TP=3p change"). TARGET
+                                     # at +3p while SL stays 20p (asymmetric). On 55 recorded EURUSD
+                                     # closes (tick-level MFE) a +3p TP nearly HALVES the trail's bleed
+                                     # (-3.50 -> -1.79 gross pips/trade, win 49%->65%) by booking the
+                                     # small pop before the -20 reversal. STILL net-negative (-2.79p at
+                                     # ~1p cost) = harm reduction, NOT a cure (the real fix is the wide-TP
+                                     # regime redesign). Risk unchanged (sized off the 20p SL). Revert: None.
         # No hard_trail_pips → the trail uses the adaptive trail_dist_atr_mult × ATR.
         "sl_atr_mult": 2.0,
         "tp_atr_mult": 2.0,
@@ -1084,6 +1096,9 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
     cfg["realtime_hard_stop_pips"] = spec.get(
         "hard_stop_pips", base.get("realtime_hard_stop_pips")
     )
+    # Fixed take-profit override in pips (per-pair; None = symmetric to the SL). When
+    # set, the TARGET is this fixed distance while the SL keeps hard_stop_pips (asymmetric).
+    cfg["fixed_tp_pips"] = spec.get("fixed_tp_pips", base.get("fixed_tp_pips"))
     # Hard TRAIL distance in pips (tighter than the stop so the trail locks profit
     # before the TP). None → trail falls back to the stop distance.
     cfg["realtime_hard_trail_pips"] = spec.get(
