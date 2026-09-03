@@ -2404,8 +2404,9 @@ class AxonDaemon:
                     from research.mtf_regime_switch.good_spot import good_spot_decision
                     gs = good_spot_decision(
                         "Buy" if fade_long else "Sell", det.get("mtf_position"),
-                        htf_key=str(self.config.get("goodspot_htf_key", "1D")),
-                        flip_counter_trend=bool(self.config.get("goodspot_flip_counter_trend", False)))
+                        htf_key=str(self.config.get("goodspot_htf_key", "2D")),
+                        flip_counter_trend=bool(self.config.get("goodspot_flip_counter_trend", False)),
+                        skip_up_buy=bool(self.config.get("goodspot_skip_up_buy", True)))
                 except Exception as _gse:
                     logger.debug("goodspot decision failed: %s", _gse)
             self._wtms_setups.append({
@@ -2630,7 +2631,8 @@ class AxonDaemon:
                 return None
             cur = base[2][-1]
             plan = [("5Y", d, 1260), ("1Y", d, 252), ("3M", d, 63), ("1M", d, 21),
-                    ("1W", d, 5), ("1D", h, 24), ("1H", h, 12), ("15M", m15, 24), ("5M", m5, 24)]
+                    ("1W", d, 5), ("2D", h, 48), ("1D", h, 24), ("1H", h, 12),
+                    ("15M", m15, 24), ("5M", m5, 24)]   # 2D added: the selector's HTF window
             # Trend measure: net_range (default, 2026-09-03 redesign step 1) instead of the
             # legacy efficiency_ratio that collapsed HTFs to RANGE. Config-reversible via
             # mtf_trend_measure. Both measures are logged per-TF for the forward A/B.

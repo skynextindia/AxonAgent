@@ -744,8 +744,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # goodspot_flip_counter_trend False = SKIP counter-trend fades (True = flip to
     # with-trend). Arm live only after the checkpoint validates. Revert: enabled False.
     "goodspot_shadow_enabled": True,
-    "goodspot_htf_key": "1D",
-    "goodspot_flip_counter_trend": False,
+    "goodspot_htf_key": "2D",           # wider HTF wins (backtest +0.43p 6/10q @2D vs +0.23 @1D)
+    "goodspot_flip_counter_trend": False,   # FALSIFIED (flip WORSE than skip); kept off
+    "goodspot_skip_up_buy": True,       # skip buy-dip-in-uptrend (-4p in-sample drag); the
+                                        # down/up asymmetry. False = old symmetric rule.
 
     # DIRECTION FLIP — user-directed 2026-08-21. Inverts every entry (Buy<->Sell) at
     # the decision source. ON RECORD / against the evidence: 3yr backtest shows flipping

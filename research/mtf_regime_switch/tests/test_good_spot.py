@@ -1,44 +1,54 @@
 """Tests for the good-spot selector decision (pure, deterministic)."""
 from research.mtf_regime_switch.good_spot import good_spot_decision, htf_trend
 
+HK = "1D"  # tests stamp the 1D key and pass htf_key=HK explicitly
+
 
 def _stamp(tfs):
     return {"tfs": tfs}
 
 
 def test_range_takes_either_direction():
-    s = _stamp({"1D": ["RANGE", 50.0, 0.1, 0.05]})
-    assert good_spot_decision("Sell", s)["action"] == "take"
-    assert good_spot_decision("Buy", s)["action"] == "take"
+    s = _stamp({HK: ["RANGE", 50.0, 0.1, 0.05]})
+    assert good_spot_decision("Sell", s, htf_key=HK)["action"] == "take"
+    assert good_spot_decision("Buy", s, htf_key=HK)["action"] == "take"
 
 
 def test_sell_rally_in_downtrend_takes():
-    s = _stamp({"1D": ["DOWN", 20.0, -0.6, 0.4]})
-    assert good_spot_decision("Sell", s)["action"] == "take"
+    s = _stamp({HK: ["DOWN", 20.0, -0.6, 0.4]})
+    assert good_spot_decision("Sell", s, htf_key=HK)["action"] == "take"
 
 
-def test_buy_dip_in_uptrend_takes():
-    s = _stamp({"1D": ["UP", 80.0, 0.7, 0.4]})
-    assert good_spot_decision("Buy", s)["action"] == "take"
+def test_buy_dip_in_uptrend_skips_by_default():
+    # DEFAULT skip_up_buy=True: the falsified -4p bucket is skipped.
+    s = _stamp({HK: ["UP", 80.0, 0.7, 0.4]})
+    d = good_spot_decision("Buy", s, htf_key=HK)
+    assert d["action"] == "skip" and "uptrend" in d["reason"]
+
+
+def test_buy_dip_in_uptrend_takes_when_symmetric():
+    s = _stamp({HK: ["UP", 80.0, 0.7, 0.4]})
+    d = good_spot_decision("Buy", s, htf_key=HK, skip_up_buy=False)
+    assert d["action"] == "take"
 
 
 def test_buy_into_downtrend_skips():
-    s = _stamp({"1D": ["DOWN", 20.0, -0.6, 0.4]})
-    d = good_spot_decision("Buy", s)
+    s = _stamp({HK: ["DOWN", 20.0, -0.6, 0.4]})
+    d = good_spot_decision("Buy", s, htf_key=HK)
     assert d["action"] == "skip" and "counter" in d["reason"]
 
 
 def test_sell_into_uptrend_skips():
-    s = _stamp({"1D": ["UP", 80.0, 0.7, 0.4]})
-    assert good_spot_decision("Sell", s)["action"] == "skip"
+    s = _stamp({HK: ["UP", 80.0, 0.7, 0.4]})
+    assert good_spot_decision("Sell", s, htf_key=HK)["action"] == "skip"
 
 
 def test_flip_counter_trend_flips_direction():
-    s = _stamp({"1D": ["UP", 90.0, 0.8, 0.5]})
-    d = good_spot_decision("Sell", s, flip_counter_trend=True)
+    s = _stamp({HK: ["UP", 90.0, 0.8, 0.5]})
+    d = good_spot_decision("Sell", s, htf_key=HK, flip_counter_trend=True)
     assert d["action"] == "flip" and d["flip_to"] == "Buy"
-    s2 = _stamp({"1D": ["DOWN", 10.0, -0.8, 0.5]})
-    d2 = good_spot_decision("Buy", s2, flip_counter_trend=True)
+    s2 = _stamp({HK: ["DOWN", 10.0, -0.8, 0.5]})
+    d2 = good_spot_decision("Buy", s2, htf_key=HK, flip_counter_trend=True)
     assert d2["action"] == "flip" and d2["flip_to"] == "Sell"
 
 
