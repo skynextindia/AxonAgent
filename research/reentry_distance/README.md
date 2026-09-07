@@ -23,22 +23,26 @@ For every closed position, stamp the distance (pips) and gap (minutes) from the 
 ```
 (Eightcap terminal open. `--pips`/`--min` set the "near re-entry" thresholds.)
 
-## Finding (30d, 99 closed positions, 2026-09-07)
+## Finding — 60d, 260 closed positions (2026-09-08, the robust read)
 | bucket | n | net | avg | win% |
 |---|---|---|---|---|
-| NEAR re-entry (≤5p AND ≤60min) | 31 | −$390.54 | −12.60 | **51.6** |
-| all other entries | 68 | −$1321.68 | −19.44 | 36.8 |
+| NEAR re-entry (≤5p AND ≤60min) | 79 | **−$1027.76** | −13.01 | 60.8 |
+| all other entries | 181 | +$111.40 | +0.62 | 59.1 |
 
-Distance histogram (net, avg): 0–2p −377/−19.8 · 2–5p −427/−15.2 · 5–10p −233/−18.0 ·
-**10–20p −521/−40.1** · 20p+ −17/−0.8.
+Distance histogram (net, avg): 0–2p −492/−8.35 · 2–5p −337/−5.80 · **5–10p +127/+2.94** ·
+10–20p −357/−10.19 · **20p+ +82/+1.35**. The closest (0–5p) buckets are clearly negative.
 
-**Verdict — a distance-only re-entry guard is NOT justified.** Near re-entries actually
-*win more often* (51.6% vs 36.8%) and lose *less per trade* than the average entry, so
-skipping them would drop winners and losers roughly evenly. Distance-from-exit is not
-monotonic (the *worst* bucket is 10–20p, and 20p+ is ~breakeven). The account damage
-concentrates in a handful of full-stop **doublings** (09-02, 09-03 14:06, 09-04 15:58,
-09-07 09:14 — each ≈ −$105, ≈ −$420 total), which correlate with **trend/direction**, not
-with how close the re-entry was. → the fix is the good-spot selector (don't re-sell into an
-up-trend) + the corr-gate (don't double in lockstep), **not** a distance guard.
+> **Note — the earlier 30d/99-position read was misleading.** It showed near re-entries
+> losing *less* per trade (−$12.6 vs −$19.4), implying "no distance signal." The 60d sample
+> **reverses** the per-trade sign (near −$13 vs rest +$0.6). Trust the 60d numbers.
+
+**Verdict.** Near re-entries ARE the loss center (−$1028 vs +$111 breakeven for the rest) —
+but they still **win 60.8%**; the damage is a **negative-skew tail** of catastrophic losses
+(−$243, −$226, −$205, −$198, −$169, plus the −$105 doublings) — tiny clipped scalp wins
+(+$2/+$3) against occasional full-size or doubled losses. So the cause is the
+**clip-winner/full-loser exit asymmetry + doublings**, not closeness per se. A blanket
+distance-skip would sacrifice a 60%-win stream to trim a few tail losses. → the higher-leverage
+fixes are the good-spot selector (don't re-sell into an up-trend) + the corr-gate (don't
+double in lockstep) + the exit asymmetry (small TP vs full SL), **not** a distance guard.
 
 Read-only. Nothing wired to the daemon, nothing armed. See [[reentry-distance-measure]].
