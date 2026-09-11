@@ -1,0 +1,67 @@
+{
+ "price": 1.1685,
+ "summary": "5Y=RANGE  1Y=RANGE  3M=RANGE  1M=UP  1W=UP",
+ "fade_read": {
+  "higher_tf_extreme_top": true,
+  "higher_tf_extreme_bottom": false,
+  "short_tf_momentum": "UP",
+  "note": "SELL-fade risky: at a higher-TF range TOP but short-term momentum still UP (breakout risk)"
+ },
+ "timeframes": [
+  {
+   "name": "5Y",
+   "trend": "RANGE",
+   "net_pips": 87.9,
+   "efficiency_ratio": 0.002,
+   "range_hi": 1.20236,
+   "range_lo": 0.95402,
+   "position_pct": 86.4,
+   "bars": 1260,
+   "position_label": "near top"
+  },
+  {
+   "name": "1Y",
+   "trend": "RANGE",
+   "net_pips": -30.9,
+   "efficiency_ratio": 0.004,
+   "range_hi": 1.20236,
+   "range_lo": 1.13254,
+   "position_pct": 51.5,
+   "bars": 252,
+   "position_label": "mid"
+  },
+  {
+   "name": "3M",
+   "trend": "RANGE",
+   "net_pips": 48.1,
+   "efficiency_ratio": 0.03,
+   "range_hi": 1.17151,
+   "range_lo": 1.13254,
+   "position_pct": 92.3,
+   "bars": 63,
+   "position_label": "near top"
+  },
+  {
+   "name": "1M",
+   "trend": "UP",
+   "net_pips": 308.2,
+   "efficiency_ratio": 0.553,
+   "range_hi": 1.17151,
+   "range_lo": 1.13545,
+   "position_pct": 91.6,
+   "bars": 21,
+   "position_label": "near top"
+  },
+  {
+   "name": "1W",
+   "trend": "UP",
+   "net_pips": 111.0,
+   "efficiency_ratio": 0.943,
+   "range_hi": 1.17151,
+   "range_lo": 1.15672,
+   "position_pct": 79.6,
+   "bars": 5,
+   "position_label": "upper"
+  }
+ ]
+}

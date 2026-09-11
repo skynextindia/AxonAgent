@@ -355,6 +355,24 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "consol_lookback": 8,               # closed M15 candles = the immediate consolidation window (~2h)
     "consol_max_atr": 1.8,              # range must be <= this x avg-M15-bar to count as a tight consolidation
     "consol_edge": 0.25,                # block a fade within this fraction of the NEAR edge
+    # ── Same-direction re-entry distance guard (user 2026-09-09) ──────────────
+    # Stops the "sell again right where the last sell exited / buy again where the last buy exited"
+    # churn: the only live re-entry gate is a time cooldown that is direction- AND location-blind, so
+    # after a scratch the same-dir signal re-qualifies a few pips away and re-fires into the same zone
+    # (research/reentry_distance: that near cluster is the loss centre). Blocks a fresh same-dir signal
+    # landing within reentry_min_pips AND reentry_min_minutes of the last same-dir exit; past either it
+    # passes. Only SKIPS (bounded — a skip never loses); fails OPEN. When OFF, logs the would-skip to
+    # reports/reentry_guard_shadow.jsonl so it can be proven on live outcomes before arming. Per-pair.
+    "reentry_distance_guard_enabled": False,  # per-pair master (staged OFF; arm per pair after shadow proof)
+    "reentry_min_pips": 5.0,            # re-entry within this many pips of the last same-dir exit is "near"
+    "reentry_min_minutes": 60.0,        # ...AND within this many minutes; past either threshold it passes
+    # ── Follower (mirror) range/location gate (user 2026-09-10) ───────────────
+    # The inverse mirror fired the follower leg (e.g. USDJPY BUY) purely because the LEAD
+    # signalled, without checking the follower's OWN range position — so it bought into its
+    # own resistance / sold into its own support ("buys high / sells low"). This runs the
+    # follower through the SAME _range_gate the lead uses, against the follower's own 20xM15
+    # range, before firing the mirror. Only SKIPS the follower leg (lead untouched); reversible.
+    "mirror_range_gate_enabled": False,  # per-pair master (armed for the FOLLOWER, USDJPY, below)
     # ── Per-pair entry master kill-switch ─────────────────────────────────────
     # When False for a pair, that pair's daemon instance NEVER opens a new entry
     # (all fades skipped at the top of the entry path) but STAYS ALIVE to trail /
@@ -711,7 +729,10 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # own SL lockout / daily-loss cap before firing. UNVALIDATED coupling: the +58p
     # continuation edge was USDJPY's OWN breakout-retest signal, NOT this EURUSD-mirror —
     # watch the live P&L. Flag-gated/reversible (set False); needs a flat restart.
-    "inverse_mirror_enabled": True,
+    # ZEROED 2026-09-11 (user "zero the USDJPY mirror entirely"): the mirror repeatedly
+    # DOUBLED a losing USD bet (e.g. 09-11 EURUSD SELL + USDJPY BUY, mirror leg -$101 SL).
+    # USDJPY now trades NOTHING (own entries_enabled already False + mirror OFF). Revert = True.
+    "inverse_mirror_enabled": False,
     "inverse_mirror_lead": "EURUSD",        # the pair whose FILLS trigger the mirror
     "inverse_mirror_follower": "USDJPY",    # the pair that fires the opposite order
     # COUPLED MIRROR EXIT (user 2026-09-02: "usdjpy opens and closes with EURUSD, not
@@ -724,6 +745,26 @@ DEFAULT_CONFIG = _apply_env_overrides({
     # hold-for-profit shadow keeps measuring (peak still tracked). Reversible; only acts
     # when inverse_mirror is live (multi-pair). Activates on next flat restart.
     "mirror_coupled_exit_enabled": True,
+
+    # CORRELATION-GATE SHADOW (user 2026-09-04: "fix the factor of EURUSD/USDJPY both
+    # at same direction"). The inverse mirror pairs EURUSD SELL with USDJPY BUY assuming
+    # a clean negative correlation — but when the pairs are in LOCKSTEP (rolling corr
+    # <= threshold) the two legs are ONE doubled bet, so they win together or LOSE
+    # together (the double-stop-out). Live 88d study: corr swings -0.95..+0.27 (mean
+    # -0.58), tight (<=-0.70) ~30% of the time. This gate measures whether skipping the
+    # SECOND (follower) leg in the tight regime cuts the double-losses. On every mirror
+    # fire it computes the live rolling corr, stamps a SKIP/FIRE verdict, and logs the
+    # decision + both tickets to reports/corr_gate_shadow.jsonl; the reader
+    # (research/corr_gate/corr_gate_report.py) joins realized P&L from MT5 history and
+    # buckets combined P&L by verdict. SHADOW: always fires, logs only. LIVE
+    # (corr_gate_live True, needs validation): a SKIP verdict WITHHOLDS the USDJPY order
+    # entirely — the EURUSD leg is never touched. Same corr+threshold code both modes.
+    # Reversible; only acts when inverse_mirror is live (multi-pair). Flat restart.
+    "corr_gate_shadow_enabled": True,
+    "corr_gate_live": False,          # False = measure only; True = SKIP verdict blocks the follower leg
+    "corr_gate_threshold": -0.70,     # rolling corr <= this = LOCKSTEP/doubling regime -> skip
+    "corr_gate_window": 24,           # rolling window length (bars)
+    "corr_gate_tf": "H1",             # timeframe for the correlation window
 
     # WIDE-TP MTF-REGIME SHADOW (2026-09-01). On every GATED fade signal, arm a
     # READ-ONLY virtual wide bracket (SL20/TP100) in BOTH the fade and the opposite
@@ -952,6 +993,12 @@ SYMBOL_CALIBRATION = {
                                         # +1p — it holds for the move. ONE entry (no split). Trade-off: a modest
                                         # revert now gives back to the hard stop, not a +1p scratch. Magnitude
                                         # UNVALIDATED (n=21 recon, entry-approx, chop week). Disarm = this flag.
+        "reentry_distance_guard_enabled": True,  # RE-ENTRY DISTANCE GUARD ARMED REAL for EURUSD (user 2026-09-09,
+                                        # "fix it — it sells after a sell exits / buys after a buy exits"). Skips a
+                                        # same-dir signal landing within reentry_min_pips (5) AND reentry_min_minutes
+                                        # (60) of the last same-dir EXIT — the re-sell-into-the-zone-you-just-left
+                                        # churn. Only skips; fails open; not mirrored. USDJPY left OFF. Disarm = this
+                                        # flag. Watch the skip rate + reports/reentry_guard_shadow.jsonl history.
     },
     "USDJPY": {
         "entries_enabled": False,    # ZEROED 2026-08-18 (user). USDJPY opens NO new fades — the
@@ -965,6 +1012,18 @@ SYMBOL_CALIBRATION = {
                                      # turning USDJPY off flips the lead book positive. Re-enable when a
                                      # USDJPY fade edge re-validates (or a NEW entry feature is logged).
                                      # Blocks BOTH accounts (lead is the sole origin; node only mirrors).
+        "mirror_range_gate_enabled": True,  # FOLLOWER RANGE GATE ARMED (user 2026-09-10): the inverse
+                                     # mirror leg (USDJPY BUY off a EURUSD SELL) now must pass USDJPY's OWN
+                                     # wrong-end range gate — no more buying its resistance / selling its
+                                     # support just because the lead fired. Only skips the mirror leg;
+                                     # lead EURUSD untouched. Disarm = this flag. (entries_enabled stays
+                                     # False; the mirror path is separate and still fires, so this gates it.)
+        "reentry_distance_guard_enabled": True,  # RE-ENTRY GUARD ARMED for the FOLLOWER too (user 2026-09-10,
+                                     # "make it airtight"): the mirror path now also runs USDJPY's own same-
+                                     # dir re-entry distance check (5p/60min from its last same-dir exit), so
+                                     # the mirror leg can't re-stack USDJPY's own zone independent of the lead.
+                                     # Only skips the mirror leg. (entries_enabled False → acts ONLY on the
+                                     # mirror path.) Uses self._last_dir_exit, recorded at every close.
         "magic_number": 123458,      # distinct from EURUSD
         "pip_size": 0.01,
         # USD-BASE pair: $/pip/lot is price-dependent (~contract*pip/price ≈ $6–7),
@@ -1201,6 +1260,13 @@ def resolve_symbol_config(base: dict, symbol: str) -> dict:
     for _k, _d in (("consol_gate_enabled", False), ("consol_lookback", 8),
                    ("consol_max_atr", 1.8), ("consol_edge", 0.25)):
         cfg[_k] = spec.get(_k, base.get(_k, _d))
+    # Per-pair same-direction re-entry distance guard (whitelist mapping; staged OFF for all pairs).
+    for _k, _d in (("reentry_distance_guard_enabled", False),
+                   ("reentry_min_pips", 5.0), ("reentry_min_minutes", 60.0)):
+        cfg[_k] = spec.get(_k, base.get(_k, _d))
+    # Follower mirror range/location gate (whitelist mapping; armed for USDJPY the follower).
+    cfg["mirror_range_gate_enabled"] = spec.get("mirror_range_gate_enabled",
+                                                base.get("mirror_range_gate_enabled", False))
     # Per-pair entry kill-switch (whitelist mapping — without this the SYMBOL_CALIBRATION
     # key never reaches self.config). False → the pair opens no new entries but still
     # manages open positions. USDJPY OFF 2026-08-18 (no catchable entry tell; net-losing fortnight).

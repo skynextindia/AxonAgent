@@ -1,0 +1,157 @@
+{
+ "price": 1.16836,
+ "summary": "5Y=RANGE  1Y=RANGE  3M=RANGE  1M=UP  1W=UP  1D=RANGE  1H=DOWN  15M=RANGE  5M=RANGE",
+ "fade_read": {
+  "higher_tf_extreme_top": true,
+  "higher_tf_extreme_bottom": false,
+  "short_tf_momentum": "UP",
+  "note": "SELL-fade risky: at a higher-TF range TOP but short-term momentum still UP (breakout risk)"
+ },
+ "premium_discount": {
+  "macro_pos": 76.5,
+  "macro_zone": "deep-premium",
+  "intraday_pos": 35.0,
+  "intraday_zone": "discount",
+  "bias": "SELL / supply (macro PREMIUM \u2014 price expensive vs bigger TFs)",
+  "timing": "price already pulled to intraday DISCOUNT \u2014 wait for a bounce back toward intraday premium to sell",
+  "per_tf": {
+   "5Y": {
+    "pos": 86.3,
+    "zone": "deep-premium"
+   },
+   "1Y": {
+    "pos": 51.3,
+    "zone": "equilibrium"
+   },
+   "3M": {
+    "pos": 91.9,
+    "zone": "deep-premium"
+   },
+   "1M": {
+    "pos": 91.3,
+    "zone": "deep-premium"
+   },
+   "1W": {
+    "pos": 78.7,
+    "zone": "deep-premium"
+   },
+   "1D": {
+    "pos": 26.6,
+    "zone": "discount"
+   },
+   "1H": {
+    "pos": 26.6,
+    "zone": "discount"
+   },
+   "15M": {
+    "pos": 47.0,
+    "zone": "equilibrium"
+   },
+   "5M": {
+    "pos": 40.0,
+    "zone": "discount"
+   }
+  }
+ },
+ "timeframes": [
+  {
+   "name": "5Y",
+   "trend": "RANGE",
+   "net_pips": 87.9,
+   "efficiency_ratio": 0.002,
+   "range_hi": 1.20236,
+   "range_lo": 0.95402,
+   "position_pct": 86.3,
+   "bars": 1260,
+   "position_label": "near top"
+  },
+  {
+   "name": "1Y",
+   "trend": "RANGE",
+   "net_pips": -30.9,
+   "efficiency_ratio": 0.004,
+   "range_hi": 1.20236,
+   "range_lo": 1.13254,
+   "position_pct": 51.3,
+   "bars": 252,
+   "position_label": "mid"
+  },
+  {
+   "name": "3M",
+   "trend": "RANGE",
+   "net_pips": 48.1,
+   "efficiency_ratio": 0.03,
+   "range_hi": 1.17151,
+   "range_lo": 1.13254,
+   "position_pct": 91.9,
+   "bars": 63,
+   "position_label": "near top"
+  },
+  {
+   "name": "1M",
+   "trend": "UP",
+   "net_pips": 308.2,
+   "efficiency_ratio": 0.553,
+   "range_hi": 1.17151,
+   "range_lo": 1.13545,
+   "position_pct": 91.3,
+   "bars": 21,
+   "position_label": "near top"
+  },
+  {
+   "name": "1W",
+   "trend": "UP",
+   "net_pips": 111.0,
+   "efficiency_ratio": 0.943,
+   "range_hi": 1.17151,
+   "range_lo": 1.15672,
+   "position_pct": 78.7,
+   "bars": 5,
+   "position_label": "upper"
+  },
+  {
+   "name": "1D",
+   "trend": "RANGE",
+   "net_pips": -1.4,
+   "efficiency_ratio": 0.012,
+   "range_hi": 1.17137,
+   "range_lo": 1.16727,
+   "position_pct": 26.6,
+   "bars": 24,
+   "position_label": "lower"
+  },
+  {
+   "name": "1H",
+   "trend": "DOWN",
+   "net_pips": -21.9,
+   "efficiency_ratio": 0.32,
+   "range_hi": 1.17137,
+   "range_lo": 1.16727,
+   "position_pct": 26.6,
+   "bars": 12,
+   "position_label": "lower"
+  },
+  {
+   "name": "15M",
+   "trend": "RANGE",
+   "net_pips": -10.9,
+   "efficiency_ratio": 0.154,
+   "range_hi": 1.16959,
+   "range_lo": 1.16727,
+   "position_pct": 47.0,
+   "bars": 24,
+   "position_label": "mid"
+  },
+  {
+   "name": "5M",
+   "trend": "RANGE",
+   "net_pips": -2.7,
+   "efficiency_ratio": 0.1,
+   "range_hi": 1.16877,
+   "range_lo": 1.16809,
+   "position_pct": 40.0,
+   "bars": 24,
+   "position_label": "lower"
+  }
+ ]
+}

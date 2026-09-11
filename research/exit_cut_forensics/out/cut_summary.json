@@ -1,0 +1,99 @@
+{
+ "tail_share": {
+  "total_loss_pips": -1155.0,
+  "full_stop_all_loss_pips": -1031.8,
+  "full_stop_all_n": 72,
+  "full_stop_sell_loss_pips": -607.9,
+  "full_stop_sell_n": 37,
+  "full_stop_sell_share": 0.526
+ },
+ "mfe_subset": {
+  "n": 66,
+  "span": [
+   "2026-08-10",
+   "2026-08-19"
+  ]
+ },
+ "buffer_sweep": [
+  {
+   "n_fired": 24,
+   "n_savers": 16,
+   "n_casualties": 8,
+   "pips_saved": 168.5,
+   "pips_cost": -28.6,
+   "net_delta_naive": 139.9,
+   "net_delta_optimistic": 168.5,
+   "buffer": 1.0
+  },
+  {
+   "n_fired": 21,
+   "n_savers": 11,
+   "n_casualties": 9,
+   "pips_saved": 153.8,
+   "pips_cost": -33.4,
+   "net_delta_naive": 120.4,
+   "net_delta_optimistic": 153.8,
+   "buffer": 2.0
+  },
+  {
+   "n_fired": 14,
+   "n_savers": 10,
+   "n_casualties": 4,
+   "pips_saved": 143.6,
+   "pips_cost": -24.1,
+   "net_delta_naive": 119.5,
+   "net_delta_optimistic": 143.6,
+   "buffer": 3.0
+  },
+  {
+   "n_fired": 13,
+   "n_savers": 9,
+   "n_casualties": 4,
+   "pips_saved": 134.2,
+   "pips_cost": -28.1,
+   "net_delta_naive": 106.1,
+   "net_delta_optimistic": 134.2,
+   "buffer": 4.0
+  },
+  {
+   "n_fired": 10,
+   "n_savers": 8,
+   "n_casualties": 2,
+   "pips_saved": 125.2,
+   "pips_cost": -5.0,
+   "net_delta_naive": 120.3,
+   "net_delta_optimistic": 125.2,
+   "buffer": 5.0
+  },
+  {
+   "n_fired": 9,
+   "n_savers": 8,
+   "n_casualties": 1,
+   "pips_saved": 117.2,
+   "pips_cost": -5.9,
+   "net_delta_naive": 111.3,
+   "net_delta_optimistic": 117.2,
+   "buffer": 6.0
+  },
+  {
+   "n_fired": 8,
+   "n_savers": 7,
+   "n_casualties": 1,
+   "pips_saved": 102.6,
+   "pips_cost": -7.9,
+   "net_delta_naive": 94.7,
+   "net_delta_optimistic": 102.6,
+   "buffer": 8.0
+  }
+ ],
+ "best_buffer": {
+  "n_fired": 24,
+  "n_savers": 16,
+  "n_casualties": 8,
+  "pips_saved": 168.5,
+  "pips_cost": -28.6,
+  "net_delta_naive": 139.9,
+  "net_delta_optimistic": 168.5,
+  "buffer": 1.0
+ }
+}

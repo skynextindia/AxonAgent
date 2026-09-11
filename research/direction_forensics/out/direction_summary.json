@@ -1,0 +1,338 @@
+{
+ "decision": {
+  "label": "C \u2014 NO STABLE DIRECTION FILTER FOUND",
+  "statement": "The existing decision-point features do not contain a stable, out-of-sample distinction between reversal and continuation. Every candidate discriminator sits at chance on the fair labeled subset, and no TRAIN-fit veto generalizes to held-out data.",
+  "evidence": [
+   "Fine-label feature separation (clean_win n=32 vs wrong_direction n=29): best discriminating power |AUC\u22120.5| = 0.091; any feature CI excluding 0.5: False.",
+   "Reversal-vs-continuation hypothesis: max component power = 0.091 \u2014 None of the testable hypothesis components separate winning fades from run-over fades (all AUC \u2248 0.5). The proposed reversal-vs-continuation signature is NOT present in the existing telemetry.",
+   "Walk-forward: best TRAIN policy vetoes 0 trades on TRAIN+VALIDATION \u2014 it is effectively inaction (the discriminating features are absent before August). No filter to validate; its only vetoes fall in OOS/August, i.e. in-sample to the adverse regime. (generalizes=False, august_only=False, untrainable=True).",
+   "Feature coverage by split: the discriminating features (displacement, S/R distance) and MFE labels have ZERO coverage in TRAIN and VALIDATION (train displacement=0, val displacement=0); they exist ONLY in the August OOS window \u2014 so a filter using them cannot be trained or validated out-of-regime on current telemetry.",
+   "Fine-labeled data spans months ['2026-08'] \u2014 single month (the adverse regime): no out-of-sample period exists for the precise labels, so any fine-label threshold is inherently August-fitted."
+  ],
+  "why_not": [
+   "Not A: no feature clears both a CI-excludes-chance separation AND held-out generalization.",
+   "Not B: the separation is at chance on the fair subset and the temporal core of the hypothesis (velocity decay/acceleration) is absent from telemetry, so there is nothing 'promising' to carry forward."
+  ],
+  "to_upgrade": [
+   "Log the VELOCITY TRAJECTORY (a short pre-signal velocity/efficiency series), not a single snapshot \u2014 the hypothesis's decay/acceleration terms need it.",
+   "Log MFE/MAE on EVERY trade (currently recent-only) so the fine labels span more than the August regime and a real train/validation/OOS split becomes possible.",
+   "Accumulate a second independent adverse regime before fitting any threshold \u2014 the current fine labels are 100% one month."
+  ]
+ },
+ "feat_fine": [
+  {
+   "feature": "tick_efficiency",
+   "auc": 0.409,
+   "power": 0.091,
+   "ci": [
+    0.254,
+    0.55
+   ],
+   "ci_excludes_0.5": false,
+   "pos_summary": {
+    "n": 32,
+    "median": 0.01592,
+    "mean": 0.01965,
+    "p25": 0.00769,
+    "p75": 0.02623,
+    "min": 0.0,
+    "max": 0.06827
+   },
+   "neg_summary": {
+    "n": 29,
+    "median": 0.01889,
+    "mean": 0.0286,
+    "p25": 0.01228,
+    "p75": 0.04048,
+    "min": 0.0,
+    "max": 0.1375
+   }
+  },
+  {
+   "feature": "sr_level_dist_pips",
+   "auc": 0.573,
+   "power": 0.073,
+   "ci": [
+    0.423,
+    0.714
+   ],
+   "ci_excludes_0.5": false,
+   "pos_summary": {
+    "n": 32,
+    "median": 1.75,
+    "mean": 1.85781,
+    "p25": 0.4,
+    "p75": 3.1,
+    "min": 0.0,
+    "max": 4.55
+   },
+   "neg_summary": {
+    "n": 29,
+    "median": 1.15,
+    "mean": 1.48793,
+    "p25": 0.15,
+    "p75": 2.65,
+    "min": 0.0,
+    "max": 4.65
+   }
+  },
+  {
+   "feature": "displacement_ratio",
+   "auc": 0.433,
+   "power": 0.067,
+   "ci": [
+    0.268,
+    0.575
+   ],
+   "ci_excludes_0.5": false,
+   "pos_summary": {
+    "n": 31,
+    "median": 0.0492,
+    "mean": 0.0616,
+    "p25": 0.0211,
+    "p75": 0.0889,
+    "min": 0.0,
+    "max": 0.2079
+   },
+   "neg_summary": {
+    "n": 28,
+    "median": 0.06655,
+    "mean": 0.1,
+    "p25": 0.0406,
+    "p75": 0.1214,
+    "min": 0.0028,
+    "max": 0.5455
+   }
+  },
+  {
+   "feature": "regime_confidence",
+   "auc": 0.436,
+   "power": 0.064,
+   "ci": [
+    0.305,
+    0.576
+   ],
+   "ci_excludes_0.5": false,
+   "pos_summary": {
+    "n": 32,
+    "median": 0.79001,
+    "mean": 0.78943,
+    "p25": 0.73613,
+    "p75": 0.87156,
+    "min": 0.52287,
+    "max": 0.9267
+   },
+   "neg_summary": {
+    "n": 29,
+    "median": 0.80057,
+    "mean": 0.81181,
+    "p25": 0.77263,
+    "p75": 0.89201,
+    "min": 0.58156,
+    "max": 1.0
+   }
+  },
+  {
+   "feature": "velocity_divergence",
+   "auc": 0.458,
+   "power": 0.042,
+   "ci": [
+    0.316,
+    0.596
+   ],
+   "ci_excludes_0.5": false,
+   "pos_summary": {
+    "n": 32,
+    "median": 2.1764,
+    "mean": 3.84647,
+    "p25": 1.28311,
+    "p75": 4.97787,
+    "min": 0.82814,
+    "max": 21.0373
+   },
+   "neg_summary": {
+    "n": 29,
+    "median": 2.22993,
+    "mean": 27001.7246,
+    "p25": 1.67783,
+    "p75": 3.62412,
+    "min": 0.86695,
+    "max": 782975.17353
+   }
+  },
+  {
+   "feature": "spread_pips",
+   "auc": 0.46,
+   "power": 0.04,
+   "ci": [
+    0.315,
+    0.614
+   ],
+   "ci_excludes_0.5": false,
+   "pos_summary": {
+    "n": 32,
+    "median": 0.1,
+    "mean": 0.07813,
+    "p25": 0.0,
+    "p75": 0.1,
+    "min": 0.0,
+    "max": 0.2
+   },
+   "neg_summary": {
+    "n": 29,
+    "median": 0.1,
+    "mean": 0.0931,
+    "p25": 0.1,
+    "p75": 0.1,
+    "min": 0.0,
+    "max": 0.3
+   }
+  },
+  {
+   "feature": "peak_confidence",
+   "auc": 0.502,
+   "power": 0.002,
+   "ci": [
+    0.378,
+    0.621
+   ],
+   "ci_excludes_0.5": false,
+   "pos_summary": {
+    "n": 32,
+    "median": 1.0,
+    "mean": 0.95781,
+    "p25": 0.85,
+    "p75": 1.0,
+    "min": 0.85,
+    "max": 1.0
+   },
+   "neg_summary": {
+    "n": 29,
+    "median": 1.0,
+    "mean": 0.95172,
+    "p25": 0.85,
+    "p75": 1.0,
+    "min": 0.65,
+    "max": 1.0
+   }
+  }
+ ],
+ "hypothesis_max_power": 0.09105603448275862,
+ "walk_forward_verdict": "best TRAIN policy vetoes 0 trades on TRAIN+VALIDATION \u2014 it is effectively inaction (the discriminating features are absent before August). No filter to validate; its only vetoes fall in OOS/August, i.e. in-sample to the adverse regime.",
+ "backtest": {
+  "policy": "g18[disp>=0.45; votes>=1]",
+  "n_total": 313,
+  "n_kept": 312,
+  "n_vetoed": 1,
+  "trade_count_change": -1,
+  "vetoed_wrong_direction": 1,
+  "vetoed_clean_winners": 0,
+  "vetoed_other_loss": 0,
+  "vetoed_no_label": 0,
+  "baseline_net_R": 10.681,
+  "kept_net_R": 10.776,
+  "net_R_retained_pct": 100.9,
+  "losses_avoided_R": 0.095,
+  "winners_forgone_R": 0.0,
+  "baseline_PF": 1.143,
+  "kept_PF": 1.144,
+  "baseline_maxDD_R": -8.633,
+  "kept_maxDD_R": -8.633,
+  "baseline_winrate": 67.5,
+  "kept_winrate": 67.7,
+  "slices": {
+   "by_symbol": {
+    "EURUSD": {
+     "n_kept": 229,
+     "n_vetoed": 1,
+     "kept_net_R": 11.95,
+     "vetoed_wrong_dir": 1,
+     "vetoed_winners": 0
+    },
+    "USDJPY": {
+     "n_kept": 83,
+     "n_vetoed": 0,
+     "kept_net_R": -1.18,
+     "vetoed_wrong_dir": 0,
+     "vetoed_winners": 0
+    }
+   },
+   "by_direction": {
+    "SELL": {
+     "n_kept": 195,
+     "n_vetoed": 1,
+     "kept_net_R": 16.1,
+     "vetoed_wrong_dir": 1,
+     "vetoed_winners": 0
+    },
+    "BUY": {
+     "n_kept": 117,
+     "n_vetoed": 0,
+     "kept_net_R": -5.32,
+     "vetoed_wrong_dir": 0,
+     "vetoed_winners": 0
+    }
+   },
+   "by_month": {
+    "2026-06": {
+     "n_kept": 57,
+     "n_vetoed": 0,
+     "kept_net_R": 6.18,
+     "vetoed_wrong_dir": 0,
+     "vetoed_winners": 0
+    },
+    "2026-07": {
+     "n_kept": 145,
+     "n_vetoed": 0,
+     "kept_net_R": 9.82,
+     "vetoed_wrong_dir": 0,
+     "vetoed_winners": 0
+    },
+    "2026-08": {
+     "n_kept": 110,
+     "n_vetoed": 1,
+     "kept_net_R": -5.22,
+     "vetoed_wrong_dir": 1,
+     "vetoed_winners": 0
+    }
+   },
+   "by_regime": {
+    "unknown": {
+     "n_kept": 1,
+     "n_vetoed": 0,
+     "kept_net_R": -0.68,
+     "vetoed_wrong_dir": 0,
+     "vetoed_winners": 0
+    },
+    "ranging": {
+     "n_kept": 168,
+     "n_vetoed": 0,
+     "kept_net_R": 4.93,
+     "vetoed_wrong_dir": 0,
+     "vetoed_winners": 0
+    },
+    "breakout": {
+     "n_kept": 15,
+     "n_vetoed": 0,
+     "kept_net_R": 2.28,
+     "vetoed_wrong_dir": 0,
+     "vetoed_winners": 0
+    },
+    "panic": {
+     "n_kept": 46,
+     "n_vetoed": 0,
+     "kept_net_R": 0.35,
+     "vetoed_wrong_dir": 0,
+     "vetoed_winners": 0
+    },
+    "compression": {
+     "n_kept": 82,
+     "n_vetoed": 1,
+     "kept_net_R": 3.9,
+     "vetoed_wrong_dir": 1,
+     "vetoed_winners": 0
+    }
+   }
+  }
+ }
+}

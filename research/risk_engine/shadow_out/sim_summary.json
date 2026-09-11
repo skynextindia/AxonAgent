@@ -1,0 +1,469 @@
+{
+  "journal": "reports\\signals_node.jsonl",
+  "n_source_trades": 103,
+  "profile": {
+    "initial": 100000.0,
+    "buffered_floor": 95200.0,
+    "firm_floor": 94000.0,
+    "buffered_daily_pct": 2.4000000000000004
+  },
+  "base_pct_reference": 0.011,
+  "results": {
+    "A_fixed_1100usd": {
+      "policy": "A_fixed_1100usd",
+      "n_trades": 103,
+      "final_equity": 98434.92002495477,
+      "start_equity": 100000.0,
+      "max_drawdown_usd": 9447.834392626799,
+      "max_drawdown_pct": 8.757502015620666,
+      "min_equity": 98434.92002495477,
+      "buffered_floor_breaches": 0,
+      "firm_floor_breaches": 0,
+      "first_buffered_breach_ts": null,
+      "daily_loss_events": 0,
+      "forced_flatten_equivalents": 0,
+      "rejected_trades": 0,
+      "reduced_size_trades": 0,
+      "gross_profit": 19540.894430533583,
+      "gross_loss": 21105.97440557884,
+      "profit_factor": 0.9258465899289839,
+      "expectancy": -15.194951214031622,
+      "win_rate": 64.07766990291263,
+      "winner_exposure_usd": 72574.96455654461,
+      "avg_risk_pct": 1.061691767560516,
+      "max_correlated_exposure_usd": 1219971.5,
+      "max_daily_loss_usd": 1876.3395540308848,
+      "max_daily_loss_pct": 1.8692874879239114,
+      "breakdown": {
+        "month": {
+          "2026-07": {
+            "n": 12,
+            "pnl": 4617.931735121233,
+            "wins": 8
+          },
+          "2026-08": {
+            "n": 91,
+            "pnl": -6183.0117101664955,
+            "wins": 58
+          }
+        },
+        "symbol": {
+          "USDJPY": {
+            "n": 51,
+            "pnl": 1641.420024954736,
+            "wins": 29
+          },
+          "EURUSD": {
+            "n": 52,
+            "pnl": -3206.5,
+            "wins": 37
+          }
+        },
+        "direction": {
+          "BUY": {
+            "n": 24,
+            "pnl": -977.2107130385392,
+            "wins": 16
+          },
+          "SELL": {
+            "n": 79,
+            "pnl": -587.8692620067221,
+            "wins": 50
+          }
+        },
+        "regime": {
+          "R3_lateJul_ramp": {
+            "n": 37,
+            "pnl": 6174.758618639749,
+            "wins": 29
+          },
+          "R4_Aug_bleed": {
+            "n": 66,
+            "pnl": -7739.838593685013,
+            "wins": 37
+          }
+        }
+      }
+    },
+    "B_fixed_pct": {
+      "policy": "B_fixed_pct",
+      "n_trades": 103,
+      "final_equity": 98128.0938088784,
+      "start_equity": 100000.0,
+      "max_drawdown_usd": 9807.654137105768,
+      "max_drawdown_pct": 9.086567076937246,
+      "min_equity": 98128.0938088784,
+      "buffered_floor_breaches": 0,
+      "firm_floor_breaches": 0,
+      "first_buffered_breach_ts": null,
+      "daily_loss_events": 0,
+      "forced_flatten_equivalents": 0,
+      "rejected_trades": 0,
+      "reduced_size_trades": 0,
+      "gross_profit": 20102.207144933287,
+      "gross_loss": 21974.113336054852,
+      "profit_factor": 0.9148131183955366,
+      "expectancy": -18.17384651574335,
+      "win_rate": 64.07766990291263,
+      "winner_exposure_usd": 75302.29508266058,
+      "avg_risk_pct": 1.0990870436125448,
+      "max_correlated_exposure_usd": 1265103.96,
+      "max_daily_loss_usd": 1869.1026182476053,
+      "max_daily_loss_pct": 1.8679445593601074,
+      "breakdown": {
+        "month": {
+          "2026-07": {
+            "n": 12,
+            "pnl": 4489.876412918232,
+            "wins": 8
+          },
+          "2026-08": {
+            "n": 91,
+            "pnl": -6361.782604039793,
+            "wins": 58
+          }
+        },
+        "symbol": {
+          "USDJPY": {
+            "n": 51,
+            "pnl": 1555.3638088784394,
+            "wins": 29
+          },
+          "EURUSD": {
+            "n": 52,
+            "pnl": -3427.27,
+            "wins": 37
+          }
+        },
+        "direction": {
+          "BUY": {
+            "n": 24,
+            "pnl": -1045.9237677537108,
+            "wins": 16
+          },
+          "SELL": {
+            "n": 79,
+            "pnl": -825.9824233678478,
+            "wins": 50
+          }
+        },
+        "regime": {
+          "R3_lateJul_ramp": {
+            "n": 37,
+            "pnl": 6095.080940693188,
+            "wins": 29
+          },
+          "R4_Aug_bleed": {
+            "n": 66,
+            "pnl": -7966.987131814747,
+            "wins": 37
+          }
+        }
+      }
+    },
+    "C_drawdown_scaled": {
+      "policy": "C_drawdown_scaled",
+      "n_trades": 103,
+      "final_equity": 97946.71197054189,
+      "start_equity": 100000.0,
+      "max_drawdown_usd": 8849.187825136265,
+      "max_drawdown_pct": 8.286074504795153,
+      "min_equity": 97946.71197054189,
+      "buffered_floor_breaches": 0,
+      "firm_floor_breaches": 0,
+      "first_buffered_breach_ts": null,
+      "daily_loss_events": 0,
+      "forced_flatten_equivalents": 0,
+      "rejected_trades": 0,
+      "reduced_size_trades": 49,
+      "gross_profit": 18581.95894614473,
+      "gross_loss": 20635.246975602844,
+      "profit_factor": 0.9004960768395102,
+      "expectancy": -19.93483523745743,
+      "win_rate": 64.07766990291263,
+      "winner_exposure_usd": 69124.83971205316,
+      "avg_risk_pct": 1.0109467962757777,
+      "max_correlated_exposure_usd": 1252174.92,
+      "max_daily_loss_usd": 1429.9102313431504,
+      "max_daily_loss_pct": 1.3769539907136636,
+      "breakdown": {
+        "month": {
+          "2026-07": {
+            "n": 12,
+            "pnl": 3384.026555573853,
+            "wins": 8
+          },
+          "2026-08": {
+            "n": 91,
+            "pnl": -5437.314585031966,
+            "wins": 58
+          }
+        },
+        "symbol": {
+          "USDJPY": {
+            "n": 51,
+            "pnl": 1118.891970541884,
+            "wins": 29
+          },
+          "EURUSD": {
+            "n": 52,
+            "pnl": -3172.179999999999,
+            "wins": 37
+          }
+        },
+        "direction": {
+          "BUY": {
+            "n": 24,
+            "pnl": -1067.7621189841134,
+            "wins": 16
+          },
+          "SELL": {
+            "n": 79,
+            "pnl": -985.5259104739991,
+            "wins": 50
+          }
+        },
+        "regime": {
+          "R3_lateJul_ramp": {
+            "n": 37,
+            "pnl": 4974.66827186863,
+            "wins": 29
+          },
+          "R4_Aug_bleed": {
+            "n": 66,
+            "pnl": -7027.956301326744,
+            "wins": 37
+          }
+        }
+      }
+    },
+    "D_floor_aware": {
+      "policy": "D_floor_aware",
+      "n_trades": 103,
+      "final_equity": 98144.05380887841,
+      "start_equity": 100000.0,
+      "max_drawdown_usd": 9791.694137105762,
+      "max_drawdown_pct": 9.071780502235422,
+      "min_equity": 98144.05380887841,
+      "buffered_floor_breaches": 0,
+      "firm_floor_breaches": 0,
+      "first_buffered_breach_ts": null,
+      "daily_loss_events": 0,
+      "forced_flatten_equivalents": 0,
+      "rejected_trades": 0,
+      "reduced_size_trades": 1,
+      "gross_profit": 20102.207144933287,
+      "gross_loss": 21958.153336054853,
+      "profit_factor": 0.9154780384890501,
+      "expectancy": -18.018895059432676,
+      "win_rate": 64.07766990291263,
+      "winner_exposure_usd": 75302.29508266058,
+      "avg_risk_pct": 1.0964569915062576,
+      "max_correlated_exposure_usd": 1265103.96,
+      "max_daily_loss_usd": 1869.1026182476053,
+      "max_daily_loss_pct": 1.8679445593601074,
+      "breakdown": {
+        "month": {
+          "2026-07": {
+            "n": 12,
+            "pnl": 4489.876412918232,
+            "wins": 8
+          },
+          "2026-08": {
+            "n": 91,
+            "pnl": -6345.822604039793,
+            "wins": 58
+          }
+        },
+        "symbol": {
+          "USDJPY": {
+            "n": 51,
+            "pnl": 1555.3638088784394,
+            "wins": 29
+          },
+          "EURUSD": {
+            "n": 52,
+            "pnl": -3411.31,
+            "wins": 37
+          }
+        },
+        "direction": {
+          "BUY": {
+            "n": 24,
+            "pnl": -1045.9237677537108,
+            "wins": 16
+          },
+          "SELL": {
+            "n": 79,
+            "pnl": -810.0224233678479,
+            "wins": 50
+          }
+        },
+        "regime": {
+          "R3_lateJul_ramp": {
+            "n": 37,
+            "pnl": 6095.080940693188,
+            "wins": 29
+          },
+          "R4_Aug_bleed": {
+            "n": 66,
+            "pnl": -7951.027131814747,
+            "wins": 37
+          }
+        }
+      }
+    },
+    "E_correlation_aware": {
+      "policy": "E_correlation_aware",
+      "n_trades": 103,
+      "final_equity": 99482.58036037303,
+      "start_equity": 100000.0,
+      "max_drawdown_usd": 8453.16758561114,
+      "max_drawdown_pct": 7.831666288949496,
+      "min_equity": 99482.58036037303,
+      "buffered_floor_breaches": 0,
+      "firm_floor_breaches": 0,
+      "first_buffered_breach_ts": null,
+      "daily_loss_events": 0,
+      "forced_flatten_equivalents": 0,
+      "rejected_trades": 0,
+      "reduced_size_trades": 9,
+      "gross_profit": 20045.899839702462,
+      "gross_loss": 20563.319479329362,
+      "profit_factor": 0.9748377376450811,
+      "expectancy": -5.023491646863105,
+      "win_rate": 64.07766990291263,
+      "winner_exposure_usd": 73360.55995863213,
+      "avg_risk_pct": 1.0509821411027525,
+      "max_correlated_exposure_usd": 1251235.9500000002,
+      "max_daily_loss_usd": 1968.2573645997327,
+      "max_daily_loss_pct": 1.9388550595028642,
+      "breakdown": {
+        "month": {
+          "2026-07": {
+            "n": 12,
+            "pnl": 4489.876412918232,
+            "wins": 8
+          },
+          "2026-08": {
+            "n": 91,
+            "pnl": -5007.296052545143,
+            "wins": 58
+          }
+        },
+        "symbol": {
+          "USDJPY": {
+            "n": 51,
+            "pnl": 2426.61036037309,
+            "wins": 29
+          },
+          "EURUSD": {
+            "n": 52,
+            "pnl": -2944.0299999999997,
+            "wins": 37
+          }
+        },
+        "direction": {
+          "BUY": {
+            "n": 24,
+            "pnl": -537.0234486268497,
+            "wins": 16
+          },
+          "SELL": {
+            "n": 79,
+            "pnl": 19.603808999942984,
+            "wins": 50
+          }
+        },
+        "regime": {
+          "R3_lateJul_ramp": {
+            "n": 37,
+            "pnl": 6095.080940693188,
+            "wins": 29
+          },
+          "R4_Aug_bleed": {
+            "n": 66,
+            "pnl": -6612.5005803200975,
+            "wins": 37
+          }
+        }
+      }
+    },
+    "F_floor_plus_corr": {
+      "policy": "F_floor_plus_corr",
+      "n_trades": 103,
+      "final_equity": 99482.58036037303,
+      "start_equity": 100000.0,
+      "max_drawdown_usd": 8453.16758561114,
+      "max_drawdown_pct": 7.831666288949496,
+      "min_equity": 99482.58036037303,
+      "buffered_floor_breaches": 0,
+      "firm_floor_breaches": 0,
+      "first_buffered_breach_ts": null,
+      "daily_loss_events": 0,
+      "forced_flatten_equivalents": 0,
+      "rejected_trades": 0,
+      "reduced_size_trades": 9,
+      "gross_profit": 20045.899839702462,
+      "gross_loss": 20563.319479329362,
+      "profit_factor": 0.9748377376450811,
+      "expectancy": -5.023491646863105,
+      "win_rate": 64.07766990291263,
+      "winner_exposure_usd": 73360.55995863213,
+      "avg_risk_pct": 1.0509821411027525,
+      "max_correlated_exposure_usd": 1251235.9500000002,
+      "max_daily_loss_usd": 1968.2573645997327,
+      "max_daily_loss_pct": 1.9388550595028642,
+      "breakdown": {
+        "month": {
+          "2026-07": {
+            "n": 12,
+            "pnl": 4489.876412918232,
+            "wins": 8
+          },
+          "2026-08": {
+            "n": 91,
+            "pnl": -5007.296052545143,
+            "wins": 58
+          }
+        },
+        "symbol": {
+          "USDJPY": {
+            "n": 51,
+            "pnl": 2426.61036037309,
+            "wins": 29
+          },
+          "EURUSD": {
+            "n": 52,
+            "pnl": -2944.0299999999997,
+            "wins": 37
+          }
+        },
+        "direction": {
+          "BUY": {
+            "n": 24,
+            "pnl": -537.0234486268497,
+            "wins": 16
+          },
+          "SELL": {
+            "n": 79,
+            "pnl": 19.603808999942984,
+            "wins": 50
+          }
+        },
+        "regime": {
+          "R3_lateJul_ramp": {
+            "n": 37,
+            "pnl": 6095.080940693188,
+            "wins": 29
+          },
+          "R4_Aug_bleed": {
+            "n": 66,
+            "pnl": -6612.5005803200975,
+            "wins": 37
+          }
+        }
+      }
+    }
+  }
+}

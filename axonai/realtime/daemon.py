@@ -116,6 +116,7 @@ class AxonDaemon:
         self._retest_setup: Optional[dict] = None  # armed structure-shift retest entry setup (lead-only)
         self._retest_fwd: list = []  # structure-retest forward fixed-rail P&L shadow trackers
         self._retest_last_fire_ts: float = 0.0  # cooldown anchor for structure-retest REAL fires
+        self._last_dir_exit: dict = {}  # "Buy"/"Sell" -> (exit_price, exit_epoch) for the same-dir re-entry distance guard
         self._retest_last_log_ts: float = 0.0  # dedup anchor for structure-retest SHADOW logs (churn cap)
         self._retest_shift_cache: Optional[dict] = None  # cached shift-zigzag (~30s)
         self._regime_map_cache: Optional[dict] = None  # cached per-TF regime map core (~regime_map_cache_sec)
@@ -1327,6 +1328,44 @@ class AxonDaemon:
                         })
                     continue
 
+            # Same-direction re-entry distance guard (user 2026-09-09). Stops "sell again right
+            # where the last sell exited / buy again where the last buy exited" churn. Only SKIPS;
+            # fails OPEN; lead-side (a skipped entry is not mirrored). When the flag is OFF it still
+            # logs what it WOULD have skipped to reports/reentry_guard_shadow.jsonl so the veto can
+            # be proven on live outcomes (via research/reentry_distance) before it is ever armed.
+            _rg_ok, _rg_reason, _rg_detail = self._reentry_guard(signal, event.price)
+            if not _rg_ok:
+                if self.config.get("reentry_distance_guard_enabled", False):
+                    self._events_skipped += 1
+                    logger.info("SKIPPED (%s)", _rg_reason)
+                    self._log_skip(event, _rg_reason)
+                    if dashboard:
+                        self._broadcast({
+                            "type": "event",
+                            "id": self._events_detected,
+                            "event_type": event.event_type.value,
+                            "priority": event.priority.name,
+                            "price": event.price,
+                            "details": event.details,
+                            "timestamp": event.timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                            "status": "skipped",
+                            "reason": _rg_reason,
+                            "events_detected": self._events_detected,
+                            "events_fired": self._events_fired,
+                            "events_skipped": self._events_skipped,
+                        })
+                    continue
+                else:
+                    try:
+                        import json as _json
+                        _shadow = {"timestamp_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                                   "type": "reentry_guard_would_skip", "mt5_symbol": self.mt5_symbol,
+                                   "signal": signal, "price": round(float(event.price), 5), **(_rg_detail or {})}
+                        with open(self._report_path("reentry_guard_shadow.jsonl"), "a", encoding="utf-8") as _f:
+                            _f.write(_json.dumps(_shadow) + "\n")
+                    except Exception as _rge:
+                        logger.debug("reentry guard shadow log failed: %s", _rge)
+
             system_name = event.details.get("system", "optimized")
             logger.info("EXECUTION (%s): Direct signal: %s", system_name, signal)
             
@@ -1418,7 +1457,7 @@ class AxonDaemon:
                         # fire the opposite-direction USDJPY order at the same spot. Lead-
                         # side only; inert in single-pair mode. Best-effort, never blocks.
                         if self._is_inverse_mirror_lead():
-                            self._fire_follower_inverse(signal)
+                            self._fire_follower_inverse(signal, ticket)
                     # Mirror this entry decision to the execution node (best-effort;
                     # lead side only — a no-op when mirror_client is None). The staged
                     # PROBE carries its fraction so the node opens the same probe size.
@@ -2730,23 +2769,87 @@ class AxonDaemon:
                     and self.supervisor is not None
                     and self.config.get("inverse_mirror_lead", "EURUSD") in (self.mt5_symbol or ""))
 
-    def _fire_follower_inverse(self, lead_signal: str) -> None:
+    def _fire_follower_inverse(self, lead_signal: str, lead_ticket=None) -> None:
         """Lead-side dispatch: find the follower daemon in the supervisor registry and
         fire its opposite-direction mirror. Best-effort; never raises into the lead
-        entry path."""
+        entry path. lead_ticket is forwarded so the corr-gate shadow can join both
+        legs' realized P&L offline."""
         try:
             follower = self.config.get("inverse_mirror_follower", "USDJPY")
             for d in self.supervisor.daemons.values():
                 if d is self:
                     continue
                 if follower in (getattr(d, "mt5_symbol", "") or ""):
-                    d.fire_inverse_mirror(lead_signal, self.mt5_symbol)
+                    d.fire_inverse_mirror(lead_signal, self.mt5_symbol, lead_ticket)
                     return
             logger.info("INVERSE MIRROR: no %s follower daemon found (single-pair launch?)", follower)
         except Exception as e:
             logger.error("INVERSE MIRROR dispatch failed: %s", e, exc_info=True)
 
-    def fire_inverse_mirror(self, lead_signal: str, lead_symbol: str) -> None:
+    def _pair_correlation(self, sym_a: str, sym_b: str, window: int, tf_name: str):
+        """Rolling Pearson correlation of the last `window` log-returns of two symbols
+        (read-only history query). Returns a float in [-1, 1] or None on failure. Used
+        by the corr-gate shadow to detect the LOCKSTEP/doubling regime at mirror time."""
+        try:
+            import math
+            tfmap = {"M15": mt5.TIMEFRAME_M15, "H1": mt5.TIMEFRAME_H1,
+                     "H4": mt5.TIMEFRAME_H4, "D1": mt5.TIMEFRAME_D1}
+            tf = tfmap.get(str(tf_name).upper(), mt5.TIMEFRAME_H1)
+            need = int(window) + 1
+            ra = mt5.copy_rates_from_pos(sym_a, tf, 0, need)
+            rb = mt5.copy_rates_from_pos(sym_b, tf, 0, need)
+            if ra is None or rb is None:
+                return None
+            ma = {int(x['time']): float(x['close']) for x in ra}
+            mb = {int(x['time']): float(x['close']) for x in rb}
+            ts = sorted(set(ma) & set(mb))
+            if len(ts) < 4:
+                return None
+            ca = [ma[t] for t in ts]; cb = [mb[t] for t in ts]
+            da = [math.log(ca[i] / ca[i - 1]) for i in range(1, len(ca))]
+            db = [math.log(cb[i] / cb[i - 1]) for i in range(1, len(cb))]
+            n = len(da)
+            maa = sum(da) / n; mbb = sum(db) / n
+            cov = sum((da[i] - maa) * (db[i] - mbb) for i in range(n))
+            va = sum((x - maa) ** 2 for x in da); vb = sum((x - mbb) ** 2 for x in db)
+            if va <= 0 or vb <= 0:
+                return None
+            return cov / math.sqrt(va * vb)
+        except Exception as e:
+            logger.debug("corr calc failed: %s", e)
+            return None
+
+    def _corr_gate_eval(self, lead_symbol: str, lead_signal: str, inv: str):
+        """Compute the corr-gate verdict for a pending mirror fire. Returns a dict
+        (corr/verdict/threshold/window/tf) or None when the gate is disabled. NEVER
+        raises — a gate error must not disturb the mirror."""
+        try:
+            if not self.config.get("corr_gate_shadow_enabled", True):
+                return None
+            thr = float(self.config.get("corr_gate_threshold", -0.70))
+            win = int(self.config.get("corr_gate_window", 24))
+            tf = str(self.config.get("corr_gate_tf", "H1"))
+            corr = self._pair_correlation(lead_symbol, self.mt5_symbol, win, tf)
+            # verdict: tight (corr <= threshold) = LOCKSTEP/doubling -> skip the 2nd leg.
+            # Missing corr -> FIRE (fail-open, never block on a data gap).
+            verdict = "skip" if (corr is not None and corr <= thr) else "fire"
+            return {"corr": None if corr is None else round(corr, 3),
+                    "verdict": verdict, "threshold": thr, "window": win, "tf": tf}
+        except Exception as e:
+            logger.debug("corr gate eval failed: %s", e)
+            return None
+
+    def _log_corr_gate(self, row: dict) -> None:
+        """Append one corr-gate shadow row. Read-only; failure is swallowed."""
+        try:
+            import os, json
+            os.makedirs("reports", exist_ok=True)
+            with open(self._report_path("corr_gate_shadow.jsonl"), "a", encoding="utf-8") as f:
+                f.write(json.dumps(row) + "\n")
+        except Exception as e:
+            logger.debug("corr gate log failed: %s", e)
+
+    def fire_inverse_mirror(self, lead_signal: str, lead_symbol: str, lead_ticket=None) -> None:
         """Follower-side: open the OPPOSITE-direction order on THIS pair, triggered by a
         lead-pair fill at the same spot (EURUSD SELL -> USDJPY BUY, the negative
         correlation). Real order on this pair's own executor + live_state. Honors this
@@ -2767,6 +2870,54 @@ class AxonDaemon:
                     logger.info("INVERSE MIRROR %s: not flat — skip (lead %s %s)",
                                 self.mt5_symbol, lead_symbol, lead_signal)
                     return
+                # ── FOLLOWER LOCATION + RE-ENTRY GATES (user 2026-09-10) ──
+                # The mirror leg bypassed BOTH the location gate (it fired the opposite side
+                # purely because the LEAD signalled — buying into the follower's OWN resistance
+                # / selling its OWN support) AND the same-direction re-entry distance guard
+                # (re-stacking the follower's own zone). Run BOTH against the follower's own
+                # state/price before firing. Each only ever SKIPS this leg (lead untouched);
+                # reversible via mirror_range_gate_enabled / reentry_distance_guard_enabled.
+                # Fails OPEN (allow) on any error — a gate glitch must not wedge the mirror.
+                try:
+                    _tick = mt5.symbol_info_tick(self.mt5_symbol)
+                    _px = (_tick.ask if inv == "Buy" else _tick.bid) if _tick else None
+                    if _px:
+                        if self.config.get("mirror_range_gate_enabled", False):
+                            _rok, _rwhy = self._range_gate(inv.upper(), _px)
+                            if not _rok:
+                                logger.info("INVERSE MIRROR %s: SKIPPED by follower range gate (%s)",
+                                            self.mt5_symbol, _rwhy)
+                                return
+                        if self.config.get("reentry_distance_guard_enabled", False):
+                            _gok, _gwhy, _ = self._reentry_guard(inv, _px)
+                            if not _gok:
+                                logger.info("INVERSE MIRROR %s: SKIPPED by follower re-entry guard (%s)",
+                                            self.mt5_symbol, _gwhy)
+                                return
+                except Exception as _fge:
+                    logger.debug("follower location/re-entry gate failed (allowing): %s", _fge)
+
+                # ── CORRELATION GATE (shadow / optional live) ──
+                # Measure how tightly the two pairs are moving together right now. When
+                # corr <= threshold the mirror is ONE doubled bet (both legs win/lose
+                # together). SHADOW: log the verdict, fire anyway. LIVE: a SKIP verdict
+                # withholds THIS (follower) leg entirely — the lead EURUSD leg is untouched.
+                _cg = self._corr_gate_eval(lead_symbol, lead_signal, inv)
+                _base_row = {
+                    "t": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    "lead_sym": lead_symbol, "lead_dir": lead_signal,
+                    "follower_sym": self.mt5_symbol, "follower_dir": inv,
+                    "lead_ticket": lead_ticket,
+                    "live_gate": bool(self.config.get("corr_gate_live", False)),
+                }
+                if _cg is not None:
+                    _base_row.update(_cg)
+                    if _base_row["live_gate"] and _cg["verdict"] == "skip":
+                        _base_row.update({"follower_ticket": None, "skipped": True})
+                        self._log_corr_gate(_base_row)
+                        logger.info("INVERSE MIRROR %s: SKIPPED by corr gate (corr=%s <= %s, lockstep)",
+                                    self.mt5_symbol, _cg["corr"], _cg["threshold"])
+                        return
                 tr = self.trade_executor.execute_signal(self.mt5_symbol, inv, self.live_state, 1.0)
                 if tr and tr.get("order"):
                     ticket = tr.get("order")
@@ -2784,6 +2935,9 @@ class AxonDaemon:
                             tr.get("price", 0.0) or 0.0, ticket)
                     logger.info("INVERSE MIRROR %s: opened %s (inverse of lead %s %s) ticket=%s vol=%s",
                                 self.mt5_symbol, inv, lead_symbol, lead_signal, ticket, tr.get("volume"))
+                    if _cg is not None:
+                        _base_row.update({"follower_ticket": ticket, "skipped": False})
+                        self._log_corr_gate(_base_row)
                 else:
                     logger.warning("INVERSE MIRROR %s: order returned no ticket (result=%s)",
                                    self.mt5_symbol, tr)
@@ -3407,6 +3561,38 @@ class AxonDaemon:
         logger.info("RANGE EXTREME GATE PASSED: %s at pos %.2f of %dxM15 range [%.5f-%.5f]",
                     direction, rel, lookback, rng_lo, rng_hi)
         return True, ""
+
+    def _reentry_guard(self, signal: str, price: float):
+        """Block a SAME-DIRECTION re-entry landing on top of where we last got out (user
+        2026-09-09). The exact churn: a Sell exits, cooldown passes, price is still in the
+        same zone, the same Sell re-qualifies and re-fires a few pips away — likewise Buys.
+        research/reentry_distance found that 'near' re-entry cluster (within a few pips AND
+        an hour of the same-dir exit) is the loss centre. This blocks a fresh same-dir signal
+        that lands within reentry_min_pips AND reentry_min_minutes of the last same-dir exit;
+        past either threshold it passes (price has moved on / structure has had time to change).
+        Only ever SKIPS (bounded — a skip never loses); fails OPEN. Returns (passed, reason,
+        detail). `signal` is 'Buy'/'Sell'."""
+        try:
+            key = "Buy" if str(signal).strip().lower().startswith("b") else "Sell"
+            last = self._last_dir_exit.get(key)
+            if not last:
+                return True, "", None                        # no prior same-dir exit -> allow
+            exit_px, exit_ts = last
+            pip = 0.01 if ("JPY" in self.mt5_symbol.upper() or "XAU" in self.mt5_symbol.upper()) else 0.0001
+            dist_p = abs(price - exit_px) / pip
+            gap_min = (datetime.now(timezone.utc).timestamp() - exit_ts) / 60.0
+            min_p = float(self.config.get("reentry_min_pips", 5.0))
+            min_m = float(self.config.get("reentry_min_minutes", 60.0))
+            detail = {"dir": key, "dist_pips": round(dist_p, 1), "gap_min": round(gap_min, 1),
+                      "last_exit_px": round(exit_px, 5), "min_pips": min_p, "min_min": min_m}
+            if dist_p < min_p and gap_min < min_m:
+                return False, (f"re-entry guard: {key} only {dist_p:.1f}p / {gap_min:.0f}min from last "
+                               f"{key} exit @ {exit_px:.5f} (need >={min_p:g}p away OR >={min_m:g}min "
+                               f"since)"), detail
+            return True, "", detail
+        except Exception as e:
+            logger.debug("reentry guard failed: %s", e)
+            return True, "", None                            # fail OPEN — never block on error
 
     def _consolidation_gate(self, signal: str, price: float):
         """Block a fade fired at the WRONG END of a TIGHT consolidation (user 2026-08-14).
@@ -4939,6 +5125,15 @@ class AxonDaemon:
             self._holdprofit_shadow.pop(ticket, None)
             self._active_trade_entry_time.pop(ticket, None)
             
+            # Record this exit for the same-direction re-entry distance guard: remember where and
+            # when we last got OUT of a Buy / a Sell, so a fresh same-dir signal landing right on
+            # top of it can be recognised as the "sell again where the last sell exited" churn.
+            try:
+                _rg_key = "Buy" if str(direction).strip().lower().startswith("b") else "Sell"
+                self._last_dir_exit[_rg_key] = (float(exit_price), datetime.now(timezone.utc).timestamp())
+            except Exception:
+                pass
+
             # Apply post-trade global cooldown to prevent immediate reversal trades
             # caused by our own TP/SL orders hitting the market and causing a tick climax
             cooldown_minutes = 45 if profit < 0 else 15
