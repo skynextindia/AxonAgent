@@ -139,6 +139,14 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "realtime_enabled": False,
     "tick_poll_interval_ms": 100,
     "realtime_cooldown_seconds": 10,
+    # Post-trade cooldown FLOOR (minutes) — user 2026-09-12 "wait for the next signal as the
+    # market gives, not a fixed clock". Was a blunt 45(loss)/15(win) timer; measurement showed
+    # the 15-45min re-entry window is the loss centre and same-zone churn (the bulk of it) is
+    # already caught adaptively by the re-entry distance guard. So these are now just a short
+    # anti-tick-climax floor; the distance/structure guard governs the real re-entry timing.
+    # Revert to old behaviour: set loss=45, win=15. See daemon.py close handler.
+    "post_trade_cooldown_loss_min": 10.0,
+    "post_trade_cooldown_win_min": 10.0,
     "realtime_min_event_priority": "MEDIUM",
     "realtime_tick_buffer_size": 10_000,
     "realtime_candle_history": 500,
@@ -777,6 +785,13 @@ DEFAULT_CONFIG = _apply_env_overrides({
     "wtms_sl_pips": 20.0,
     "wtms_tp_pips": 100.0,
     "wtms_max_hold_hours": 120.0,
+    # STRUCTURE REGIME TAG (variance ratio, 2026-09-15). READ-ONLY: the Lo-MacKinlay
+    # variance ratio over trailing M15 closes is stamped on each wtms setup so the
+    # reverting->scalp / trending->wide-TP switch (variance-ratio-regime-switch finding)
+    # can be forward-validated on live fills. Tag only; NEVER gates. Window kept < the
+    # 500-bar M15 deque so it fills reliably (research used 480; 240 is the robust live cut).
+    "wtms_vr_window": 240,
+    "wtms_vr_q": 8,
     # GOOD-SPOT SELECTOR SHADOW (redesign step 2, 2026-09-03). READ-ONLY: stamps the
     # selector verdict (take/skip/flip) on every wtms setup via the SAME pure function
     # (research/mtf_regime_switch/good_spot.py) the live gate will later call, so the

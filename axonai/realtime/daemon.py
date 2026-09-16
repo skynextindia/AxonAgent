@@ -2408,6 +2408,34 @@ class AxonDaemon:
         except Exception as e:
             logger.debug("breakout-retest shadow failed: %s", e)
 
+    def _wtms_variance_ratio(self):
+        """Lo-MacKinlay variance ratio VR(q) over the trailing M15 closes (READ-ONLY).
+        VR<1 mean-reverting, ~1 random walk, >1 trending. Used ONLY to tag the wtms
+        shadow row so the reverting->scalp / trending->wide-TP switch can be forward-
+        checked (see memory variance-ratio-regime-switch). Returns (vr, window, q) or
+        (None, window, q). Never raises, never affects behavior."""
+        import math
+        win = int(self.config.get("wtms_vr_window", 240))
+        q = int(self.config.get("wtms_vr_q", 8))
+        try:
+            closes = [c.close for c in getattr(self.live_evidence, "_m15_candles", [])][-(win + 1):]
+            rets = [math.log(closes[k] / closes[k - 1])
+                    for k in range(1, len(closes)) if closes[k - 1] > 0 and closes[k] > 0]
+            m = len(rets)
+            if m < q * 4:
+                return None, win, q
+            mu = sum(rets) / m
+            v1 = sum((r - mu) ** 2 for r in rets) / m
+            if v1 <= 0:
+                return None, win, q
+            qr = [sum(rets[k:k + q]) for k in range(0, m - q + 1)]
+            muq = sum(qr) / len(qr)
+            vq = sum((r - muq) ** 2 for r in qr) / len(qr)
+            return vq / (q * v1), win, q
+        except Exception as _vre:
+            logger.debug("wtms VR failed: %s", _vre)
+            return None, win, q
+
     def _arm_wtms_setup(self, direction, entry, details) -> None:
         """Arm a READ-ONLY virtual wide-bracket PAIR (fade + with-trend) on a gated
         fade signal, stamped with the live MTF cross-regime. Never places an order.
@@ -2448,12 +2476,19 @@ class AxonDaemon:
                         skip_up_buy=bool(self.config.get("goodspot_skip_up_buy", True)))
                 except Exception as _gse:
                     logger.debug("goodspot decision failed: %s", _gse)
+            # Structure regime (variance ratio) at arm time — tag only, never gates.
+            vr, vr_win, vr_q = self._wtms_variance_ratio()
+            vr_regime = None
+            if vr is not None:
+                vr_regime = "reverting" if vr <= 0.85 else ("trending" if vr >= 0.95 else "random")
             self._wtms_setups.append({
                 "sig_epoch": int(datetime.now(timezone.utc).timestamp()),
                 "fade_dir": "Buy" if fade_long else "Sell", "entry": float(entry),
                 "pip": pip, "bars": 0, "sl_pips": sl_p, "tp_pips": tp_p,
                 "sr_level": (float(lvl) if lvl else None), "level_type": det.get("sr_level_type"),
                 "mtf": det.get("mtf_position"), "goodspot": gs,
+                "vr": (round(vr, 3) if vr is not None else None),
+                "vr_regime": vr_regime, "vr_window": vr_win, "vr_q": vr_q,
                 "fade": {"long": fade_long, "sl": f_sl, "tp": f_tp, "mfe": 0.0, "mae": 0.0, "out": None},
                 "opp": {"long": not fade_long, "sl": o_sl, "tp": o_tp, "mfe": 0.0, "mae": 0.0, "out": None},
             })
@@ -2514,6 +2549,8 @@ class AxonDaemon:
                         "mtf_tfs": mtf.get("tfs"),
                         "trend_measure": mtf.get("trend_measure"),
                         "goodspot": s.get("goodspot"),   # selector verdict (take/skip/flip) at arm time
+                        "vr": s.get("vr"), "vr_regime": s.get("vr_regime"),  # structure regime at arm time
+                        "vr_window": s.get("vr_window"), "vr_q": s.get("vr_q"),
                     }
                     try:
                         os.makedirs("reports", exist_ok=True)
@@ -5134,10 +5171,21 @@ class AxonDaemon:
             except Exception:
                 pass
 
-            # Apply post-trade global cooldown to prevent immediate reversal trades
-            # caused by our own TP/SL orders hitting the market and causing a tick climax
-            cooldown_minutes = 45 if profit < 0 else 15
-            logger.info("Trade closed (Profit: %.2f). Applying %d minute post-trade cooldown.", profit, cooldown_minutes)
+            # Post-trade cooldown. Originally a blunt 45min-on-loss / 15min-on-win timer.
+            # Measurement 2026-09-12 (scratchpad/cooldown_measure.py, 109 EURUSD trades):
+            # the 15-45min re-entry window is the loss centre (-137p) and the 45-90min window
+            # is the sweet spot (+63p). The bulk of the toxic bucket (23/29, -77p) is SAME-ZONE
+            # re-firing that the re-entry distance guard already blocks adaptively — so a long
+            # blind timer is mostly redundant once the guard is armed. Per user 2026-09-12
+            # ("wait for the next signal as the market gives, not a fixed clock"): drop to a
+            # SHORT FLOOR that only dodges our own exit's tick-climax, and let the distance/
+            # structure guard govern the real re-entry. Config-driven + reversible; revert to
+            # the old behaviour = set post_trade_cooldown_loss_min:45, post_trade_cooldown_win_min:15.
+            _cd_loss = float(self.config.get("post_trade_cooldown_loss_min", 10))
+            _cd_win = float(self.config.get("post_trade_cooldown_win_min", 10))
+            cooldown_minutes = _cd_loss if profit < 0 else _cd_win
+            logger.info("Trade closed (Profit: %.2f). Applying %g minute post-trade cooldown "
+                        "(floor; distance guard governs re-entry).", profit, cooldown_minutes)
             self.event_detector.set_cooldown(cooldown_minutes * 60)
             
         # Update tracked positions with active ones
